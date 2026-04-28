@@ -16,17 +16,19 @@ atom-studio backend
   → Postgres  (store agent + token hash + junction tables)
 ```
 
-### LiteLLM agent provisioning (not key/generate)
+### LiteLLM agent provisioning (via /key/generate — /agent/new was removed in 1.83)
 
 When an agent is created, we call `POST /atom/provision_agent` on atom-llm.
-This creates a **LiteLLM agent** scoped to the domain's team with:
-- Its own virtual key
+This creates a **LiteLLM key** scoped to the domain's team with:
+- Its own virtual key (`sk-...`)
 - Model restrictions (allowed_models)
 - Rate limits (rpm/tpm)
 - Guardrails (if specified)
 
-We do NOT call `/key/generate` separately. The virtual key comes from `/agent/new` already
-properly scoped. This is LiteLLM's native hierarchy and it handles all enforcement.
+atom-studio never calls LiteLLM directly. The ATOM abstraction layer
+(`POST /atom/provision_agent`) internally calls `POST /key/generate` with `team_id`.
+**LiteLLM 1.83 removed `/agent/new`** in favour of team-scoped keys. The returned
+`litellm_agent_id` is the `token_id` of the generated key, not an agent-object ID.
 
 The `litellm_team_id` must already exist on the domain (set during domain creation in
 SESSION-07). If it is null, agent creation fails immediately with 400.
@@ -365,7 +367,7 @@ In `Layout.tsx`, re-enable the Agents sidebar item (it was disabled in SESSION-0
 
 - [ ] `POST /api/domains/{did}/agents` → full provisioning chain completes
 - [ ] `SELECT litellm_agent_id FROM agents WHERE name='test-agent'` → non-null
-- [ ] `GET http://localhost:4000/agent/info?agent_id={litellm_agent_id}` → agent exists in LiteLLM scoped to team
+- [ ] `GET http://localhost:4000/key/info?key_id={litellm_agent_id}` → key exists in LiteLLM, scoped to domain team
 - [ ] Agent JWT validates in GATE:
   ```bash
   curl -H "Authorization: Bearer {raw_jwt}" http://localhost:8080/healthz
@@ -411,8 +413,9 @@ Developer workflow note:
 
 LiteLLM mapping (important):
   ATOM Domain → LiteLLM Team  (domain.litellm_team_id = domain.id)
-  ATOM Agent  → LiteLLM Agent (POST /atom/provision_agent, returns litellm_agent_id + virtual_key)
-  Do NOT call /key/generate — the key comes from /agent/new response
+  ATOM Agent  → LiteLLM Key   (POST /atom/provision_agent → internally POST /key/generate with team_id)
+  litellm_agent_id = token_id returned by /key/generate (NOT an /agent/new ID — that endpoint is gone in 1.83)
+  Always go via /atom/provision_agent, never call /key/generate or /agent/new directly
 
 Backend tasks:
 
@@ -462,7 +465,7 @@ Frontend tasks:
 After completing, run the full chain test:
   1. Create domain → verify litellm_team_id set
   2. Create agent → verify litellm_agent_id set + virtual_key encrypted in DB
-  3. Verify LiteLLM agent exists: GET /agent/info?agent_id={litellm_agent_id}
+  3. Verify LiteLLM key exists: GET /key/info?key_id={litellm_agent_id}
   4. Use agent JWT to make LLM call through GATE → should return LLM response
   5. Regenerate token → verify old token rejected by GATE, new token accepted
 ```
