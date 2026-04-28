@@ -151,10 +151,14 @@ services:
       - ./.keys:/etc/atom:ro
 
   # ── atom-llm ────────────────────────────────────────────────────────────────
+  # NOTE: Before SESSION-05, atom-llm/ does not have a custom Dockerfile yet.
+  # Run: bash scripts/clone-upstreams.sh first (SESSION-00).
+  # After SESSION-05 adds atom-llm/Dockerfile, switch 'image' to 'build'.
   atom-llm:
-    build:
-      context: atom-llm/
-      dockerfile: Dockerfile
+    image: ghcr.io/berriai/litellm:main-latest   # replaced by local build in SESSION-05
+    # build:
+    #   context: atom-llm/
+    #   dockerfile: Dockerfile
     container_name: atom-llm
     restart: unless-stopped
     depends_on:
@@ -169,10 +173,14 @@ services:
       - "4000:4000"
 
   # ── atom-studio ─────────────────────────────────────────────────────────────
+  # NOTE: Before SESSION-07, atom-studio/ does not have a custom Dockerfile yet.
+  # Run: bash scripts/clone-upstreams.sh first (SESSION-00).
+  # After SESSION-07 adds atom-studio/Dockerfile, switch 'image' to 'build'.
   atom-studio:
-    build:
-      context: atom-studio/
-      dockerfile: Dockerfile
+    image: python:3.11-slim   # placeholder — replaced by local build in SESSION-07
+    # build:
+    #   context: atom-studio/
+    #   dockerfile: Dockerfile
     container_name: atom-studio
     restart: unless-stopped
     depends_on:

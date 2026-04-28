@@ -6,6 +6,13 @@
 
 ---
 
+## Context
+
+`atom-llm/` is already cloned from LiteLLM OSS (SESSION-00). This session modifies it.
+All ATOM-specific additions go in `atom-llm/atom_extensions/` to minimise merge conflicts
+with future upstream updates. Document every change to LiteLLM core files in `UPSTREAM_DIFF.md`.
+
+
 ## Tasks
 
 1. **Clean up LiteLLM fork** (`atom-llm/`)
@@ -68,6 +75,13 @@
 
 ---
 
+## Context
+
+`atom-llm/` is already cloned from LiteLLM OSS (SESSION-00). This session modifies it.
+All ATOM-specific additions go in `atom-llm/atom_extensions/` to minimise merge conflicts
+with future upstream updates. Document every change to LiteLLM core files in `UPSTREAM_DIFF.md`.
+
+
 ## Technologies
 
 | Technology | Rationale |
@@ -77,6 +91,13 @@
 | confluent-kafka-python | LiteLLM is Python; this is the standard Kafka client |
 
 ---
+
+## Context
+
+`atom-llm/` is already cloned from LiteLLM OSS (SESSION-00). This session modifies it.
+All ATOM-specific additions go in `atom-llm/atom_extensions/` to minimise merge conflicts
+with future upstream updates. Document every change to LiteLLM core files in `UPSTREAM_DIFF.md`.
+
 
 ## Acceptance Criteria
 
@@ -88,6 +109,13 @@
 - [ ] `atom-llm/UPSTREAM_DIFF.md` documents all changes.
 
 ---
+
+## Context
+
+`atom-llm/` is already cloned from LiteLLM OSS (SESSION-00). This session modifies it.
+All ATOM-specific additions go in `atom-llm/atom_extensions/` to minimise merge conflicts
+with future upstream updates. Document every change to LiteLLM core files in `UPSTREAM_DIFF.md`.
+
 
 ## Claude Code Starter Prompt
 
@@ -122,4 +150,11 @@ Test: Use httpie/curl to call POST /atom/provision_agent and verify a virtual ke
 ```
 
 ---
+
+## Context
+
+`atom-llm/` is already cloned from LiteLLM OSS (SESSION-00). This session modifies it.
+All ATOM-specific additions go in `atom-llm/atom_extensions/` to minimise merge conflicts
+with future upstream updates. Document every change to LiteLLM core files in `UPSTREAM_DIFF.md`.
+
 

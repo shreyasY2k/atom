@@ -92,30 +92,41 @@ atom/                          ← monorepo root
 ## Quick Start
 
 ```bash
-# 1. Clone and bootstrap
-git clone <repo> atom && cd atom
-make bootstrap          # installs Go, Python, Node tool versions
+# 1. Clone this repo
+git clone https://github.com/your-org/atom.git && cd atom
 
-# 2. Spin up kind cluster + infrastructure
-make infra-up           # creates kind cluster, deploys Postgres/Redis/MinIO/Kafka/OPA
+# 2. Clone the five upstream forks into the monorepo (SESSION-00)
+#    atom-llm (LiteLLM), atom-sdk, atom-studio, atom-runtime, atom-memory (agentscope)
+bash scripts/clone-upstreams.sh
 
-# 3. Run database migrations
+# 3. Install required tools
+make bootstrap
+
+# 4. Set up secrets
+cp .env.example .env
+make generate-keys       # generates RSA-4096 JWT key pair in .keys/
+# Edit .env — set key paths and any real LLM API keys
+
+# 5. Spin up kind cluster + infrastructure
+make infra-up
+
+# 6. Apply database schema (after SESSION-02 creates migration files)
 make migrate-up
 
-# 4. Start all services locally (docker-compose for fast iteration)
+# 7. Start local dev stack (docker-compose — faster iteration than k8s)
 make dev-up
 
-# 5. Open atom-studio
+# 8. Open atom-studio
 open http://localhost:3000
 
-# 6. Install atom-cli
+# 9. Install atom-cli
 make cli-install
 
-# 7. Create your first agent
+# 10. Create your first agent
 atom login --studio http://localhost:3000
 atom create agent <token-from-studio>
-atom validate agent
-atom deploy agent
+atom validate
+atom deploy
 ```
 
 ---

@@ -1,99 +1,140 @@
 # SESSION-00 — Monorepo Setup
 
 **Prerequisites:** Git, Go 1.22+, Python 3.11+, Node.js 20+, Docker, kind  
-**Goal:** Create the ATOM monorepo skeleton with all upstream forks vendored, tooling configured, and a working `make dev-up`.  
+**Goal:** Clone all upstream forks into the monorepo, set up the Python workspace, and verify the full skeleton is correct.  
 **Estimated time:** 0.5 days
+
+---
+
+## Context
+
+The monorepo skeleton already exists (you are reading this from it). It contains:
+- `gate/` and `atom-cli/` — Go components written from scratch (skeleton stubs present)
+- `policies/` — OPA Rego policies (base policies and unit tests present)
+- `infra/`, `migrations/`, `decisions/`, `sessions/`, `docs/` — fully populated
+- `Makefile`, `docker-compose.dev.yml`, `.env.example`, `go.work`, etc. — present
+
+**What is NOT yet present:** the five forked Python components. They must be cloned from
+upstream in this session:
+
+| Directory | Upstream |
+|---|---|
+| `atom-llm/` | https://github.com/BerriAI/litellm |
+| `atom-sdk/` | https://github.com/modelscope/agentscope |
+| `atom-studio/` | https://github.com/modelscope/agentscope (studio subpackage) |
+| `atom-runtime/` | https://github.com/modelscope/agentscope (runtime subpackage) |
+| `atom-memory/` | https://github.com/modelscope/agentscope (memory/reme subpackage) |
+
+These are **not** git submodules. They live as plain subdirectories in this repo (ADR-001).
+Once cloned and committed, upstream changes are merged manually using `diff` — the workflow
+is documented in each component's `UPSTREAM_DIFF.md`.
 
 ---
 
 ## Tasks
 
-1. **Initialise git repo**  
-   `git init atom && cd atom`  
-   Set up conventional commits config (`.commitlintrc.yaml`), `.gitignore`.
+### 1. Clone upstream forks
 
-2. **Clone upstream forks into subdirectories**
-   ```bash
-   git clone https://github.com/modelscope/agentscope           atom-sdk
-   git clone https://github.com/modelscope/agentscope           atom-studio    # studio subdir
-   git clone https://github.com/modelscope/agentscope-runtime   atom-runtime   # if separate
-   git clone https://github.com/BerriAI/litellm                 atom-llm
-   ```
-   Commit each as an initial vendor snapshot with message `chore: vendor <upstream> as <component>`.
+```bash
+bash scripts/clone-upstreams.sh
+```
 
-3. **Initialise Go workspace** for `gate/` and `atom-cli/`  
-   ```
-   gate/
-     cmd/gate/main.go
-     internal/{auth,policy,router,audit,proxy}/
-     go.mod  (module github.com/your-org/atom/gate)
-   atom-cli/
-     cmd/atom/main.go
-     internal/{config,auth,scaffold,deploy}/
-     go.mod  (module github.com/your-org/atom/atom-cli)
-   go.work  (links both modules)
-   ```
+This script:
+- Clones each upstream with `--depth=1`
+- Removes the upstream `.git` directory (detaches from upstream)
+- Creates `UPSTREAM_DIFF.md` in each component
+- Runs `git add` + `git commit` for the snapshot
 
-4. **Python workspace** — create `pyproject.toml` (hatch or uv) at root referencing  
-   `atom-llm`, `atom-sdk`, `atom-memory`, `atom-runtime` as workspace members.
+**Before running:** check if agentscope has split studio/runtime/memory into separate repos
+since this doc was written. Adjust URLs in `scripts/clone-upstreams.sh` if so.
 
-5. **Create `infra/` skeleton**
-   ```
-   infra/
-     kind/cluster.yaml
-     helm/
-       values-dev.yaml
-       values-prod.yaml
-     manifests/
-       namespaces.yaml
-   ```
-   `namespaces.yaml` defines: `atom-system`, `atom-infra`, `atom-agents`.
+---
 
-6. **Create `policies/` skeleton**
-   ```
-   policies/
-     base/
-       agent_auth.rego
-       domain_isolation.rego
-       tool_access.rego
-       PLACEHOLDER_bfsi_compliance.rego
-     custom/
-       .gitkeep
-     tests/
-       agent_auth_test.rego
-   ```
+### 2. Set up Python workspace
 
-7. **Root Makefile** with targets:
-   - `make bootstrap` — installs tool versions (go, python, node, helm, kind, kubectl, opa cli)
-   - `make infra-up` — creates kind cluster + deploys infra helm charts
-   - `make infra-down` — tears down kind cluster
-   - `make migrate-up` / `make migrate-down` — runs golang-migrate
-   - `make dev-up` — starts all services via docker-compose
-   - `make dev-down`
-   - `make test` — runs all test suites
-   - `make lint` — runs golangci-lint, ruff, eslint
-   - `make gate-build` — builds GATE binary
-   - `make cli-install` — builds and installs `atom` CLI
-   - `make policy-test` — runs `opa test policies/`
-   - `make policy-bundle` — compiles OPA bundle
+Create `pyproject.toml` at the repo root using `uv` workspaces:
 
-8. **`docker-compose.dev.yml`** with services:
-   - `postgres` (postgres:16 + pgvector)
-   - `redis`
-   - `minio`
-   - `redpanda` (Kafka-compatible)
-   - `opa` (openpolicyagent/opa:latest-rootless)
-   - `gate` (built from `gate/Dockerfile`)
-   - `atom-llm` (built from `atom-llm/Dockerfile`)
-   - `atom-studio` (built from `atom-studio/Dockerfile`)
+```toml
+# pyproject.toml
+[tool.uv.workspace]
+members = ["atom-llm", "atom-sdk", "atom-memory", "atom-runtime", "atom-studio"]
+```
 
-9. **`.env.example`** at root documenting all required environment variables.
+```bash
+uv sync
+```
 
-10. **Pre-commit hooks** (`.pre-commit-config.yaml`):
-    - `golangci-lint` on `gate/` and `atom-cli/`
-    - `ruff` on Python components
-    - `opa fmt` and `opa check` on `policies/`
-    - `conventional-commits` linting on commit messages
+This makes all five Python components importable in a shared virtual environment,
+useful for running cross-component integration tests.
+
+---
+
+### 3. Verify Go workspace
+
+`go.work` is already present. Run:
+
+```bash
+go work sync
+cd gate && go vet ./...
+cd ../atom-cli && go vet ./...
+```
+
+Both should exit 0. If `go.sum` is missing, run `go mod tidy` inside each module.
+
+---
+
+### 4. Copy .env.example to .env and fill in secrets
+
+```bash
+cp .env.example .env
+# Generate secrets
+echo "PLATFORM_HMAC_SECRET=$(openssl rand -hex 32)" >> .env
+echo "ATOM_ENCRYPTION_KEY=$(openssl rand -hex 32)"  >> .env
+```
+
+---
+
+### 5. Generate JWT key pair
+
+```bash
+make generate-keys
+# Keys appear in .keys/ (gitignored)
+# Update .env:
+# JWT_PUBLIC_KEY_PATH=./.keys/jwt_public.pem
+# JWT_PRIVATE_KEY_PATH=./.keys/jwt_private.pem
+```
+
+---
+
+### 6. Start dev stack
+
+```bash
+make dev-up
+```
+
+At this point `atom-llm` uses the upstream LiteLLM published image and `atom-studio`
+uses a placeholder. Both will be replaced with local builds in SESSION-05 and SESSION-07
+respectively. The other services (Postgres, Redis, MinIO, Redpanda, OPA, Grafana) start fully.
+
+---
+
+### 7. Install pre-commit hooks
+
+```bash
+pre-commit install --install-hooks
+```
+
+---
+
+### 8. Run smoke test
+
+```bash
+make migrate-up
+make policy-test
+make lint-go
+docker ps | grep atom
+# All containers should show "healthy" or "Up"
+```
 
 ---
 
@@ -101,69 +142,69 @@
 
 | Technology | Rationale |
 |---|---|
-| Git subtree / copy | Simpler than submodules for upstream vendor; manual but explicit |
-| Go workspace (`go.work`) | Links gate/ and atom-cli/ modules for local cross-module dev |
-| `uv` or `hatch` | Fast Python workspace management; reproducible lockfiles |
-| Makefile | Universal, no additional tooling needed; every developer knows make |
-| docker-compose | Fast local iteration without k8s overhead |
-| pre-commit | Catches issues before they reach CI; enforces consistency |
+| `scripts/clone-upstreams.sh` | Reproducible one-command setup; documents upstream URLs explicitly |
+| `uv` workspace | Fast Python environment management across 5 components |
+| `go.work` | Links `gate/` and `atom-cli/` for cross-module local development |
+| Plain subdirectory (not submodule) | ADR-001: simpler DX, single repo audit trail |
 
 ---
 
 ## Acceptance Criteria
 
-- [ ] `make bootstrap` completes without error on a clean machine (Ubuntu 22+ or macOS 14+).
-- [ ] `make dev-up` starts all 8 services; `docker ps` shows all healthy.
-- [ ] `make policy-test` runs and passes the stub Rego test.
-- [ ] `make lint` exits 0.
-- [ ] `git log --oneline` shows at least one commit per upstream vendor.
-- [ ] `go work sync` succeeds with no errors.
+- [ ] `ls atom-llm/ atom-sdk/ atom-runtime/ atom-memory/ atom-studio/` — all exist with upstream content
+- [ ] `git log --oneline | head -3` shows the upstream snapshot commit
+- [ ] `go work sync` exits 0
+- [ ] `go vet ./...` in `gate/` exits 0
+- [ ] `make policy-test` — all 7 Rego tests pass
+- [ ] `make dev-up` — `docker ps` shows all infra services healthy
+- [ ] `make migrate-up` — all 7 migrations applied (after SESSION-02 creates them)
+- [ ] `.env` exists with real secrets (not the `changeme` defaults)
+- [ ] `.keys/jwt_private.pem` and `.keys/jwt_public.pem` exist
 
 ---
 
 ## Expected Outcome
 
-A working monorepo with all components present, a Makefile-driven developer workflow, and a
-docker-compose environment that boots Postgres, Redis, MinIO, Kafka, and OPA in one command.
+A fully initialised monorepo with all upstream code present, Go tooling verified,
+Python workspace wired, dev stack booted, and policies passing.
 
 ---
 
 ## Claude Code Starter Prompt
 
 ```
-You are helping implement SESSION-00 of the ATOM platform — a secure agentic framework for BFSI.
+You are starting SESSION-00 of ATOM — monorepo setup.
 
-Your task: Set up the ATOM monorepo skeleton.
+The skeleton repo already exists. Your tasks:
 
-Context:
-- Monorepo at ~/atom (create if not exists)
-- Components: gate/ (Go), atom-cli/ (Go), atom-llm/ (Python, clone of LiteLLM),
-  atom-sdk/ (Python, clone of agentscope), atom-studio/ (existing agentscope-studio stack),
-  atom-memory/ (Python), atom-runtime/ (Python), policies/ (OPA Rego), infra/ (Helm/k8s)
-- Local k8s: kind (already installed)
+1. Run: bash scripts/clone-upstreams.sh
+   This clones atom-llm (LiteLLM), atom-sdk, atom-studio, atom-runtime, atom-memory
+   (all agentscope variants) into the monorepo as plain subdirectories.
+   If any URL is 404, check the current repo name on GitHub and update the script.
 
-Steps to execute in order:
-1. Clone agentscope into atom-sdk/ and atom-studio/ (agentscope-studio is a subdirectory)
-2. Clone BerriAI/litellm into atom-llm/
-3. Initialise gate/ as Go module github.com/your-org/atom/gate with directory skeleton
-4. Initialise atom-cli/ as Go module with Cobra skeleton
-5. Create go.work linking gate/ and atom-cli/
-6. Create pyproject.toml using uv workspace for Python components
-7. Create infra/kind/cluster.yaml for a 3-node kind cluster with port mappings
-8. Create policies/ directory with stub Rego files
-9. Create root Makefile with all targets described in SESSION-00
-10. Create docker-compose.dev.yml with postgres+pgvector, redis, minio, redpanda, opa
-11. Create .env.example with all required variables
-12. Create .pre-commit-config.yaml
+2. Create pyproject.toml at repo root for uv workspace:
+   members: ["atom-llm", "atom-sdk", "atom-memory", "atom-runtime", "atom-studio"]
+   Run: uv sync
 
-For the kind cluster config, expose:
-- hostPort 80 → containerPort 80 (GATE)
-- hostPort 3000 → containerPort 3000 (studio)
-- hostPort 9001 → containerPort 9001 (MinIO console)
-- hostPort 3001 → containerPort 3001 (Grafana)
+3. Run: go work sync
+   Then in gate/ and atom-cli/: go mod tidy
 
-After completing, run: make lint (should exit 0 even with empty stubs).
+4. Copy .env.example to .env. Generate and set:
+   PLATFORM_HMAC_SECRET=$(openssl rand -hex 32)
+   ATOM_ENCRYPTION_KEY=$(openssl rand -hex 32)
+
+5. Run: make generate-keys
+   Update .env with the generated key paths.
+
+6. Run: make dev-up
+   Verify all docker containers are healthy.
+
+7. Run: pre-commit install --install-hooks
+
+8. Run: make policy-test — verify all 7 Rego tests pass.
+
+9. Run: make lint-go — verify go vet passes on gate/ and atom-cli/.
+
+Do NOT modify any upstream cloned code yet. That begins in SESSION-05 (atom-llm)
+and SESSION-06 (atom-sdk). Document anything surprising in UPSTREAM_DIFF.md.
 ```
-
----
-

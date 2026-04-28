@@ -6,6 +6,22 @@
 
 ---
 
+## Context
+
+`atom-sdk/` is already cloned from agentscope (SESSION-00). This session modifies it.
+
+**The single most important change in the entire ATOM codebase:** agentscope ships with
+model wrappers for every major LLM provider (OpenAI, Anthropic, Gemini, ZhipuAI, DashScope,
+Ollama, vLLM, etc.) that call those APIs directly. We remove ALL of them and replace with
+one wrapper — `AtomModelWrapper` — that **only** knows how to call GATE.
+
+This is architectural enforcement: it is structurally impossible for an agent to bypass GATE
+and call an LLM provider directly. There is no backdoor, no config flag, no "dev mode" that
+enables direct provider access. The code path literally does not exist after this session.
+Any future developer who wants to add a provider wrapper has to add code — and that is the
+control point that code review enforces.
+
+
 ## Tasks
 
 1. **Identify and remove provider wrappers** in `atom-sdk/`  
@@ -63,6 +79,22 @@
 
 ---
 
+## Context
+
+`atom-sdk/` is already cloned from agentscope (SESSION-00). This session modifies it.
+
+**The single most important change in the entire ATOM codebase:** agentscope ships with
+model wrappers for every major LLM provider (OpenAI, Anthropic, Gemini, ZhipuAI, DashScope,
+Ollama, vLLM, etc.) that call those APIs directly. We remove ALL of them and replace with
+one wrapper — `AtomModelWrapper` — that **only** knows how to call GATE.
+
+This is architectural enforcement: it is structurally impossible for an agent to bypass GATE
+and call an LLM provider directly. There is no backdoor, no config flag, no "dev mode" that
+enables direct provider access. The code path literally does not exist after this session.
+Any future developer who wants to add a provider wrapper has to add code — and that is the
+control point that code review enforces.
+
+
 ## Technologies
 
 | Technology | Rationale |
@@ -73,6 +105,22 @@
 
 ---
 
+## Context
+
+`atom-sdk/` is already cloned from agentscope (SESSION-00). This session modifies it.
+
+**The single most important change in the entire ATOM codebase:** agentscope ships with
+model wrappers for every major LLM provider (OpenAI, Anthropic, Gemini, ZhipuAI, DashScope,
+Ollama, vLLM, etc.) that call those APIs directly. We remove ALL of them and replace with
+one wrapper — `AtomModelWrapper` — that **only** knows how to call GATE.
+
+This is architectural enforcement: it is structurally impossible for an agent to bypass GATE
+and call an LLM provider directly. There is no backdoor, no config flag, no "dev mode" that
+enables direct provider access. The code path literally does not exist after this session.
+Any future developer who wants to add a provider wrapper has to add code — and that is the
+control point that code review enforces.
+
+
 ## Acceptance Criteria
 
 - [ ] `grep -r "OpenAI\|Anthropic\|DashScope\|ZhipuAI" atom-sdk/src/agentscope/models/` — no results.
@@ -82,6 +130,22 @@
 - [ ] `atom-sdk/UPSTREAM_DIFF.md` documents all removed providers.
 
 ---
+
+## Context
+
+`atom-sdk/` is already cloned from agentscope (SESSION-00). This session modifies it.
+
+**The single most important change in the entire ATOM codebase:** agentscope ships with
+model wrappers for every major LLM provider (OpenAI, Anthropic, Gemini, ZhipuAI, DashScope,
+Ollama, vLLM, etc.) that call those APIs directly. We remove ALL of them and replace with
+one wrapper — `AtomModelWrapper` — that **only** knows how to call GATE.
+
+This is architectural enforcement: it is structurally impossible for an agent to bypass GATE
+and call an LLM provider directly. There is no backdoor, no config flag, no "dev mode" that
+enables direct provider access. The code path literally does not exist after this session.
+Any future developer who wants to add a provider wrapper has to add code — and that is the
+control point that code review enforces.
+
 
 ## Claude Code Starter Prompt
 
@@ -111,4 +175,20 @@ Test: Run hello_atom_agent.py against the running GATE+atom-llm stack.
 ```
 
 ---
+
+## Context
+
+`atom-sdk/` is already cloned from agentscope (SESSION-00). This session modifies it.
+
+**The single most important change in the entire ATOM codebase:** agentscope ships with
+model wrappers for every major LLM provider (OpenAI, Anthropic, Gemini, ZhipuAI, DashScope,
+Ollama, vLLM, etc.) that call those APIs directly. We remove ALL of them and replace with
+one wrapper — `AtomModelWrapper` — that **only** knows how to call GATE.
+
+This is architectural enforcement: it is structurally impossible for an agent to bypass GATE
+and call an LLM provider directly. There is no backdoor, no config flag, no "dev mode" that
+enables direct provider access. The code path literally does not exist after this session.
+Any future developer who wants to add a provider wrapper has to add code — and that is the
+control point that code review enforces.
+
 
