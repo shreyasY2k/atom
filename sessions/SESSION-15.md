@@ -1,7 +1,7 @@
 # SESSION-15 — E2E Testing + Hardening
 
-**Prerequisites:** All prior sessions complete  
-**Goal:** End-to-end test suite, security hardening, performance baseline, and operational documentation.  
+**Prerequisites:** All prior sessions complete
+**Goal:** End-to-end test suite, security hardening, performance baseline, and operational documentation.
 **Estimated time:** 1.5 days
 
 ---
@@ -13,7 +13,9 @@
    ```
    1. Create user + domain via studio API
    2. Create agent via studio (returns JWT)
-   3. scaffold project: atom create agent <token>
+   3. scaffold project: atom create (interactive — use expect/pexpect to drive the wizard)
+      OR: in E2E context, skip atom create and use a pre-scaffolded fixture project
+      that has ATOM_MODE=prod + ATOM_AGENT_JWT set from the token issued in step 2
    4. atom validate → exit 0
    5. Submit deployment: atom deploy
    6. Approve in studio HITL

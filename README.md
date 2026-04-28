@@ -124,9 +124,14 @@ make cli-install
 
 # 10. Create your first agent
 atom login --studio http://localhost:3000
-atom create agent <token-from-studio>
+atom create          # interactive wizard → generates project
+cd <project-name>
+cp .env.example .env && vim .env   # set LLM_API_KEY
+python agent.py      # runs in dev mode
 atom validate
-atom deploy
+# prod workflow (after Studio provisioning)
+# set ATOM_MODE=prod + ATOM_AGENT_JWT in .env, then:
+atom deploy          # scan + submit for approval
 ```
 
 ---

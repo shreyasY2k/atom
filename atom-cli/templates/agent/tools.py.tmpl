@@ -1,0 +1,81 @@
+"""
+Tool implementations for {{.ProjectName}}.
+
+In dev mode these run locally.
+In prod mode, register these as ATOM tools in atom-studio (Tools → New Tool)
+and provision them to your agent. The agent will call them via GATE.
+"""
+from agentscope.service import ServiceExecStatus, ServiceResponse, ServiceToolkit
+{{- if .HasFileReader}}
+import os
+{{- end}}
+{{- if .HasHTTPGet}}
+import urllib.request
+{{- end}}
+
+{{if .HasWebSearch}}
+def web_search(query: str) -> ServiceResponse:
+    """Search the web for information about the given query."""
+    # TODO: replace stub with a real search API (e.g. Brave, Serper, Tavily)
+    print(f"[web_search] query: {query}")
+    return ServiceResponse(
+        status=ServiceExecStatus.SUCCESS,
+        content=f"Stub result for: {query}. Replace this with a real search implementation.",
+    )
+{{end}}
+{{- if .HasCalculator}}
+def calculator(expression: str) -> ServiceResponse:
+    """Evaluate a mathematical expression and return the result."""
+    try:
+        result = eval(expression, {"__builtins__": {}})  # noqa: S307
+        return ServiceResponse(status=ServiceExecStatus.SUCCESS, content=str(result))
+    except Exception as e:
+        return ServiceResponse(status=ServiceExecStatus.ERROR, content=str(e))
+{{end}}
+{{- if .HasFileReader}}
+def file_reader(path: str) -> ServiceResponse:
+    """Read a local file and return its contents."""
+    try:
+        with open(path) as f:
+            return ServiceResponse(status=ServiceExecStatus.SUCCESS, content=f.read())
+    except Exception as e:
+        return ServiceResponse(status=ServiceExecStatus.ERROR, content=str(e))
+{{end}}
+{{- if .HasHTTPGet}}
+def http_get(url: str) -> ServiceResponse:
+    """Make an HTTP GET request and return the response body."""
+    try:
+        with urllib.request.urlopen(url) as resp:  # noqa: S310
+            return ServiceResponse(status=ServiceExecStatus.SUCCESS, content=resp.read().decode())
+    except Exception as e:
+        return ServiceResponse(status=ServiceExecStatus.ERROR, content=str(e))
+{{end}}
+{{- if .HasMemoryRecall}}
+def memory_recall(query: str) -> ServiceResponse:
+    """Recall facts from agent memory."""
+    # TODO: wire up a real memory store here
+    print(f"[memory_recall] query: {query}")
+    return ServiceResponse(
+        status=ServiceExecStatus.SUCCESS,
+        content=f"Stub memory recall for: {query}.",
+    )
+{{end}}
+
+def build_toolkit() -> ServiceToolkit:
+    toolkit = ServiceToolkit()
+{{- if .HasWebSearch}}
+    toolkit.add(web_search)
+{{- end}}
+{{- if .HasCalculator}}
+    toolkit.add(calculator)
+{{- end}}
+{{- if .HasFileReader}}
+    toolkit.add(file_reader)
+{{- end}}
+{{- if .HasHTTPGet}}
+    toolkit.add(http_get)
+{{- end}}
+{{- if .HasMemoryRecall}}
+    toolkit.add(memory_recall)
+{{- end}}
+    return toolkit

@@ -39,6 +39,13 @@ private key — the same key GATE uses for validation. This token is:
 - Never stored raw anywhere — only `sha256(token)` goes to Postgres
 - Has no expiry — revoked explicitly via `agent_tokens.revoked_at`
 
+### Developer workflow context
+
+Developers scaffold and iterate on agents using `atom create` (SESSION-10), which generates
+a local project that runs in **dev mode** (calls LiteLLM directly, no GATE or token needed).
+The token issued here is only needed when the developer is ready to switch to **prod mode**
+(routing through GATE). They set it as `ATOM_AGENT_JWT` in their agent project's `.env`.
+
 ---
 
 ## Part 1 — Backend
@@ -130,55 +137,57 @@ async def create_agent(domain_id: str, payload, owner_id: str) -> tuple[dict, st
                     "Re-create the domain or run provision_domain manually."
                 )
 
-            # Step 2: insert agent record (status=draft until LiteLLM responds)
+            # Step 2: insert agent (status=draft)
             agent = await conn.fetchrow("""
-                INSERT INTO agents
-                  (domain_id, owner_id, name, description,
-                   hitl_timeout_seconds, hitl_fallback, status)
-                VALUES ($1, $2, $3, $4, $5, $6, 'draft')
+                INSERT INTO agents (domain_id, name, description, status, owner_id,
+                                    allowed_models, rpm_limit, tpm_limit, hitl_timeout_s,
+                                    hitl_fallback)
+                VALUES ($1,$2,$3,'draft',$4,$5,$6,$7,$8,$9)
                 RETURNING *
-            """, domain_id, owner_id,
-                payload.name, payload.description,
-                payload.hitl_timeout_seconds, payload.hitl_fallback)
+            """, domain_id, payload.name, payload.description, owner_id,
+                payload.allowed_models, payload.rpm_limit, payload.tpm_limit,
+                payload.hitl_timeout_s, payload.hitl_fallback)
 
-            # Step 3: provision LiteLLM agent scoped to domain's team
-            try:
-                async with httpx.AsyncClient(timeout=20) as client:
-                    resp = await client.post(
-                        f"{settings.atom_llm_url}/atom/provision_agent",
-                        json={
-                            "agent_id":       str(agent["id"]),
-                            "agent_name":     payload.name,
-                            "team_id":        domain["litellm_team_id"],
-                            "allowed_models": payload.allowed_models,
-                            "rpm_limit":      payload.rpm_limit,
-                            "tpm_limit":      payload.tpm_limit,
-                            "guardrails":     payload.guardrails or [],
-                        },
+            # Step 3: provision LiteLLM agent
+            async with httpx.AsyncClient() as client:
+                resp = await client.post(
+                    f"{settings.atom_llm_url}/atom/provision_agent",
+                    json={
+                        "agent_id":       str(agent["id"]),
+                        "agent_name":     payload.name,
+                        "team_id":        str(domain["litellm_team_id"]),
+                        "allowed_models": payload.allowed_models,
+                        "rpm_limit":      payload.rpm_limit,
+                        "tpm_limit":      payload.tpm_limit,
+                    },
+                    timeout=10.0
+                )
+                if resp.status_code != 200:
+                    raise httpx.HTTPStatusError(
+                        f"atom-llm provision_agent failed: {resp.text}",
+                        request=resp.request, response=resp
                     )
-                    resp.raise_for_status()
-                    litellm = resp.json()
-            except Exception as e:
-                raise RuntimeError(f"LiteLLM agent provisioning failed: {e}")
+                litellm_data = resp.json()
 
-            # Step 4: store LiteLLM IDs + encrypted virtual key
-            encrypted_key = encrypt_virtual_key(litellm["virtual_key"])
+            # Step 4: encrypt and store virtual key
+            encrypted_key = encrypt_virtual_key(litellm_data["virtual_key"])
             await conn.execute("""
                 UPDATE agents
-                SET litellm_agent_id    = $1,
-                    litellm_virtual_key = $2
-                WHERE id = $3
-            """, litellm["litellm_agent_id"], encrypted_key, agent["id"])
+                SET litellm_agent_id=$1, litellm_virtual_key=$2
+                WHERE id=$3
+            """, litellm_data["litellm_agent_id"], encrypted_key, agent["id"])
 
-            # Step 5: issue RS256 JWT for the agent
-            raw_jwt = issue_agent_jwt(str(agent["id"]), str(domain_id))
+            # Step 5: issue RS256 agent JWT
+            raw_jwt = issue_agent_jwt(str(agent["id"]), domain_id)
             token_hash = hashlib.sha256(raw_jwt.encode()).hexdigest()
+
+            # Step 6: store token hash (never the raw token)
             await conn.execute("""
                 INSERT INTO agent_tokens (agent_id, token_hash)
                 VALUES ($1, $2)
             """, agent["id"], token_hash)
 
-            # Step 6: wire tools, skills, policies
+            # Step 7: wire tools, skills, policies (junction tables)
             for tool_id in (payload.tool_ids or []):
                 await conn.execute(
                     "INSERT INTO agent_tools (agent_id, tool_id) VALUES ($1,$2)",
@@ -189,81 +198,54 @@ async def create_agent(domain_id: str, payload, owner_id: str) -> tuple[dict, st
                     "INSERT INTO agent_skills (agent_id, skill_id) VALUES ($1,$2)",
                     agent["id"], skill_id
                 )
-            for policy_id in (payload.policy_ids or []):
-                await conn.execute(
-                    "INSERT INTO agent_policies (agent_id, policy_id) VALUES ($1,$2)",
-                    agent["id"], policy_id
-                )
 
-            # Step 7: create memory config if specified
+            # Step 8: memory config
             if payload.memory_config:
-                mem_id = await conn.fetchval("""
+                await conn.execute("""
                     INSERT INTO memory_configs
-                      (short_term_ttl_s, max_vectors, embedding_model)
-                    VALUES ($1, $2, $3)
-                    RETURNING id
-                """, payload.memory_config.short_term_ttl_s,
+                        (agent_id, short_term_ttl_s, max_vectors, embedding_model)
+                    VALUES ($1,$2,$3,$4)
+                """, agent["id"],
+                    payload.memory_config.short_term_ttl_s,
                     payload.memory_config.max_vectors,
                     payload.memory_config.embedding_model)
-                await conn.execute(
-                    "UPDATE agents SET memory_config_id=$1 WHERE id=$2",
-                    mem_id, agent["id"]
-                )
 
-            # Step 8: mark deployed-ready (still needs approval to go to k8s)
-            await conn.execute(
-                "UPDATE agents SET status='draft' WHERE id=$1", agent["id"]
-            )
-
-    return dict(agent), raw_jwt
+            return dict(agent), raw_jwt
 
 
-async def regenerate_token(agent_id: str, domain_id: str, rdb) -> str:
+async def regenerate_token(agent_id: str, conn) -> str:
     """
-    Revoke the current token and issue a new one.
-    The old token is invalidated in Redis within milliseconds (GATE checks Redis first).
+    Revoke current token and issue a new one.
+    Old token is blacklisted in Redis for 24h so GATE rejects it immediately.
     """
-    async with get_conn() as conn:
-        # Get old token hash
-        old_hash = await conn.fetchval("""
-            SELECT token_hash FROM agent_tokens
-            WHERE agent_id=$1 AND revoked_at IS NULL
-            ORDER BY issued_at DESC LIMIT 1
-        """, agent_id)
+    import redis.asyncio as aioredis
+    from ..config import get_settings
+    settings = get_settings()
 
-        if old_hash:
-            # Revoke in DB
-            await conn.execute("""
-                UPDATE agent_tokens SET revoked_at=now()
-                WHERE agent_id=$1 AND revoked_at IS NULL
-            """, agent_id)
-            # Set Redis revocation flag — GATE sees this within milliseconds
-            await rdb.set(f"token_revoked:{old_hash}", "1", ex=86400)
+    # Get and revoke old token
+    old = await conn.fetchrow(
+        "SELECT token_hash FROM agent_tokens WHERE agent_id=$1 AND revoked_at IS NULL",
+        agent_id
+    )
+    if old:
+        await conn.execute(
+            "UPDATE agent_tokens SET revoked_at=now() WHERE agent_id=$1 AND revoked_at IS NULL",
+            agent_id
+        )
+        r = aioredis.from_url(settings.redis_url)
+        await r.set(f"token_revoked:{old['token_hash']}", "1", ex=86400)
+        await r.aclose()
 
-        # Issue new token
-        raw_jwt   = issue_agent_jwt(agent_id, domain_id)
-        new_hash  = hashlib.sha256(raw_jwt.encode()).hexdigest()
-        await conn.execute("""
-            INSERT INTO agent_tokens (agent_id, token_hash)
-            VALUES ($1, $2)
-        """, agent_id, new_hash)
-
+    # Issue new token
+    agent = await conn.fetchrow("SELECT domain_id FROM agents WHERE id=$1", agent_id)
+    raw_jwt = issue_agent_jwt(agent_id, str(agent["domain_id"]))
+    token_hash = hashlib.sha256(raw_jwt.encode()).hexdigest()
+    await conn.execute(
+        "INSERT INTO agent_tokens (agent_id, token_hash) VALUES ($1,$2)",
+        agent_id, token_hash
+    )
     return raw_jwt
 ```
-
-**`router.py`** — endpoints:
-
-```
-GET    /api/domains/{domain_id}/agents
-POST   /api/domains/{domain_id}/agents
-GET    /api/domains/{domain_id}/agents/{agent_id}
-PATCH  /api/domains/{domain_id}/agents/{agent_id}
-DELETE /api/domains/{domain_id}/agents/{agent_id}
-POST   /api/domains/{domain_id}/agents/{agent_id}/regenerate-token
-```
-
-DELETE endpoint must also call `DELETE /atom/deprovision_agent` on atom-llm with
-`litellm_id = agent.litellm_agent_id`.
 
 ### 3. Tools and Skills routers
 
@@ -305,7 +287,7 @@ app.include_router(skills_router, prefix="/api/skills",  tags=["skills"])
 |---|---|
 | 1 | Agent name (required), description |
 | 2 | Domain selection (dropdown from GET /api/domains) |
-| 3 | Allowed models (checkboxes: gpt-4o, gpt-4o-mini, etc.) |
+| 3 | Allowed models (checkboxes: gpt-4o, gpt-4o-mini, claude-sonnet-4-20250514, gemini-2.5-flash) |
 | 4 | Tools (checkboxes from GET /api/tools) |
 | 5 | Skills (checkboxes from GET /api/skills) |
 | 6 | Memory: short_term_ttl_s (slider 60–86400), max_vectors (input), embedding_model |
@@ -319,25 +301,34 @@ Final step shows a full summary before submission. "Create Agent" button calls
 Shown immediately after successful agent creation. Cannot be dismissed any other way.
 
 ```
-┌─────────────────────────────────────────────────────────────┐
-│  ⚠  Copy your agent token now                               │
-│                                                             │
-│  This token is shown exactly once and cannot be recovered.  │
-│  Store it securely or use it immediately:                   │
-│                                                             │
-│  atom create agent eyJhbGciOiJSUzI1NiIs...                 │
-│  [━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━] [Copy]          │
-│                                                             │
-│  ☐  I have copied the token and stored it securely         │
-│                                                             │
-│  [ Close ]  ← disabled until checkbox is ticked            │
-└─────────────────────────────────────────────────────────────┘
+┌──────────────────────────────────────────────────────────────────┐
+│  ⚠  Copy your agent token now                                    │
+│                                                                  │
+│  This token is shown exactly once and cannot be recovered.       │
+│  It is your agent's credential for prod mode — set it as         │
+│  ATOM_AGENT_JWT in your agent project's .env file.               │
+│                                                                  │
+│  eyJhbGciOiJSUzI1NiIs...                                         │
+│  [━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━] [Copy]       │
+│                                                                  │
+│  To use in your agent project:                                   │
+│    ATOM_MODE=prod                                                │
+│    ATOM_AGENT_JWT=<this token>                                   │
+│    ATOM_GATE_URL=http://<your-gate>:8080                         │
+│                                                                  │
+│  ☐  I have copied the token and stored it securely              │
+│                                                                  │
+│  [ Close ]  ← disabled until checkbox is ticked                 │
+└──────────────────────────────────────────────────────────────────┘
 ```
 
 Implementation notes:
 - `onOpenChange` is blocked — user cannot click outside to dismiss
 - Close button disabled until checkbox is checked
 - `navigator.clipboard.writeText()` on Copy button
+- Do NOT display `atom create agent <token>` — that command no longer exists.
+  The developer scaffolds their project with `atom create` (offline wizard, no token needed).
+  The token is only needed when switching `ATOM_MODE=prod` in an existing project.
 - After close, navigate to `/domains/{domain_id}/agents/{agent_id}`
 
 ### 7. Agent detail page (`src/pages/AgentDetail.tsx`)
@@ -352,7 +343,8 @@ Shows:
 - Memory config summary
 - Action buttons:
   - **Deploy** → triggers SESSION-09 approval flow (disabled if already deployed)
-  - **Regenerate Token** → confirmation dialog, then calls regenerate-token endpoint, shows new token in reveal modal
+  - **Regenerate Token** → confirmation dialog, then calls regenerate-token endpoint,
+    shows new token in reveal modal (same modal, same copy instructions)
   - **Suspend** → calls DELETE endpoint
 
 Deployment history and HITL history tables are stubs here — wired in SESSION-09.
@@ -391,6 +383,7 @@ In `Layout.tsx`, re-enable the Agents sidebar item (it was disabled in SESSION-0
 - [ ] If atom-llm is down, `POST /api/domains/{did}/agents` returns 502 and agent is NOT in Postgres
 - [ ] Domain with null `litellm_team_id` → agent creation returns 400
 - [ ] Frontend wizard completes in 7 steps
+- [ ] Token reveal modal shows token + prod-mode `.env` instructions (NOT `atom create agent <token>`)
 - [ ] Token reveal modal cannot be closed without ticking checkbox
 - [ ] Token reveal modal cannot be dismissed by clicking outside
 - [ ] `pytest src/tests/test_agents.py` passes
@@ -408,6 +401,13 @@ Context:
 - agents.litellm_agent_id column exists (migration 000008)
 - .keys/jwt_private.pem and .keys/jwt_public.pem exist
 - atom-llm is running with /atom/provision_agent endpoint
+
+Developer workflow note:
+  Developers use `atom create` (SESSION-10) to scaffold agent projects locally.
+  atom create is a purely offline cookiecutter-style wizard — it does NOT require a token.
+  The token issued here is only needed when the developer switches their project to
+  ATOM_MODE=prod. They paste it as ATOM_AGENT_JWT in their .env file.
+  Do NOT reference `atom create agent <token>` anywhere in the UI — that command does not exist.
 
 LiteLLM mapping (important):
   ATOM Domain → LiteLLM Team  (domain.litellm_team_id = domain.id)
@@ -446,7 +446,15 @@ Backend tasks:
 Frontend tasks:
 
 6. 7-step agent creation wizard (shadcn Card + step indicator)
-7. Token reveal modal — cannot dismiss outside, close disabled until checkbox ticked
+
+7. Token reveal modal — important copy requirements:
+   - Show the raw JWT token in a copyable field
+   - Instruction text: "Set this as ATOM_AGENT_JWT in your agent project's .env file"
+   - Show the three env vars the developer needs: ATOM_MODE=prod, ATOM_AGENT_JWT=<token>,
+     ATOM_GATE_URL=http://<your-gate>:8080
+   - Do NOT show "atom create agent <token>" — that command does not exist
+   - Cannot dismiss outside, close disabled until checkbox ticked
+
 8. Agent detail page — status badge, config display, Deploy/Regenerate/Suspend buttons
 9. Agents list page — table with status badges, New Agent button
 10. Enable Agents in Layout sidebar
