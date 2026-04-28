@@ -1,0 +1,44 @@
+# atom-llm/Dockerfile.dev — ARM64-compatible dev image
+#
+# Installs the LATEST litellm from PyPI (not pinned — avoids version mismatch
+# between the cloned source and PyPI releases), then applies the three
+# ATOM-specific surgical changes via Python patch scripts.
+#
+# Why patch instead of copy whole files?
+# Copying atom-llm/litellm/proxy/proxy_server.py onto the PyPI-installed version
+# causes ImportError: the cloned source may include commits made after the
+# last PyPI release, referencing constants that the installed package lacks.
+# Patching the installed file is version-safe.
+
+FROM python:3.11-slim
+
+WORKDIR /app
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    curl build-essential libssl-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install latest litellm + prisma + ATOM extras
+RUN pip install --no-cache-dir "litellm[proxy]" prisma asyncpg confluent-kafka 2>/dev/null || \
+    pip install --no-cache-dir "litellm[proxy]" prisma asyncpg kafka-python
+
+# Generate Prisma client for the installed schema
+RUN SCHEMA=$(python3 -c "import litellm, os; print(os.path.join(os.path.dirname(litellm.__file__), 'proxy', 'schema.prisma'))") && \
+    echo "Running prisma generate on ${SCHEMA}" && \
+    prisma generate --schema "${SCHEMA}"
+
+# ── ATOM extensions (new package — no upstream equivalent) ───────────────────
+COPY atom_extensions/ /app/atom_extensions/
+ENV PYTHONPATH="/app:${PYTHONPATH}"
+
+# ── Apply ATOM patches to the installed litellm ──────────────────────────────
+# Three changes to proxy_server.py (see atom-llm/UPSTREAM_DIFF.md):
+#   1. user_telemetry = False   (disable phone-home)
+#   2. Inject X-ATOM-Agent-ID header into LLM call metadata
+#   3. Register atom_extensions routers at app startup
+COPY atom_extensions/apply_patches.py /tmp/apply_patches.py
+RUN python3 /tmp/apply_patches.py && rm /tmp/apply_patches.py
+
+EXPOSE 4000
+
+CMD ["litellm", "--config", "/app/config.dev.yaml", "--port", "4000"]
