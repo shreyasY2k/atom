@@ -11,6 +11,12 @@ KUBECONFIG   ?= $(HOME)/.kube/config
 include .env
 export
 
+# ── Tool paths ────────────────────────────────────────────────────────────────
+MIGRATE := $(shell go env GOPATH)/bin/migrate
+# For k8s deployments, port-forward postgres before running migrations:
+#   kubectl port-forward svc/postgres 5432:5432 -n atom-infra &
+# DATABASE_URL in .env already points to localhost:5432
+
 # ─────────────────────────────────────────────────────────────────────────────
 help: ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | \
@@ -95,17 +101,17 @@ dev-logs: ## Tail logs from all dev services
 	@docker compose -f docker-compose.dev.yml logs -f
 
 # ── Migrations ────────────────────────────────────────────────────────────────
-migrate-up: ## Apply all database migrations
-	@migrate -database "$(DATABASE_URL)" -path migrations up
+migrate-up: ## Apply all database migrations (port-forward postgres first)
+	@$(MIGRATE) -database "$(DATABASE_URL)" -path migrations up
 	@echo "✓ Migrations applied."
 
 migrate-down: ## Roll back the last migration
-	@migrate -database "$(DATABASE_URL)" -path migrations down 1
+	@$(MIGRATE) -database "$(DATABASE_URL)" -path migrations down 1
 
 migrate-status: ## Show migration status
-	@migrate -database "$(DATABASE_URL)" -path migrations version
+	@$(MIGRATE) -database "$(DATABASE_URL)" -path migrations version
 
-seed-dev: ## Load development seed data
+seed-dev: ## Load development seed data (port-forward postgres first)
 	@psql "$(DATABASE_URL)" -f migrations/seed_dev.sql
 	@echo "✓ Seed data loaded."
 

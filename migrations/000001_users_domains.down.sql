@@ -1,0 +1,3 @@
+-- 000001 rollback
+DROP TABLE IF EXISTS domains;
+DROP TABLE IF EXISTS users;

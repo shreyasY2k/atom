@@ -1,0 +1,7 @@
+-- 000003 rollback
+DROP TABLE IF EXISTS agent_skills;
+DROP TABLE IF EXISTS skills;
+DROP TABLE IF EXISTS agent_tools;
+DROP TABLE IF EXISTS tools;
+DROP TABLE IF EXISTS agent_policies;
+DROP TABLE IF EXISTS policies;
