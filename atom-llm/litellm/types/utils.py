@@ -2978,8 +2978,6 @@ class StandardCallbackDynamicParams(TypedDict, total=False):
     arize_space_id: Optional[str]
 
     # PostHog dynamic params
-    posthog_api_key: Optional[str]
-    posthog_api_url: Optional[str]
 
     # Weave (W&B) dynamic params
     wandb_api_key: Optional[str]

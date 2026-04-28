@@ -41,8 +41,6 @@ _supported_callback_params = [
     "arize_api_key",
     "arize_space_key",
     "arize_space_id",
-    "posthog_api_key",
-    "posthog_host",
     "braintrust_api_key",
     "braintrust_project",
     "braintrust_host",

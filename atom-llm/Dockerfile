@@ -93,6 +93,11 @@ COPY --from=builder /root/.cache /root/.cache
 RUN find /app/.venv -type f -path "*/tornado/test/*" -delete && \
     find /app/.venv -type d -path "*/tornado/test" -delete
 
+# ATOM extensions — copied in before EXPOSE so they are importable at startup
+COPY atom_extensions/ /app/atom_extensions/
+# Install ATOM extra dependencies (asyncpg for tools/skills, optional confluent-kafka)
+RUN /app/.venv/bin/pip install --no-cache-dir asyncpg confluent-kafka 2>/dev/null ||     /app/.venv/bin/pip install --no-cache-dir asyncpg kafka-python
+
 EXPOSE 4000/tcp
 
 COPY docker/supervisord.conf /etc/supervisord.conf

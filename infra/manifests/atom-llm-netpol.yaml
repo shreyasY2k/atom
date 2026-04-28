@@ -1,0 +1,78 @@
+---
+# NetworkPolicy: ONLY gate pods in atom-system may reach atom-llm.
+# Agents cannot call atom-llm directly — all LLM traffic must flow through GATE.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: atom-llm-ingress
+  namespace: atom-system
+spec:
+  podSelector:
+    matchLabels:
+      app: atom-llm
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app: gate
+      ports:
+        - protocol: TCP
+          port: 4000
+  egress:
+    # Postgres
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: atom-infra
+          podSelector:
+            matchLabels:
+              app: postgres
+      ports:
+        - protocol: TCP
+          port: 5432
+    # Redis
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: atom-infra
+          podSelector:
+            matchLabels:
+              app: redis
+      ports:
+        - protocol: TCP
+          port: 6379
+    # Redpanda (Kafka)
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: atom-infra
+          podSelector:
+            matchLabels:
+              app: redpanda
+      ports:
+        - protocol: TCP
+          port: 9092
+    # MinIO
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: atom-infra
+          podSelector:
+            matchLabels:
+              app: minio
+      ports:
+        - protocol: TCP
+          port: 9000
+    # External LLM providers (CIDR-based — allow all HTTPS egress to internet)
+    - ports:
+        - protocol: TCP
+          port: 443
+    # DNS
+    - ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53

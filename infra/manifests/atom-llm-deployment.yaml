@@ -1,0 +1,77 @@
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: atom-llm
+  namespace: atom-system
+  labels:
+    app: atom-llm
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: atom-llm
+  template:
+    metadata:
+      labels:
+        app: atom-llm
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+      containers:
+        - name: atom-llm
+          image: atom-llm:local
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 4000
+              name: http
+          env:
+            - name: DATABASE_URL
+              value: postgresql://atom:changeme@postgres.atom-infra.svc.cluster.local:5432/atom
+            - name: KAFKA_BROKERS
+              value: redpanda.atom-infra.svc.cluster.local:9092
+            - name: STORE_MODEL_IN_DB
+              value: "true"
+            - name: LITELLM_WORKER_STARTUP_HOOKS
+              value: atom_extensions.startup_hook.register_callbacks
+          envFrom:
+            - secretRef:
+                name: atom-credentials
+          resources:
+            requests:
+              cpu: 250m
+              memory: 512Mi
+            limits:
+              cpu: 1000m
+              memory: 1Gi
+          readinessProbe:
+            httpGet:
+              path: /health/readiness
+              port: 4000
+            initialDelaySeconds: 20
+            periodSeconds: 10
+            failureThreshold: 6
+          livenessProbe:
+            httpGet:
+              path: /health/liveliness
+              port: 4000
+            initialDelaySeconds: 30
+            periodSeconds: 15
+            failureThreshold: 3
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: atom-llm
+  namespace: atom-system
+  labels:
+    app: atom-llm
+spec:
+  selector:
+    app: atom-llm
+  ports:
+    - port: 4000
+      targetPort: 4000
+      name: http
