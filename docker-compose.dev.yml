@@ -172,29 +172,59 @@ services:
     ports:
       - "4000:4000"
 
-  # ── atom-studio ─────────────────────────────────────────────────────────────
-  # NOTE: Before SESSION-07, atom-studio/ does not have a custom Dockerfile yet.
-  # Run: bash scripts/clone-upstreams.sh first (SESSION-00).
-  # After SESSION-07 adds atom-studio/Dockerfile, switch 'image' to 'build'.
-  atom-studio:
-    image: python:3.11-slim   # placeholder — replaced by local build in SESSION-07
-    # build:
-    #   context: atom-studio/
-    #   dockerfile: Dockerfile
-    container_name: atom-studio
+  # ── atom-studio API (FastAPI backend) ────────────────────────────────────────
+  # Built from scratch in SESSION-07. Implements auth, domains, agents, HITL, deployments.
+  atom-studio-api:
+    build:
+      context: atom-studio/backend/
+      dockerfile: Dockerfile
+    container_name: atom-studio-api
     restart: unless-stopped
     depends_on:
       postgres:
         condition: service_healthy
+      redis:
+        condition: service_healthy
     env_file: .env
     environment:
       DATABASE_URL: postgresql://atom:${POSTGRES_PASSWORD:-changeme}@postgres:5432/atom
+      REDIS_URL: redis://:${REDIS_PASSWORD:-changeme}@redis:6379
       ATOM_LLM_URL: http://atom-llm:4000
       ATOM_RUNTIME_URL: http://atom-runtime:8090
+      JWT_PRIVATE_KEY_PATH: /etc/atom/jwt_private.pem
+      JWT_PUBLIC_KEY_PATH: /etc/atom/jwt_public.pem
     ports:
-      - "3000:3000"
+      - "3001:3001"
     volumes:
       - ./.keys:/etc/atom:ro
+
+  # ── atom-studio UI (React + Vite frontend) ────────────────────────────────────
+  # Built from scratch in SESSION-07. Management portal UI.
+  # In dev, run with: cd atom-studio/frontend && npm run dev (port 5173)
+  # This service is the production nginx build. For fast iteration use npm run dev.
+  atom-studio-ui:
+    build:
+      context: atom-studio/frontend/
+      dockerfile: Dockerfile
+    container_name: atom-studio-ui
+    restart: unless-stopped
+    depends_on:
+      - atom-studio-api
+    ports:
+      - "3000:3000"
+
+  # ── agentscope-studio (visualization only — NOT modified) ─────────────────────
+  # Pure Node.js trace/conversation viewer. Agents point studio_url here.
+  # Run as-is from the cloned upstream. Zero ATOM modifications.
+  agentscope-studio:
+    image: node:20-alpine
+    container_name: agentscope-studio
+    working_dir: /app
+    command: sh -c "npm install && npm run dev -- --host 0.0.0.0 --port 3002"
+    volumes:
+      - ./agentscope-studio:/app:ro
+    ports:
+      - "3002:3002"
 
   # ── Grafana ──────────────────────────────────────────────────────────────────
   grafana:

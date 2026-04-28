@@ -1,57 +1,73 @@
 # ADR-007 — agentscope Fork Strategy
 
-**Status:** Accepted  
+**Status:** Amended (original decision was based on incorrect assumptions about agentscope-studio)
 **Date:** 2025-01-01
+**Amended:** 2025-06-01
 
 ---
 
 ## Context
 
-ATOM builds on four agentscope components: the core SDK (`agentscope`), the studio UI
-(`agentscope-studio`), the memory system (`agentscope-reme`), and the runtime
-(`agentscope-runtime`). All are open-source (Apache 2.0).
+ATOM builds on agentscope components. When this ADR was first written, agentscope-studio was
+assumed to be a full-stack Python/FastAPI application we could extend with ATOM management APIs.
+That assumption was wrong.
+
+**What agentscope-studio actually is:** A pure Node.js visualization toolkit. It receives
+WebSocket pushes from agents via `agentscope.init(studio_url=...)` and displays conversations,
+traces, and token usage in a browser. It has no Python backend, no auth, no database, no
+management APIs. It is a developer debugging and observability dashboard.
+
+---
 
 ## Decision
 
-Fork all four into subdirectories of the ATOM monorepo as:
-- `atom-sdk` (from `agentscope`)
-- `atom-studio` (from `agentscope-studio`)
-- `atom-memory` (from `agentscope-reme`)
-- `atom-runtime` (from `agentscope-runtime`)
+### Components forked and modified
 
-**Changes specific to each fork:**
+**`atom-sdk`** (from agentscope core)
+- SESSION-06: Remove all provider wrappers, add AtomChatWrapper + AtomEmbeddingWrapper
+  that route through GATE via base_url pattern, add HITL hooks
 
-`atom-sdk`:
-- Remove all AI provider model wrappers (OpenAI, Anthropic, Gemini, etc.).
-- Add `AtomModelWrapper` that authenticates with the agent's JWT and calls `atom-llm` via GATE.
-- Add HITL hook points for HiClaw integration.
+**`atom-memory`** (from agentscope-reme)
+- SESSION-12: Add pgvector backend (long-term), Redis backend (short-term)
 
-`atom-studio`:
-- Add JWT auth layer (login, sessions).
-- Add domain and agent management screens.
-- Add agent token generation and provisioning flow.
-- Add HITL decision dashboard.
-- Add deployment approval workflow.
-- Keep all existing agentscope-studio UI patterns and stack.
+**`atom-runtime`** (from agentscope-runtime)
+- SESSION-11: Add deploy webhook + k8s manifest builder
 
-`atom-memory`:
-- Add pgvector backend for long-term semantic memory.
-- Add Redis backend for short-term working memory.
-- Wire memory configuration from atom-studio.
+### Components cloned but NOT modified
 
-`atom-runtime`:
-- Integrate with ATOM Postgres for deployment configs.
-- Add deployment approval webhook before k8s rollout.
-- Generate per-agent Ingress rules for `/domain/{id}/agent/{id}` routing.
+**`agentscope-studio`** — cloned in SESSION-00, runs as-is.
 
-## Upstream Merge Policy
+Role in ATOM: observability only. Developers point agents at it during development to
+watch live conversations and traces. Runs as a separate pod. Never touched.
 
-Upstream merges are done manually on a best-effort basis when a new upstream release contains
-significant improvements. Each fork maintains a `UPSTREAM_CHANGELOG.md` noting divergence points.
+### Components built from scratch
+
+**`atom-studio`** — new service, not a fork (see ADR-015).
+
+The ATOM management portal: auth, domains, agents, HITL queue, deployment approvals.
+
+---
+
+## Revised Monorepo Layout
+
+```
+atom-sdk/           ← fork of agentscope (SDK, modified)
+atom-memory/        ← fork of agentscope-reme (modified)
+atom-runtime/       ← fork of agentscope-runtime (modified)
+agentscope-studio/  ← clone of agentscope-studio (NOT modified)
+atom-studio/        ← built from scratch
+  backend/          ← FastAPI (Python)
+  frontend/         ← React + Vite + shadcn/ui
+```
+
+---
 
 ## Consequences
 
-- **Positive:** Rich existing functionality; proven agent orchestration; existing k8s deployment
-  capability in agentscope-runtime.
-- **Negative:** Four upstream repos to track. Merge debt accumulates over time.
-  Mitigated by clear change isolation policy (ATOM changes in dedicated modules/files where possible).
+**Positive:** atom-studio is clean FastAPI (consistent with all other Python services).
+agentscope-studio stays pristine with zero merge risk. Clear separation of concerns:
+observability (agentscope-studio) vs management (atom-studio).
+
+**Negative:** atom-studio frontend is built from scratch (more work than reusing a fork).
+Developers need to know two URLs. Mitigated by linking from atom-studio dashboard to the
+agentscope-studio trace viewer.
