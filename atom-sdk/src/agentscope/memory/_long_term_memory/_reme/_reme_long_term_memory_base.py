@@ -66,12 +66,17 @@ Example:
             )
 
 """
+
 from abc import ABCMeta
 from typing import Any
 
 from .._long_term_memory_base import LongTermMemoryBase
-from ....embedding import DashScopeTextEmbedding, OpenAITextEmbedding
-from ....model import DashScopeChatModel, OpenAIChatModel
+from ....embedding import EmbeddingModelBase
+from ....model import ChatModelBase
+
+# Import internal classes for isinstance checks (not re-exported)
+from ....model._openai_model import OpenAIChatModel
+from ....embedding._openai_embedding import OpenAITextEmbedding
 
 
 class ReMeLongTermMemoryBase(LongTermMemoryBase, metaclass=ABCMeta):
@@ -96,10 +101,8 @@ class ReMeLongTermMemoryBase(LongTermMemoryBase, metaclass=ABCMeta):
         agent_name: str | None = None,
         user_name: str | None = None,
         run_name: str | None = None,
-        model: DashScopeChatModel | OpenAIChatModel | None = None,
-        embedding_model: (
-            DashScopeTextEmbedding | OpenAITextEmbedding | None
-        ) = None,
+        model: ChatModelBase | None = None,
+        embedding_model: EmbeddingModelBase | None = None,
         reme_config_path: str | None = None,
         **kwargs: Any,
     ) -> None:
@@ -194,20 +197,14 @@ class ReMeLongTermMemoryBase(LongTermMemoryBase, metaclass=ABCMeta):
         # These will be passed as command-line style config overrides
         config_args = []
 
-        # Extract LLM API credentials based on model type
-        # DashScope uses a fixed endpoint, OpenAI can have custom base_url
-        if isinstance(model, DashScopeChatModel):
-            llm_api_base = "https://dashscope.aliyuncs.com/compatible-mode/v1"
-            llm_api_key = model.api_key
-
-        elif isinstance(model, OpenAIChatModel):
+        # Extract LLM API credentials — AtomChatModel inherits OpenAIChatModel
+        if isinstance(model, OpenAIChatModel):
             llm_api_base = str(getattr(model.client, "base_url", None))
             llm_api_key = str(getattr(model.client, "api_key", None))
 
         else:
             raise ValueError(
-                f"model must be a DashScopeChatModel or "
-                f"OpenAIChatModel instance. "
+                f"model must be an OpenAIChatModel or AtomChatModel instance. "
                 f"Got {type(model).__name__} instead.",
             )
 
@@ -217,16 +214,8 @@ class ReMeLongTermMemoryBase(LongTermMemoryBase, metaclass=ABCMeta):
         if llm_model_name:
             config_args.append(f"llm.default.model_name={llm_model_name}")
 
-        # Extract embedding model API credentials based on type
-        # Similar to LLM, DashScope uses fixed endpoint,
-        # OpenAI can be customized
-        if isinstance(embedding_model, DashScopeTextEmbedding):
-            embedding_api_base = (
-                "https://dashscope.aliyuncs.com/compatible-mode/v1"
-            )
-            embedding_api_key = embedding_model.api_key
-
-        elif isinstance(embedding_model, OpenAITextEmbedding):
+        # Extract embedding model credentials — AtomTextEmbedding inherits OpenAITextEmbedding
+        if isinstance(embedding_model, OpenAITextEmbedding):
             embedding_api_base = str(
                 getattr(embedding_model.client, "base_url", None),
             )
@@ -236,8 +225,7 @@ class ReMeLongTermMemoryBase(LongTermMemoryBase, metaclass=ABCMeta):
 
         else:
             raise ValueError(
-                "embedding_model must be a DashScopeTextEmbedding or "
-                "OpenAITextEmbedding instance. "
+                "embedding_model must be an OpenAITextEmbedding or AtomTextEmbedding instance. "
                 f"Got {type(embedding_model).__name__} instead.",
             )
 
