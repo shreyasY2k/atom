@@ -26,6 +26,7 @@ import (
 	"github.com/your-org/atom/gate/internal/auth"
 	"github.com/your-org/atom/gate/internal/config"
 	"github.com/your-org/atom/gate/internal/health"
+	"github.com/your-org/atom/gate/internal/policy"
 	"github.com/your-org/atom/gate/internal/ratelimit"
 	"github.com/your-org/atom/gate/internal/router"
 )
@@ -82,6 +83,16 @@ func main() {
 		}
 	}
 
+	// ── OPA policy manager ────────────────────────────────────────────────────
+	opaMgr, err := policy.NewManager(ctx, cfg.OPABundlePath)
+	if err != nil {
+		slog.Warn("OPA policy load failed — policy enforcement disabled", "err", err)
+		opaMgr = nil
+	} else {
+		defer opaMgr.Close()
+		slog.Info("OPA policies loaded", "dir", cfg.OPABundlePath)
+	}
+
 	// ── Audit logger ──────────────────────────────────────────────────────────
 	auditLogger := audit.New(pool, cfg.PlatformHMACSecret, cfg.KafkaBrokers)
 	defer auditLogger.Close()
@@ -91,7 +102,7 @@ func main() {
 		ErrorHandler: errorHandler,
 	})
 
-	// Health endpoints bypass the auth middleware chain.
+	// Health endpoints bypass the auth + OPA middleware chain.
 	app.Get("/healthz", health.Healthz)
 	app.Get("/readyz", health.Readyz(pool, rdb))
 
@@ -99,6 +110,9 @@ func main() {
 	app.Use(requestid.New())
 	app.Use(otelMiddleware(tp))
 	app.Use(auth.Middleware(cfg.JWTPublicKey, pool, rdb))
+	if opaMgr != nil {
+		app.Use(policy.Middleware(opaMgr, pool, rdb))
+	}
 	app.Use(ratelimit.Middleware(rdb))
 	app.Use(auditLogger.Middleware())
 

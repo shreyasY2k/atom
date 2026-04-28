@@ -15,6 +15,7 @@ import (
 	kafkago "github.com/segmentio/kafka-go"
 
 	"github.com/your-org/atom/gate/internal/auth"
+	"github.com/your-org/atom/gate/internal/policy"
 )
 
 const (
@@ -90,6 +91,13 @@ func (l *Logger) Middleware() fiber.Handler {
 			ev.DomainID = claims.DomainID
 			ev.AgentID = claims.AgentID
 			ev.TokenType = claims.Type
+		}
+
+		if pd := policy.GetPolicyDecision(c); pd != nil {
+			ev.PolicyDecision.Allow = pd.Allow
+			ev.PolicyDecision.Reason = pd.Reason
+		} else {
+			ev.PolicyDecision.Allow = true // health/readyz bypass OPA
 		}
 
 		// Non-blocking send — drop if buffer is full.
