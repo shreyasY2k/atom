@@ -1,0 +1,36 @@
+statefulset:
+  replicas: 1
+
+resources:
+  cpu:
+    cores: 1
+  memory:
+    container:
+      max: 1Gi
+    redpanda:
+      reserveMemory: 128Mi
+      memory: 512Mi
+
+storage:
+  persistentVolume:
+    enabled: true
+    size: 5Gi
+
+# Disable TLS for dev cluster
+tls:
+  enabled: false
+
+listeners:
+  kafka:
+    port: 9092
+    tls:
+      enabled: false
+
+config:
+  cluster:
+    auto_create_topics_enabled: true
+
+post_install_job:
+  enabled: false
+
+# Topics created via separate init job in OPA manifest

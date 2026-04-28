@@ -1,0 +1,141 @@
+---
+# ConfigMap: bundle all base Rego policies
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: opa-policies
+  namespace: atom-infra
+data:
+  agent_auth.rego: |
+    package atom.authz
+
+    import future.keywords.if
+    import future.keywords.in
+
+    default allow := false
+
+    allow if {
+      input.token.type == "agent"
+      input.token.agent_id == path_agent_id
+      not is_revoked
+    }
+
+    allow if {
+      input.token.type == "human"
+      input.token.role in {"admin", "developer"}
+    }
+
+    path_agent_id := agent_id if {
+      parts := split(input.request.path, "/")
+      count(parts) >= 5
+      agent_id := parts[4]
+    }
+
+    is_revoked if {
+      input.token.revoked == true
+    }
+
+  domain_isolation.rego: |
+    package atom.authz
+
+    import future.keywords.if
+
+    deny[{"reason": "cross-domain access denied"}] if {
+      input.token.type == "agent"
+      input.token.domain_id != path_domain_id
+    }
+
+    path_domain_id := domain_id if {
+      parts := split(input.request.path, "/")
+      count(parts) >= 3
+      domain_id := parts[2]
+    }
+
+  tool_access.rego: |
+    package atom.authz
+
+    import future.keywords.if
+    import future.keywords.in
+
+    deny[{"reason": "tool not permitted for this agent"}] if {
+      startswith(input.request.path, "/tools/")
+      tool_name := split(input.request.path, "/")[2]
+      not tool_name in input.agent.tools
+    }
+
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: opa
+  namespace: atom-infra
+  labels:
+    app: opa
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: opa
+  template:
+    metadata:
+      labels:
+        app: opa
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+      containers:
+        - name: opa
+          image: openpolicyagent/opa:latest
+          args:
+            - run
+            - --server
+            - --watch
+            - --log-format=json
+            - --addr=0.0.0.0:8181
+            - --ignore=..*
+            - /policies
+          ports:
+            - containerPort: 8181
+              name: http
+          volumeMounts:
+            - name: policies
+              mountPath: /policies
+              readOnly: true
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 256Mi
+          readinessProbe:
+            httpGet:
+              path: /health?plugins&bundle
+              port: 8181
+            initialDelaySeconds: 5
+            periodSeconds: 5
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8181
+            initialDelaySeconds: 10
+            periodSeconds: 10
+      volumes:
+        - name: policies
+          configMap:
+            name: opa-policies
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: opa
+  namespace: atom-infra
+spec:
+  selector:
+    app: opa
+  ports:
+    - port: 8181
+      targetPort: 8181
+      name: http

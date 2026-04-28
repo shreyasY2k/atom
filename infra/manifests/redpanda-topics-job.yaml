@@ -1,0 +1,30 @@
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: redpanda-topics-init
+  namespace: atom-infra
+spec:
+  template:
+    spec:
+      restartPolicy: OnFailure
+      containers:
+        - name: rpk
+          image: redpandadata/redpanda:latest
+          command:
+            - /bin/sh
+            - -c
+            - |
+              until rpk cluster info --brokers redpanda:9092 2>/dev/null; do
+                echo "Waiting for Redpanda..."; sleep 5
+              done
+              rpk topic create atom.audit atom.llm atom.agent.logs atom.deployments \
+                --brokers redpanda:9092 2>/dev/null || true
+              echo "Topics ready."
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              cpu: 200m
+              memory: 128Mi

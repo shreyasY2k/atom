@@ -1,0 +1,33 @@
+mode: standalone
+
+rootUser: minioadmin
+rootPassword: "changeme"
+
+resources:
+  requests:
+    cpu: 250m
+    memory: 512Mi
+  limits:
+    cpu: 1000m
+    memory: 1Gi
+
+persistence:
+  enabled: true
+  size: 10Gi
+
+buckets:
+  - name: atom-audit
+    policy: none
+    purge: false
+  - name: atom-policies
+    policy: none
+    purge: false
+
+# Expose console on port 9001
+consoleService:
+  type: ClusterIP
+  port: 9001
+
+service:
+  type: ClusterIP
+  port: 9000

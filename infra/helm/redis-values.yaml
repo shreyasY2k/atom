@@ -1,0 +1,23 @@
+architecture: standalone
+
+auth:
+  enabled: true
+  password: "changeme"
+
+master:
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      cpu: 500m
+      memory: 256Mi
+  persistence:
+    enabled: true
+    size: 2Gi
+
+replica:
+  replicaCount: 0
+
+metrics:
+  enabled: false

@@ -1,0 +1,127 @@
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: redpanda
+  namespace: atom-infra
+  labels:
+    app: redpanda
+spec:
+  clusterIP: None
+  selector:
+    app: redpanda
+  ports:
+    - name: kafka
+      port: 9092
+      targetPort: 9092
+    - name: admin
+      port: 9644
+      targetPort: 9644
+
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: redpanda
+  namespace: atom-infra
+  labels:
+    app: redpanda
+spec:
+  serviceName: redpanda
+  replicas: 1
+  selector:
+    matchLabels:
+      app: redpanda
+  template:
+    metadata:
+      labels:
+        app: redpanda
+    spec:
+      securityContext:
+        runAsNonRoot: false
+        fsGroup: 101
+      containers:
+        - name: redpanda
+          image: redpandadata/redpanda:latest-fips
+          command:
+            - /usr/bin/rpk
+            - redpanda
+            - start
+            - --smp=1
+            - --memory=512M
+            - --reserve-memory=0M
+            - --overprovisioned
+            - --kafka-addr=PLAINTEXT://0.0.0.0:9092
+            - --advertise-kafka-addr=PLAINTEXT://redpanda.atom-infra.svc.cluster.local:9092
+            - --rpc-addr=0.0.0.0:33145
+            - --advertise-rpc-addr=redpanda-0.redpanda.atom-infra.svc.cluster.local:33145
+            - --mode=dev-container
+          ports:
+            - name: kafka
+              containerPort: 9092
+            - name: admin
+              containerPort: 9644
+            - name: rpc
+              containerPort: 33145
+          resources:
+            requests:
+              cpu: 250m
+              memory: 512Mi
+            limits:
+              cpu: 1000m
+              memory: 1Gi
+          readinessProbe:
+            exec:
+              command: [/usr/bin/rpk, cluster, info, --brokers, localhost:9092]
+            initialDelaySeconds: 20
+            periodSeconds: 10
+            failureThreshold: 12
+          livenessProbe:
+            exec:
+              command: [/usr/bin/rpk, cluster, info, --brokers, localhost:9092]
+            initialDelaySeconds: 30
+            periodSeconds: 15
+            failureThreshold: 6
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/redpanda/data
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes: [ReadWriteOnce]
+        resources:
+          requests:
+            storage: 5Gi
+
+---
+# Job: create the four ATOM Kafka topics once Redpanda is ready
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: redpanda-topics-init
+  namespace: atom-infra
+spec:
+  template:
+    spec:
+      restartPolicy: OnFailure
+      containers:
+        - name: rpk
+          image: redpandadata/redpanda:latest-fips
+          command:
+            - /bin/sh
+            - -c
+            - |
+              until /usr/bin/rpk cluster info --brokers redpanda.atom-infra.svc.cluster.local:9092 2>/dev/null; do
+                echo "Waiting for Redpanda..."; sleep 5
+              done
+              /usr/bin/rpk topic create atom.audit atom.llm atom.agent.logs atom.deployments \
+                --brokers redpanda.atom-infra.svc.cluster.local:9092 2>/dev/null || true
+              echo "Topics created."
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              cpu: 200m
+              memory: 128Mi

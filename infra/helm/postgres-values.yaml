@@ -1,0 +1,49 @@
+global:
+  security:
+    allowInsecureImages: true
+
+image:
+  repository: pgvector/pgvector
+  tag: pg16
+  pullPolicy: IfNotPresent
+
+auth:
+  enablePostgresUser: true
+  postgresPassword: "changeme"
+  username: atom
+  password: "changeme"
+  database: atom
+
+volumePermissions:
+  enabled: true
+
+primary:
+  initdb:
+    scripts:
+      init.sql: |
+        CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
+        CREATE EXTENSION IF NOT EXISTS vector;
+        CREATE EXTENSION IF NOT EXISTS pg_trgm;
+  # Allow postgres to write to /var/run/postgresql (lock file, socket)
+  podSecurityContext:
+    enabled: true
+    fsGroup: 1001
+  containerSecurityContext:
+    enabled: true
+    runAsUser: 1001
+    runAsNonRoot: true
+    readOnlyRootFilesystem: false
+    allowPrivilegeEscalation: false
+  resources:
+    requests:
+      cpu: 250m
+      memory: 256Mi
+    limits:
+      cpu: 1000m
+      memory: 1Gi
+  persistence:
+    enabled: true
+    size: 10Gi
+
+metrics:
+  enabled: false
