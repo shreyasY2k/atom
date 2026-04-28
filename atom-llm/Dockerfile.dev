@@ -13,19 +13,25 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 # Install LiteLLM and ATOM runtime dependencies from PyPI.
 # confluent-kafka may fail on ARM64 wheels — fall back to kafka-python.
+# Pin LiteLLM to a version that supports the dot-format startup hook so
+# docker-compose and k8s both use the same format.
 RUN pip install --no-cache-dir \
-        "litellm[proxy]" \
+        "litellm[proxy]>=1.50.0,<2.0.0" \
         prisma \
         asyncpg \
         httpx \
         python-dotenv \
+        opentelemetry-sdk \
+        opentelemetry-exporter-otlp-proto-http \
         confluent-kafka 2>/dev/null \
     || pip install --no-cache-dir \
-        "litellm[proxy]" \
+        "litellm[proxy]>=1.50.0,<2.0.0" \
         prisma \
         asyncpg \
         httpx \
         python-dotenv \
+        opentelemetry-sdk \
+        opentelemetry-exporter-otlp-proto-http \
         kafka-python
 
 # Generate Prisma client against the installed schema.
@@ -34,11 +40,14 @@ RUN SCHEMA=$(python3 -c \
     echo "Running prisma generate on ${SCHEMA}" && \
     prisma generate --schema "${SCHEMA}"
 
-# ── ATOM extensions and entry point ──────────────────────────────────────────
+# ── ATOM extensions, config, and entry point ─────────────────────────────────
 COPY atom_extensions/ /app/atom_extensions/
 COPY main.py /app/main.py
+# Bake in the dev config so the image works standalone (k8s doesn't need a mount)
+COPY config.dev.yaml /app/config.dev.yaml
 
 ENV PYTHONPATH="/app:${PYTHONPATH}"
+ENV CONFIG_FILE_PATH="/app/config.dev.yaml"
 
 EXPOSE 4000
 

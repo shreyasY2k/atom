@@ -150,6 +150,9 @@ services:
       ATOM_LLM_URL: http://atom-llm:4000
       ATOM_STUDIO_API_URL: http://atom-studio-api:3001
       ATOM_MEMORY_URL: http://atom-memory:8000
+      # OTEL: kubectl port-forward svc/alloy 4318:4318 -n atom-system must be running.
+      # Go's otlptracehttp.WithEndpoint expects host:port (no scheme); WithInsecure() makes it HTTP.
+      OTEL_EXPORTER_OTLP_ENDPOINT: host.docker.internal:4318
     ports:
       - "8080:8080"
     volumes:
@@ -177,6 +180,10 @@ services:
       # Disable spend/budget DB checks that fail on non-x86 Prisma builds
       DISABLE_SPEND_LOGS: "True"
       STORE_MODEL_IN_DB: "False"
+      # OTEL tracing — send to local Alloy (port-forward from k8s) or docker-compose Alloy.
+      # Python OTEL expects full URL. Use host.docker.internal to reach host port-forward.
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://host.docker.internal:4318
+      OTEL_SERVICE_NAME: atom-llm
     depends_on:
       postgres:
         condition: service_healthy
@@ -243,6 +250,37 @@ services:
       - ./agentscope-studio:/app:ro
     ports:
       - "3002:3002"
+
+  # ── atom-runtime (k8s deployment controller) ─────────────────────────────────
+  # Receives approved deployment requests from atom-studio and applies k8s
+  # manifests to the kind cluster.
+  # Requires a kubeconfig that is valid from inside the container.
+  # For Docker Desktop (macOS/Windows): the kind API server is accessible via
+  # host.docker.internal — update ~/.kube/config server to use that hostname
+  # before mounting it here.
+  atom-runtime:
+    build:
+      context: atom-runtime/runtime/
+      dockerfile: Dockerfile
+    container_name: atom-runtime
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      atom-studio-api:
+        condition: service_started
+    env_file: .env
+    environment:
+      DATABASE_URL: postgresql://atom:${POSTGRES_PASSWORD:-changeme}@postgres:5432/atom
+      ATOM_STUDIO_API_URL: http://atom-studio-api:3001
+      ATOM_RUNTIME_SELF_URL: http://atom-runtime:8090
+      ATOM_GATE_CLUSTER_URL: http://host.docker.internal:8080
+    ports:
+      - "8090:8090"
+    volumes:
+      # Mount the kind kubeconfig. The server URL in the config must be
+      # reachable from inside the container (use host.docker.internal, not 127.0.0.1).
+      - ${KUBECONFIG:-~/.kube/config}:/root/.kube/config:ro
 
   # ── Grafana ──────────────────────────────────────────────────────────────────
   grafana:

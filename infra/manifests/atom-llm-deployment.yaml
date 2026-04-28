@@ -16,9 +16,7 @@ spec:
       labels:
         app: atom-llm
     spec:
-      securityContext:
-        runAsNonRoot: true
-        runAsUser: 1000
+      # atom-llm (LiteLLM) runs as root — Prisma engine binary requires it.
       containers:
         - name: atom-llm
           image: atom-llm:local
@@ -32,9 +30,19 @@ spec:
             - name: KAFKA_BROKERS
               value: redpanda.atom-infra.svc.cluster.local:9092
             - name: STORE_MODEL_IN_DB
-              value: "true"
+              value: "False"
+            - name: DISABLE_SPEND_LOGS
+              value: "True"
+            # Colon format required by LiteLLM >= 1.50 for startup hooks.
+            # Registers KafkaAuditLogger + OTELLogger when env vars are set.
             - name: LITELLM_WORKER_STARTUP_HOOKS
-              value: atom_extensions.startup_hook.register_callbacks
+              value: atom_extensions.startup_hook:register_callbacks
+            - name: OTEL_EXPORTER_OTLP_ENDPOINT
+              value: http://alloy.atom-system.svc.cluster.local:4318
+            - name: OTEL_SERVICE_NAME
+              value: atom-llm
+            # CONFIG_FILE_PATH is baked into the image (/app/config.dev.yaml)
+            # — override here only if a custom config ConfigMap is mounted.
           envFrom:
             - secretRef:
                 name: atom-credentials

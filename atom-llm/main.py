@@ -35,6 +35,13 @@ if os.environ.get("KAFKA_BROKERS"):
 
     litellm.callbacks.append(KafkaAuditLogger())
 
+# Register OTEL tracing callback if OTEL_EXPORTER_OTLP_ENDPOINT is configured.
+if os.environ.get("OTEL_EXPORTER_OTLP_ENDPOINT"):
+    import litellm  # noqa: F811 — safe reimport
+    from atom_extensions.otel import OTELLogger
+
+    litellm.callbacks.append(OTELLogger())
+
 if __name__ == "__main__":
     import uvicorn
 

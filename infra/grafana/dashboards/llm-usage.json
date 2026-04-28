@@ -1,0 +1,107 @@
+{
+  "id": null,
+  "uid": "atom-llm-usage",
+  "title": "LLM Usage",
+  "description": "Token consumption and latency per model and per agent",
+  "tags": ["atom", "llm", "tokens"],
+  "timezone": "browser",
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "30s",
+  "time": { "from": "now-1h", "to": "now" },
+  "panels": [
+    {
+      "id": 1,
+      "title": "LLM Call Rate by Model",
+      "type": "timeseries",
+      "description": "Calls per second to each LLM model",
+      "gridPos": { "x": 0, "y": 0, "w": 12, "h": 8 },
+      "datasource": { "type": "tempo", "uid": "tempo" },
+      "targets": [
+        {
+          "datasource": { "type": "tempo", "uid": "tempo" },
+          "queryType": "traceql",
+          "query": "{ resource.service.name=\"atom-llm\" } | rate() by (span.llm.model)",
+          "refId": "A",
+          "legendFormat": "{{span.llm.model}}"
+        }
+      ]
+    },
+    {
+      "id": 2,
+      "title": "LLM Call Latency by Model",
+      "type": "timeseries",
+      "description": "p95 latency per model (milliseconds)",
+      "gridPos": { "x": 12, "y": 0, "w": 12, "h": 8 },
+      "datasource": { "type": "tempo", "uid": "tempo" },
+      "targets": [
+        {
+          "datasource": { "type": "tempo", "uid": "tempo" },
+          "queryType": "traceql",
+          "query": "{ resource.service.name=\"atom-llm\" } | quantile_over_time(duration, 0.95) by (span.llm.model)",
+          "refId": "A",
+          "legendFormat": "p95 {{span.llm.model}}"
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "title": "Success vs Failure Rate",
+      "type": "timeseries",
+      "description": "Successful and failed LLM calls per second",
+      "gridPos": { "x": 0, "y": 8, "w": 12, "h": 8 },
+      "datasource": { "type": "tempo", "uid": "tempo" },
+      "targets": [
+        {
+          "datasource": { "type": "tempo", "uid": "tempo" },
+          "queryType": "traceql",
+          "query": "{ resource.service.name=\"atom-llm\" && span.llm.success=true } | rate()",
+          "refId": "success",
+          "legendFormat": "success"
+        },
+        {
+          "datasource": { "type": "tempo", "uid": "tempo" },
+          "queryType": "traceql",
+          "query": "{ resource.service.name=\"atom-llm\" && span.llm.success=false } | rate()",
+          "refId": "failure",
+          "legendFormat": "failure"
+        }
+      ]
+    },
+    {
+      "id": 4,
+      "title": "Top Callers by Request Count",
+      "type": "table",
+      "description": "Agent IDs ranked by number of LLM calls",
+      "gridPos": { "x": 12, "y": 8, "w": 12, "h": 8 },
+      "datasource": { "type": "tempo", "uid": "tempo" },
+      "targets": [
+        {
+          "datasource": { "type": "tempo", "uid": "tempo" },
+          "queryType": "traceql",
+          "query": "{ resource.service.name=\"atom-llm\" } | count() by (span.llm.agent_id, span.llm.model)",
+          "refId": "A",
+          "tableType": "spans"
+        }
+      ]
+    },
+    {
+      "id": 5,
+      "title": "Recent LLM Traces",
+      "type": "traces",
+      "description": "Latest LLM calls with token counts and latency",
+      "gridPos": { "x": 0, "y": 16, "w": 24, "h": 12 },
+      "datasource": { "type": "tempo", "uid": "tempo" },
+      "targets": [
+        {
+          "datasource": { "type": "tempo", "uid": "tempo" },
+          "queryType": "traceql",
+          "query": "{ resource.service.name=\"atom-llm\" }",
+          "refId": "A",
+          "tableType": "spans",
+          "limit": 50
+        }
+      ]
+    }
+  ]
+}

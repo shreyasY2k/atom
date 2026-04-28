@@ -22,13 +22,26 @@ Usage in agent code:
         generate_kwargs={"temperature": 0.7},
     )
     agent = ReActAgent(name="myagent", model=model, ...)
+
+With memory (inject relevant context before every LLM call):
+    from atom_memory import MemoryManager  # installed in atom-sdk env
+
+    model = AtomChatModel(
+        model_name="gpt-4o",
+        memory_manager=mem,  # optional MemoryManager
+    )
 """
 
 import os
-from typing import Any
+from typing import Any, TYPE_CHECKING
 
 from ._openai_model import OpenAIChatModel
 from ..types import JSONSerializableObject
+
+if TYPE_CHECKING:
+    # Avoid hard runtime dependency on atom-memory in atom-sdk;
+    # MemoryManager is duck-typed at runtime.
+    from atom_memory import MemoryManager  # type: ignore[import]
 
 
 def _gate_base_url() -> str:
@@ -50,6 +63,51 @@ def _agent_jwt() -> str:
     return jwt
 
 
+async def _inject_memories(
+    messages: list[dict],
+    memory_manager: "MemoryManager",
+    top_k: int = 5,
+) -> list[dict]:
+    """
+    Recall relevant memories and prepend them to the system prompt.
+
+    Uses the last user message as the recall query. If no memories are
+    found the messages list is returned unchanged.
+    """
+    user_msgs = [m for m in messages if m.get("role") == "user"]
+    if not user_msgs:
+        return messages
+
+    query = user_msgs[-1].get("content") or ""
+    if not query:
+        return messages
+
+    try:
+        memories = await memory_manager.recall(query, top_k=top_k)
+    except Exception:
+        return messages  # memory failure must never block an LLM call
+
+    if not memories:
+        return messages
+
+    memory_lines = "\n".join(f"- {m['content']}" for m in memories)
+    memories_block = f"Relevant memories:\n{memory_lines}"
+
+    messages = list(messages)  # shallow copy — don't mutate caller's list
+    sys_idx = next(
+        (i for i, m in enumerate(messages) if m.get("role") == "system"),
+        None,
+    )
+    if sys_idx is not None:
+        sys_msg = dict(messages[sys_idx])
+        sys_msg["content"] = f"{sys_msg.get('content', '')}\n\n{memories_block}"
+        messages[sys_idx] = sys_msg
+    else:
+        messages.insert(0, {"role": "system", "content": memories_block})
+
+    return messages
+
+
 class AtomChatModel(OpenAIChatModel):
     """
     Chat model that routes all LLM calls through GATE → atom-llm.
@@ -57,6 +115,9 @@ class AtomChatModel(OpenAIChatModel):
     This is the only chat model available in atom-sdk. The base_url
     and api_key are always read from ATOM env vars; they cannot be
     supplied via constructor or config — no agent can bypass GATE.
+
+    Pass a MemoryManager to automatically inject recalled memories into
+    the system prompt before every LLM call.
     """
 
     def __init__(
@@ -64,6 +125,7 @@ class AtomChatModel(OpenAIChatModel):
         model_name: str,
         stream: bool = False,
         generate_kwargs: dict[str, JSONSerializableObject] | None = None,
+        memory_manager: "MemoryManager | None" = None,
         **_ignored: Any,  # silently ignore api_key / base_url / client_kwargs
     ) -> None:
         """Initialize AtomChatModel.
@@ -77,6 +139,10 @@ class AtomChatModel(OpenAIChatModel):
             generate_kwargs (`dict | None`, optional):
                 Extra keyword arguments passed to the LiteLLM completion call,
                 e.g. ``{"temperature": 0.7}``.
+            memory_manager (`MemoryManager | None`, optional):
+                When provided, the top-5 most relevant memories are recalled
+                and injected into the system prompt before every LLM call.
+                Recall failures are silently ignored so they never block calls.
         """
         super().__init__(
             model_name=model_name,
@@ -85,3 +151,13 @@ class AtomChatModel(OpenAIChatModel):
             client_kwargs={"base_url": _gate_base_url()},
             generate_kwargs=generate_kwargs or {},
         )
+        self.memory_manager = memory_manager
+
+    async def __call__(
+        self,
+        messages: list[dict],
+        **kwargs: Any,
+    ) -> Any:
+        if self.memory_manager is not None:
+            messages = await _inject_memories(messages, self.memory_manager)
+        return await super().__call__(messages=messages, **kwargs)

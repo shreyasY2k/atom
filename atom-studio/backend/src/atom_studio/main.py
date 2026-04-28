@@ -4,6 +4,9 @@ Run locally:
   uvicorn atom_studio.main:app --reload --port 3001
 """
 
+import asyncio
+import logging
+import os
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
@@ -14,18 +17,59 @@ from .agents.router import router as agents_router
 from .auth.router import router as auth_router
 from .auth.users_router import router as users_router
 from .database import init_pool
+from .deployments.router import router as deployments_router
+from .deployments.router import runtime_router
 from .domains.router import router as domains_router
+from .hitl.router import router as hitl_router
+from .hitl.service import expire_stale_hitl
 from .skills.router import router as skills_router
 from .tools.router import router as tools_router
+from .ws.router import ws_router
+
+logger = logging.getLogger(__name__)
+
+
+def _setup_otel(app: FastAPI) -> None:
+    """Wire OTEL tracing if OTEL_EXPORTER_OTLP_ENDPOINT is set (lazy imports)."""
+    endpoint = os.environ.get("OTEL_EXPORTER_OTLP_ENDPOINT", "").rstrip("/")
+    if not endpoint:
+        return
+    try:
+        from opentelemetry import trace  # noqa: PLC0415
+        from opentelemetry.exporter.otlp.proto.http.trace_exporter import (  # noqa: PLC0415
+            OTLPSpanExporter,
+        )
+        from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor  # noqa: PLC0415
+        from opentelemetry.sdk.resources import Resource  # noqa: PLC0415
+        from opentelemetry.sdk.trace import TracerProvider  # noqa: PLC0415
+        from opentelemetry.sdk.trace.export import BatchSpanProcessor  # noqa: PLC0415
+        from opentelemetry.semconv.resource import ResourceAttributes  # noqa: PLC0415
+
+        service_name = os.environ.get("OTEL_SERVICE_NAME", "atom-studio")
+        resource = Resource.create({ResourceAttributes.SERVICE_NAME: service_name})
+        provider = TracerProvider(resource=resource)
+        exporter = OTLPSpanExporter(endpoint=f"{endpoint}/v1/traces")
+        provider.add_span_processor(BatchSpanProcessor(exporter))
+        trace.set_tracer_provider(provider)
+        FastAPIInstrumentor.instrument_app(app)
+        logger.info("OTEL tracing enabled → %s (service=%s)", endpoint, service_name)
+    except ImportError:
+        logger.warning("opentelemetry packages not installed — OTEL tracing disabled")
+    except Exception as exc:
+        logger.warning("OTEL setup failed (%s) — tracing disabled", exc)
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     await init_pool()
+    task = asyncio.create_task(expire_stale_hitl())
     yield
+    task.cancel()
 
 
 app = FastAPI(title="ATOM Studio API", version="0.1.0", lifespan=lifespan)
+
+_setup_otel(app)
 
 app.add_middleware(
     CORSMiddleware,
@@ -42,6 +86,10 @@ app.include_router(agents_global_router, prefix="/api/agents", tags=["agents"])
 app.include_router(agents_router, prefix="/api/domains/{domain_id}/agents", tags=["agents"])
 app.include_router(tools_router, prefix="/api/tools", tags=["tools"])
 app.include_router(skills_router, prefix="/api/skills", tags=["skills"])
+app.include_router(hitl_router, prefix="/api/hitl", tags=["hitl"])
+app.include_router(deployments_router, prefix="/api/deployments", tags=["deployments"])
+app.include_router(runtime_router, prefix="/api/runtime", tags=["runtime"])
+app.include_router(ws_router, prefix="/ws")
 
 
 @app.get("/healthz")

@@ -1,0 +1,32 @@
+---
+# grafana-dashboards-configmap.yaml — SESSION-13
+#
+# The Grafana Helm chart sidecar watches for ConfigMaps with label
+# grafana_dashboard=1 in the atom-system namespace and auto-imports
+# every .json key as a dashboard.
+#
+# Apply before Helm install:
+#   kubectl apply -f infra/manifests/grafana-dashboards-configmap.yaml
+#
+# The four keys below correspond to the four dashboard files created in
+# infra/grafana/dashboards/.
+
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: atom-grafana-dashboards
+  namespace: atom-system
+  labels:
+    grafana_dashboard: "1"
+data:
+  gate-overview.json: |
+    # Populated at deploy time by the install script below.
+    # Run:  make dashboards-configmap
+    # Or:   kubectl create configmap atom-grafana-dashboards \
+    #         --from-file=gate-overview.json=infra/grafana/dashboards/gate-overview.json \
+    #         --from-file=agent-activity.json=infra/grafana/dashboards/agent-activity.json \
+    #         --from-file=llm-usage.json=infra/grafana/dashboards/llm-usage.json \
+    #         --from-file=audit-chain.json=infra/grafana/dashboards/audit-chain.json \
+    #         --namespace atom-system \
+    #         --dry-run=client -o yaml | kubectl apply -f -
+    {}

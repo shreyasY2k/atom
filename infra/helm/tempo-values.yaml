@@ -1,0 +1,83 @@
+# infra/helm/tempo-values.yaml — Grafana Tempo (SESSION-13)
+# Single-binary mode; local PVC storage for dev.
+# Enables the metrics-generator to produce RED metrics (rate/error/duration)
+# from spans so Grafana can render latency histograms.
+#
+# Deploy:
+#   helm upgrade --install tempo grafana/tempo \
+#     --namespace atom-system --create-namespace \
+#     -f infra/helm/tempo-values.yaml --wait
+
+tempo:
+  # ── Storage ────────────────────────────────────────────────────────────────
+  storage:
+    trace:
+      backend: local
+      local:
+        path: /var/tempo/traces
+      wal:
+        path: /var/tempo/wal
+
+  # ── Receivers ──────────────────────────────────────────────────────────────
+  # Accept OTLP from Alloy.
+  receivers:
+    otlp:
+      protocols:
+        grpc:
+          endpoint: "0.0.0.0:4317"
+        http:
+          endpoint: "0.0.0.0:4318"
+
+  # ── Metrics generator ──────────────────────────────────────────────────────
+  # Disabled in dev — enable and point remoteWriteUrl at Prometheus if needed.
+  metricsGenerator:
+    enabled: false
+
+  # ── Compaction / retention ─────────────────────────────────────────────────
+  compactor:
+    compaction:
+      block_retention: 336h   # 14 days
+
+  # ── Server ─────────────────────────────────────────────────────────────────
+  server:
+    grpc_listen_port: 9095
+
+# ── Persistence ───────────────────────────────────────────────────────────────
+persistence:
+  enabled: true
+  size: 5Gi
+  storageClassName: standard
+
+serviceAccount:
+  create: true
+
+service:
+  type: ClusterIP
+
+# ── Health probes ─────────────────────────────────────────────────────────────
+# Tempo's HTTP server listens on 3100; patch the chart's default probe (3200).
+livenessProbe:
+  httpGet:
+    path: /ready
+    port: 3100
+  initialDelaySeconds: 30
+  timeoutSeconds: 5
+  periodSeconds: 10
+  failureThreshold: 3
+
+readinessProbe:
+  httpGet:
+    path: /ready
+    port: 3100
+  initialDelaySeconds: 20
+  timeoutSeconds: 5
+  periodSeconds: 10
+  failureThreshold: 3
+
+resources:
+  requests:
+    cpu: 100m
+    memory: 256Mi
+  limits:
+    cpu: 500m
+    memory: 512Mi

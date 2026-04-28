@@ -15,6 +15,14 @@ import {
   DialogTitle,
   DialogDescription,
 } from '@/components/ui/dialog'
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from '@/components/ui/table'
 import { TokenRevealModal } from '@/components/app/TokenRevealModal'
 
 interface AgentDetailProps {
@@ -23,6 +31,25 @@ interface AgentDetailProps {
 }
 
 type AgentStatus = 'draft' | 'pending_approval' | 'deployed' | 'suspended'
+type DeploymentStatus = 'pending' | 'approved' | 'rejected' | 'deployed' | 'failed' | 'rolled_back'
+
+interface Deployment {
+  id: string
+  version: number
+  status: DeploymentStatus
+  manifest_json: { image?: string; git_sha?: string; message?: string } | null
+  deployed_at: string | null
+  created_at: string
+}
+
+const DEPLOY_VARIANT: Record<DeploymentStatus, 'default' | 'secondary' | 'outline' | 'destructive'> = {
+  pending: 'secondary',
+  approved: 'outline',
+  rejected: 'destructive',
+  deployed: 'default',
+  failed: 'destructive',
+  rolled_back: 'secondary',
+}
 
 interface Agent {
   id: string
@@ -59,6 +86,12 @@ export function AgentDetail({ domainId, agentId }: AgentDetailProps) {
   const { data: agent, isLoading } = useQuery<Agent>({
     queryKey: ['agent', domainId, agentId],
     queryFn: async () => (await api.get(`/api/domains/${domainId}/agents/${agentId}`)).data,
+  })
+
+  const { data: deployments = [] } = useQuery<Deployment[]>({
+    queryKey: ['deployments', agentId],
+    queryFn: async () => (await api.get(`/api/deployments/${agentId}`)).data,
+    enabled: !!agentId,
   })
 
   const deleteMutation = useMutation({
@@ -186,6 +219,48 @@ export function AgentDetail({ domainId, agentId }: AgentDetailProps) {
             <p>Updated: {format(new Date(agent.updated_at), 'MMM d, yyyy HH:mm')}</p>
           </CardContent>
         </Card>
+
+        {deployments.length > 0 && (
+          <Card>
+            <CardHeader className="pb-2">
+              <CardTitle className="text-sm font-medium text-muted-foreground">
+                Deployment History
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="p-0">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead className="w-12">#</TableHead>
+                    <TableHead>Image</TableHead>
+                    <TableHead>Status</TableHead>
+                    <TableHead>Deployed at</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {deployments.map(d => (
+                    <TableRow key={d.id}>
+                      <TableCell className="font-mono text-xs">{d.version}</TableCell>
+                      <TableCell className="font-mono text-xs truncate max-w-xs">
+                        {d.manifest_json?.image ?? '—'}
+                      </TableCell>
+                      <TableCell>
+                        <Badge variant={DEPLOY_VARIANT[d.status]} className="capitalize">
+                          {d.status.replace('_', ' ')}
+                        </Badge>
+                      </TableCell>
+                      <TableCell className="text-sm text-muted-foreground">
+                        {d.deployed_at
+                          ? format(new Date(d.deployed_at), 'MMM d, yyyy HH:mm')
+                          : '—'}
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </CardContent>
+          </Card>
+        )}
       </div>
 
       {/* Actions */}

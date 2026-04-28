@@ -1,30 +1,31 @@
 ---
+# atom-studio-deployment.yaml
+# FastAPI backend (atom-studio-api) with OTEL instrumentation added in SESSION-13.
+# Frontend is served via nginx in the atom-studio-ui container.
+
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: gate
+  name: atom-studio-api
   namespace: atom-system
   labels:
-    app: gate
+    app: atom-studio-api
 spec:
-  replicas: 3
+  replicas: 1
   selector:
     matchLabels:
-      app: gate
+      app: atom-studio-api
   template:
     metadata:
       labels:
-        app: gate
+        app: atom-studio-api
     spec:
-      securityContext:
-        runAsNonRoot: true
-        runAsUser: 65532
       containers:
-        - name: gate
-          image: atom-gate:local
+        - name: atom-studio-api
+          image: atom-studio-api:local
           imagePullPolicy: IfNotPresent
           ports:
-            - containerPort: 8080
+            - containerPort: 3001
               name: http
           envFrom:
             - secretRef:
@@ -34,68 +35,53 @@ spec:
               value: postgresql://atom:changeme@postgres.atom-infra.svc.cluster.local:5432/atom?sslmode=disable
             - name: REDIS_URL
               value: redis://:changeme@redis-master.atom-infra.svc.cluster.local:6379
-            - name: OPA_BUNDLE_PATH
-              value: /policies
-            - name: KAFKA_BROKERS
-              value: redpanda.atom-infra.svc.cluster.local:9092
-            # JWT key paths — override relative paths in atom-credentials secret.
-            - name: JWT_PUBLIC_KEY_PATH
-              value: /etc/atom/jwt_public.pem
+            - name: ATOM_LLM_URL
+              value: http://atom-llm.atom-system.svc.cluster.local:4000
+            - name: ATOM_RUNTIME_URL
+              value: http://atom-runtime.atom-system.svc.cluster.local:8090
             - name: JWT_PRIVATE_KEY_PATH
               value: /etc/atom/jwt_private.pem
-            # Go otlptracehttp expects host:port (no scheme) when WithInsecure() is set.
+            - name: JWT_PUBLIC_KEY_PATH
+              value: /etc/atom/jwt_public.pem
+            # Python OTEL exporter expects a full URL
             - name: OTEL_EXPORTER_OTLP_ENDPOINT
-              value: alloy.atom-system.svc.cluster.local:4318
+              value: http://alloy.atom-system.svc.cluster.local:4318
             - name: OTEL_SERVICE_NAME
-              value: gate
+              value: atom-studio
           volumeMounts:
             - name: jwt-keys
               mountPath: /etc/atom
               readOnly: true
-            - name: policies
-              mountPath: /policies
-              readOnly: true
           resources:
             requests:
               cpu: 100m
-              memory: 64Mi
+              memory: 128Mi
             limits:
               cpu: 500m
-              memory: 256Mi
+              memory: 512Mi
           readinessProbe:
             httpGet:
-              path: /readyz
-              port: 8080
-            initialDelaySeconds: 5
-            periodSeconds: 5
-            failureThreshold: 3
-          livenessProbe:
-            httpGet:
               path: /healthz
-              port: 8080
+              port: 3001
             initialDelaySeconds: 10
             periodSeconds: 10
-            failureThreshold: 3
       volumes:
         - name: jwt-keys
           secret:
             secretName: atom-jwt-keys
-        - name: policies
-          configMap:
-            name: opa-policies
 
 ---
 apiVersion: v1
 kind: Service
 metadata:
-  name: gate
+  name: atom-studio-api
   namespace: atom-system
   labels:
-    app: gate
+    app: atom-studio-api
 spec:
   selector:
-    app: gate
+    app: atom-studio-api
   ports:
-    - port: 8080
-      targetPort: 8080
+    - port: 3001
+      targetPort: 3001
       name: http

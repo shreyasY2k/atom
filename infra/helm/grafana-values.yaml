@@ -1,0 +1,89 @@
+# infra/helm/grafana-values.yaml — Grafana (SESSION-13)
+# Provisions Tempo + Prometheus datasources and loads ATOM dashboards
+# from a ConfigMap (infra/manifests/grafana-dashboards-configmap.yaml).
+#
+# Deploy:
+#   kubectl apply -f infra/manifests/grafana-dashboards-configmap.yaml
+#   helm upgrade --install grafana grafana/grafana \
+#     --namespace atom-system --create-namespace \
+#     -f infra/helm/grafana-values.yaml --wait
+#
+# Access locally:
+#   kubectl port-forward -n atom-system svc/grafana 3001:3000
+#   open http://localhost:3001  (admin / atom-grafana-dev)
+
+adminUser: admin
+adminPassword: "atom-grafana-dev"
+
+grafana.ini:
+  server:
+    root_url: "%(protocol)s://%(domain)s:%(http_port)s/"
+  auth.anonymous:
+    enabled: false
+
+# ── Datasources ───────────────────────────────────────────────────────────────
+datasources:
+  datasources.yaml:
+    apiVersion: 1
+    datasources:
+      - name: Tempo
+        type: tempo
+        access: proxy
+        url: http://tempo.atom-system.svc.cluster.local:3100
+        uid: tempo
+        isDefault: false
+        editable: true
+        jsonData:
+          tracesToLogsV2:
+            datasourceUid: ""
+          serviceMap:
+            datasourceUid: prometheus
+          search:
+            hide: false
+          nodeGraph:
+            enabled: true
+
+      - name: Prometheus
+        type: prometheus
+        access: proxy
+        url: http://prometheus-community-kube-prometheus.atom-system.svc.cluster.local:9090
+        uid: prometheus
+        isDefault: true
+        editable: true
+
+# ── Dashboard provisioning ────────────────────────────────────────────────────
+# Sidecar watches for ConfigMaps labelled grafana_dashboard=1 in atom-system
+# and auto-imports them into the "ATOM" folder.
+sidecar:
+  dashboards:
+    enabled: true
+    label: grafana_dashboard
+    labelValue: "1"
+    folder: /var/lib/grafana/dashboards/atom
+    searchNamespace: atom-system
+    watchMethod: WATCH
+
+  datasources:
+    enabled: false
+
+# ── Service ───────────────────────────────────────────────────────────────────
+service:
+  type: ClusterIP
+  port: 3000
+
+# ── Storage ───────────────────────────────────────────────────────────────────
+persistence:
+  enabled: false    # emptyDir for dev; enable + storageClass for prod
+
+# ── Resources ─────────────────────────────────────────────────────────────────
+resources:
+  requests:
+    cpu: 100m
+    memory: 128Mi
+  limits:
+    cpu: 500m
+    memory: 512Mi
+
+# ── Ingress ───────────────────────────────────────────────────────────────────
+ingress:
+  enabled: false    # use kubectl port-forward for local dev

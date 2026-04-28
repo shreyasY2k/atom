@@ -4,11 +4,12 @@ import { cn } from '@/lib/utils'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { useAuthStore } from '@/lib/auth'
+import { usePendingCount } from '@/lib/hitlStore'
 
 const navItems = [
   { label: 'Domains', href: '/domains', icon: Globe, enabled: true },
   { label: 'Agents', href: '/agents', icon: Bot, enabled: true },
-  { label: 'HITL Queue', href: '/hitl', icon: UserCheck, enabled: false },
+  { label: 'HITL Queue', href: '/hitl', icon: UserCheck, enabled: true },
   { label: 'Audit Log', href: '/audit', icon: BookOpen, enabled: false },
 ]
 
@@ -16,6 +17,7 @@ export function Layout({ children }: { children: React.ReactNode }) {
   const { user, logout } = useAuthStore()
   const router = useRouterState()
   const currentPath = router.location.pathname
+  const pendingCount = usePendingCount()
 
   return (
     <div className="flex h-screen bg-background">
@@ -28,6 +30,7 @@ export function Layout({ children }: { children: React.ReactNode }) {
           {navItems.map(item => {
             const Icon = item.icon
             const active = currentPath.startsWith(item.href)
+            const isHitl = item.href === '/hitl'
             return (
               <div key={item.href}>
                 {item.enabled ? (
@@ -42,6 +45,11 @@ export function Layout({ children }: { children: React.ReactNode }) {
                   >
                     <Icon className="h-4 w-4" />
                     {item.label}
+                    {isHitl && pendingCount > 0 && (
+                      <Badge className="ml-auto h-5 min-w-5 flex items-center justify-center p-0 text-xs">
+                        {pendingCount}
+                      </Badge>
+                    )}
                   </Link>
                 ) : (
                   <span className="flex items-center gap-2 rounded-md px-3 py-2 text-sm font-medium text-muted-foreground/40 cursor-not-allowed select-none">

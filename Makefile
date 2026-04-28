@@ -85,20 +85,118 @@ infra-down: ## Tear down kind cluster
 	@echo "✓ Cluster deleted."
 
 # ── Local dev (docker-compose) ────────────────────────────────────────────────
-dev-up: ## Start all services locally via docker-compose (no k8s needed)
+dev-up: ## Start all services locally via docker-compose (single command)
 	@docker compose -f docker-compose.dev.yml up -d
 	@echo "✓ Dev stack up."
-	@echo "  studio:  http://localhost:3000"
+	@echo "  studio:  http://localhost:3000 (nginx)"
+	@echo "  studio:  http://localhost:5173 (vite dev — cd atom-studio/frontend && npm run dev)"
 	@echo "  gate:    http://localhost:8080"
+	@echo "  llm:     http://localhost:4000"
 	@echo "  minio:   http://localhost:9001"
-	@echo "  grafana: http://localhost:3001"
+	@echo ""
+	@echo "Monitoring stack (Grafana/Tempo/Alloy) is in Kubernetes."
+	@echo "Run 'make monitoring-up' to deploy + port-forward."
 
 dev-down: ## Stop docker-compose dev stack
-	@docker compose -f docker-compose.dev.yml down -v
+	@docker compose -f docker-compose.dev.yml down
 	@echo "✓ Dev stack down."
+
+dev-down-clean: ## Stop docker-compose and remove volumes
+	@docker compose -f docker-compose.dev.yml down -v
+	@echo "✓ Dev stack down (volumes removed)."
 
 dev-logs: ## Tail logs from all dev services
 	@docker compose -f docker-compose.dev.yml logs -f
+
+# ── Monitoring stack (Grafana + Tempo + Alloy on k8s) ────────────────────────
+monitoring-up: ## Deploy Grafana + Tempo + Alloy to atom-system namespace and port-forward
+	@echo "→ Creating dashboard ConfigMap..."
+	@kubectl create configmap atom-grafana-dashboards \
+	  --from-file=gate-overview.json=infra/grafana/dashboards/gate-overview.json \
+	  --from-file=agent-activity.json=infra/grafana/dashboards/agent-activity.json \
+	  --from-file=llm-usage.json=infra/grafana/dashboards/llm-usage.json \
+	  --from-file=audit-chain.json=infra/grafana/dashboards/audit-chain.json \
+	  --namespace atom-system \
+	  --dry-run=client -o yaml | kubectl apply -f -
+	@kubectl label configmap atom-grafana-dashboards grafana_dashboard=1 \
+	  -n atom-system --overwrite
+	@echo "→ Deploying Tempo..."
+	@helm upgrade --install tempo grafana/tempo \
+	  --namespace atom-system --create-namespace \
+	  -f infra/helm/tempo-values.yaml
+	@echo "→ Patching Tempo probes to port 3200..."
+	@kubectl patch statefulset tempo -n atom-system --type=json \
+	  -p='[{"op":"replace","path":"/spec/template/spec/containers/0/livenessProbe/httpGet/port","value":3200},{"op":"replace","path":"/spec/template/spec/containers/0/readinessProbe/httpGet/port","value":3200}]' 2>/dev/null || true
+	@echo "→ Deploying Alloy..."
+	@helm upgrade --install alloy grafana/alloy \
+	  --namespace atom-system --create-namespace \
+	  -f infra/helm/alloy-values.yaml
+	@echo "→ Patching Alloy service OTLP ports..."
+	@kubectl patch svc alloy -n atom-system --type=json -p='[
+	  {"op":"add","path":"/spec/ports/-","value":{"name":"otlp-grpc","port":4317,"targetPort":4317,"protocol":"TCP"}},
+	  {"op":"add","path":"/spec/ports/-","value":{"name":"otlp-http","port":4318,"targetPort":4318,"protocol":"TCP"}}]' 2>/dev/null || true
+	@echo "→ Deploying Grafana..."
+	@helm upgrade --install grafana grafana/grafana \
+	  --namespace atom-system --create-namespace \
+	  -f infra/helm/grafana-values.yaml
+	@echo ""
+	@echo "✓ Monitoring stack deployed."
+	@echo ""
+	@echo "Start port-forwards (run in a separate terminal):"
+	@echo "  kubectl port-forward -n atom-system svc/alloy 4318:4318   # OTLP endpoint"
+	@echo "  kubectl port-forward -n atom-system svc/grafana 3001:3000 # Grafana UI"
+	@echo ""
+	@echo "  Grafana: http://localhost:3001 (admin / atom-grafana-dev)"
+
+monitoring-down: ## Remove Grafana + Tempo + Alloy from k8s
+	@helm uninstall grafana tempo alloy -n atom-system 2>/dev/null || true
+	@kubectl delete configmap atom-grafana-dashboards -n atom-system 2>/dev/null || true
+	@echo "✓ Monitoring stack removed."
+
+# ── Kubernetes application deploy ─────────────────────────────────────────────
+k8s-deploy: ## Build images and deploy GATE + atom-llm + atom-studio to k8s
+	@echo "→ Building Docker images..."
+	@docker rmi atom-gate:local atom-llm:local atom-studio-api:local atom-studio-ui:local 2>/dev/null || true
+	@docker build -t atom-gate:local gate/ -f gate/Dockerfile
+	@docker build -t atom-llm:local atom-llm/ -f atom-llm/Dockerfile.dev
+	@docker build -t atom-studio-api:local atom-studio/backend/
+	@docker build -t atom-studio-ui:local atom-studio/frontend/
+	@echo "→ Creating secrets and ConfigMaps..."
+	@kubectl create secret generic atom-jwt-keys \
+	  --from-file=jwt_private.pem=.keys/jwt_private.pem \
+	  --from-file=jwt_public.pem=.keys/jwt_public.pem \
+	  --namespace atom-system --dry-run=client -o yaml | kubectl apply -f -
+	@kubectl create configmap opa-policies \
+	    --from-file=policies/base/ --namespace atom-system \
+	    --dry-run=client -o yaml | kubectl apply -f -
+	@echo "→ Applying manifests..."
+	@kubectl apply -f infra/manifests/gate-deployment.yaml
+	@kubectl apply -f infra/manifests/atom-llm-deployment.yaml
+	@kubectl apply -f infra/manifests/atom-studio-deployment.yaml
+	@kubectl apply -f infra/manifests/atom-studio-ui-deployment.yaml
+	@echo "→ Running LiteLLM Prisma migrations..."
+	@kubectl port-forward -n atom-infra svc/postgres 5433:5432 &
+	@sleep 3
+	@SCHEMA=$$(docker run --rm atom-llm:local python3 -c \
+	    "import litellm, os; print(os.path.join(os.path.dirname(litellm.__file__), 'proxy', 'schema.prisma'))") && \
+	  DATABASE_URL="postgresql://atom:changeme@host.docker.internal:5433/atom" \
+	  docker run --rm -e DATABASE_URL="postgresql://atom:changeme@host.docker.internal:5433/atom" \
+	  --add-host host.docker.internal:host-gateway \
+	  atom-llm:local prisma db push --schema $$SCHEMA --skip-generate --accept-data-loss 2>/dev/null || true
+	@pkill -f "port-forward.*5433" 2>/dev/null || true
+	@echo "→ Forcing fresh image pull (delete existing pods)..."
+	@kubectl delete pods -n atom-system -l app=gate 2>/dev/null || true
+	@kubectl delete pods -n atom-system -l app=atom-llm 2>/dev/null || true
+	@kubectl delete pods -n atom-system -l app=atom-studio-api 2>/dev/null || true
+	@kubectl delete pods -n atom-system -l app=atom-studio-ui 2>/dev/null || true
+	@echo "→ Waiting for rollouts..."
+	@kubectl rollout status deployment/gate -n atom-system --timeout=120s
+	@kubectl rollout status deployment/atom-llm -n atom-system --timeout=180s
+	@kubectl rollout status deployment/atom-studio-api -n atom-system --timeout=120s
+	@kubectl rollout status deployment/atom-studio-ui -n atom-system --timeout=120s
+	@echo ""
+	@echo "✓ k8s deploy complete."
+	@kubectl get pods -n atom-system
 
 # ── Migrations ────────────────────────────────────────────────────────────────
 migrate-up: ## Apply all database migrations (port-forward postgres first)

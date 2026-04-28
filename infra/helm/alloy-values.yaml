@@ -1,0 +1,80 @@
+# infra/helm/alloy-values.yaml — Grafana Alloy (SESSION-13)
+# Receives OTLP traces from GATE, atom-llm, and atom-studio;
+# forwards to Tempo in the same namespace.
+#
+# Deploy:
+#   helm upgrade --install alloy grafana/alloy \
+#     --namespace atom-system --create-namespace \
+#     -f infra/helm/alloy-values.yaml --wait
+
+alloy:
+  configMap:
+    content: |-
+      // ── OTLP receivers ────────────────────────────────────────────────────────
+      // Accept traces (and optionally metrics/logs) from all ATOM services.
+
+      otelcol.receiver.otlp "default" {
+        grpc {
+          endpoint = "0.0.0.0:4317"
+        }
+        http {
+          endpoint = "0.0.0.0:4318"
+        }
+        output {
+          traces = [otelcol.processor.batch.default.input]
+        }
+      }
+
+      // ── Batch processor ───────────────────────────────────────────────────────
+      // Buffer spans before exporting to reduce network overhead.
+
+      otelcol.processor.batch "default" {
+        timeout        = "5s"
+        send_batch_size = 1024
+        output {
+          traces = [otelcol.exporter.otlp.tempo.input]
+        }
+      }
+
+      // ── Tempo exporter ────────────────────────────────────────────────────────
+      // Send traces to the Tempo instance in the same namespace.
+
+      otelcol.exporter.otlp "tempo" {
+        client {
+          endpoint = "tempo.atom-system.svc.cluster.local:4317"
+          tls {
+            insecure = true
+          }
+        }
+      }
+
+controller:
+  type: deployment
+  replicas: 1
+
+# Expose the OTLP receiver ports via the Kubernetes Service.
+service:
+  enabled: true
+  type: ClusterIP
+
+serviceMonitor:
+  enabled: false
+
+# Additional ports on the Service for OTLP.
+extraPorts:
+  - name: otlp-grpc
+    port: 4317
+    targetPort: 4317
+    protocol: TCP
+  - name: otlp-http
+    port: 4318
+    targetPort: 4318
+    protocol: TCP
+
+resources:
+  requests:
+    cpu: 50m
+    memory: 128Mi
+  limits:
+    cpu: 200m
+    memory: 256Mi
