@@ -12,6 +12,9 @@ import { RequireAuth } from '@/components/app/RequireAuth'
 import { Layout } from '@/components/app/Layout'
 import { Login } from '@/pages/Login'
 import { Domains } from '@/pages/Domains'
+import { Agents } from '@/pages/Agents'
+import { AgentWizard } from '@/pages/AgentWizard'
+import { AgentDetail } from '@/pages/AgentDetail'
 
 const queryClient = new QueryClient()
 
@@ -48,7 +51,53 @@ const domainsRoute = createRoute({
   ),
 })
 
-const routeTree = rootRoute.addChildren([indexRoute, loginRoute, domainsRoute])
+const agentsRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: '/agents',
+  component: () => (
+    <RequireAuth>
+      <Layout>
+        <Agents />
+      </Layout>
+    </RequireAuth>
+  ),
+})
+
+const agentNewRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: '/agents/new',
+  component: () => (
+    <RequireAuth>
+      <Layout>
+        <AgentWizard />
+      </Layout>
+    </RequireAuth>
+  ),
+})
+
+const agentDetailRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: '/domains/$domainId/agents/$agentId',
+  component: function AgentDetailPage() {
+    const { domainId, agentId } = agentDetailRoute.useParams()
+    return (
+      <RequireAuth>
+        <Layout>
+          <AgentDetail domainId={domainId} agentId={agentId} />
+        </Layout>
+      </RequireAuth>
+    )
+  },
+})
+
+const routeTree = rootRoute.addChildren([
+  indexRoute,
+  loginRoute,
+  domainsRoute,
+  agentsRoute,
+  agentNewRoute,
+  agentDetailRoute,
+])
 
 const router = createRouter({ routeTree })
 

@@ -9,10 +9,14 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+from .agents.router import global_router as agents_global_router
+from .agents.router import router as agents_router
 from .auth.router import router as auth_router
 from .auth.users_router import router as users_router
 from .database import init_pool
 from .domains.router import router as domains_router
+from .skills.router import router as skills_router
+from .tools.router import router as tools_router
 
 
 @asynccontextmanager
@@ -34,6 +38,10 @@ app.add_middleware(
 app.include_router(auth_router, prefix="/api/auth", tags=["auth"])
 app.include_router(users_router, prefix="/api/users", tags=["users"])
 app.include_router(domains_router, prefix="/api/domains", tags=["domains"])
+app.include_router(agents_global_router, prefix="/api/agents", tags=["agents"])
+app.include_router(agents_router, prefix="/api/domains/{domain_id}/agents", tags=["agents"])
+app.include_router(tools_router, prefix="/api/tools", tags=["tools"])
+app.include_router(skills_router, prefix="/api/skills", tags=["skills"])
 
 
 @app.get("/healthz")

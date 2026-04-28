@@ -7,7 +7,7 @@ import { useAuthStore } from '@/lib/auth'
 
 const navItems = [
   { label: 'Domains', href: '/domains', icon: Globe, enabled: true },
-  { label: 'Agents', href: '/agents', icon: Bot, enabled: false },
+  { label: 'Agents', href: '/agents', icon: Bot, enabled: true },
   { label: 'HITL Queue', href: '/hitl', icon: UserCheck, enabled: false },
   { label: 'Audit Log', href: '/audit', icon: BookOpen, enabled: false },
 ]
