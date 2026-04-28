@@ -32,13 +32,17 @@ logger = logging.getLogger(__name__)
 KAFKA_TOPIC = "atom.llm"
 
 
-class KafkaAuditLogger:
-    """
-    Extends LiteLLM's CustomLogger protocol (duck-typed — not a subclass to
-    avoid import coupling to the LiteLLM version).
+try:
+    from litellm.integrations.custom_logger import CustomLogger as _Base
+except ImportError:
+    _Base = object  # type: ignore[assignment,misc]
 
-    Supports both sync log_success_event / log_failure_event and their async
-    variants so it works in both threaded and async proxy contexts.
+
+class KafkaAuditLogger(_Base):  # type: ignore[misc]
+    """
+    Subclasses LiteLLM's CustomLogger to inherit default no-op implementations
+    for all hooks LiteLLM may call (async_post_call_success_hook, etc.).
+    We only override the success/failure log methods to produce to Kafka.
     """
 
     def __init__(self) -> None:

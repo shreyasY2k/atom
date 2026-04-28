@@ -14,6 +14,7 @@ The DATABASE_URL env var must point to the same Postgres instance.
 
 import os
 from typing import Any, Dict, List, Optional
+from urllib.parse import urlparse, urlunparse
 
 import asyncpg
 from fastapi import APIRouter, Depends, HTTPException, status
@@ -68,8 +69,13 @@ async def get_db() -> asyncpg.Connection:
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="DATABASE_URL not configured",
         )
-    # asyncpg expects postgresql:// scheme
-    db_url = db_url.replace("postgresql+asyncpg://", "postgresql://").replace("?sslmode=disable", "")
+    # asyncpg requires plain postgresql:// with no unrecognised query params.
+    parsed = urlparse(db_url)
+    clean = parsed._replace(
+        scheme="postgresql",
+        query="",  # drop all query params (sslmode, connection_limit, etc.)
+    )
+    db_url = urlunparse(clean)
     try:
         conn = await asyncpg.connect(db_url)
         return conn

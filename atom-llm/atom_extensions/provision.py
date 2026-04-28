@@ -1,74 +1,156 @@
 """
-atom_extensions/provision.py
+atom-llm/atom_extensions/provision.py
 
-POST /atom/provision_agent  — create a LiteLLM virtual key for an ATOM agent.
+Thin wrappers around LiteLLM's native team/key API.
+All calls go to LiteLLM's own proxy on localhost:4000 using LITELLM_MASTER_KEY.
 
-Called by atom-studio at agent provisioning time. The returned virtual key is
-stored (encrypted) in agents.litellm_virtual_key in ATOM's Postgres.
+ATOM ↔ LiteLLM mapping:
+  ATOM Domain → LiteLLM Team   (domain.id used as team_id — same UUID, no extra lookup)
+  ATOM Agent  → LiteLLM Key    (team-scoped virtual key with rate limits + model list)
+
+LiteLLM 1.83+ dropped /agent/new in favour of /key/generate with team_id.
 """
 
-import secrets
-from typing import List, Optional
-
-from fastapi import APIRouter, Depends, HTTPException, status
+import os
+import httpx
+from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
-from litellm.proxy._types import UserAPIKeyAuth
-from litellm.proxy.auth.user_api_key_auth import user_api_key_auth
-from litellm.proxy.management_endpoints.key_management_endpoints import generate_key_fn
-from litellm.proxy._types import GenerateKeyRequest
+router = APIRouter(prefix="/atom", tags=["atom-provision"])
 
-atom_router = APIRouter(prefix="/atom", tags=["ATOM Extensions"])
+LITELLM_BASE = "http://localhost:4000"
+MASTER_KEY = os.environ["LITELLM_MASTER_KEY"]
+HEADERS = {"Authorization": f"Bearer {MASTER_KEY}", "Content-Type": "application/json"}
+
+
+# ── Request / Response models ─────────────────────────────────────────────────
+
+
+class ProvisionDomainRequest(BaseModel):
+    domain_id: str
+    domain_name: str
+
+
+class ProvisionDomainResponse(BaseModel):
+    team_id: str
+    team_alias: str
 
 
 class ProvisionAgentRequest(BaseModel):
     agent_id: str
-    allowed_models: List[str] = []
-    rpm_limit: Optional[int] = 100
-    tpm_limit: Optional[int] = 100_000
+    agent_name: str
+    team_id: str  # domain.litellm_team_id (= domain.id)
+    allowed_models: list[str]
+    rpm_limit: int = 60
+    tpm_limit: int = 100_000
+    guardrails: list[str] = []
 
 
 class ProvisionAgentResponse(BaseModel):
-    virtual_key: str
-    agent_id: str
+    litellm_agent_id: str  # token_id of the generated key
+    virtual_key: str  # the sk-... key agents use
 
 
-@atom_router.post("/provision_agent", response_model=ProvisionAgentResponse)
-async def provision_agent(
-    request: ProvisionAgentRequest,
-    user_api_key_dict: UserAPIKeyAuth = Depends(user_api_key_auth),
-) -> ProvisionAgentResponse:
+class DeprovisionAgentRequest(BaseModel):
+    virtual_key: str  # the sk-... key to delete
+
+
+class DeprovisionDomainRequest(BaseModel):
+    litellm_id: str  # the LiteLLM team_id to delete
+
+
+# ── Endpoints ─────────────────────────────────────────────────────────────────
+
+
+@router.post("/provision_domain", response_model=ProvisionDomainResponse)
+async def provision_domain(req: ProvisionDomainRequest):
     """
-    Create a LiteLLM virtual key scoped to a single ATOM agent.
-
-    The caller must present the LITELLM_MASTER_KEY (or an admin key) in the
-    Authorization header. atom-studio is the only intended caller.
+    Called by atom-studio when a domain is created.
+    Creates a LiteLLM team using domain.id as team_id (1:1 mapping, no lookup needed).
     """
-    key_alias = f"atom-agent-{request.agent_id[:8]}"
-    # Force the key to start with sk-atom- for easy identification.
-    custom_key = f"sk-atom-{request.agent_id[:8]}-{secrets.token_urlsafe(16)}"
+    async with httpx.AsyncClient() as client:
+        resp = await client.post(
+            f"{LITELLM_BASE}/team/new",
+            headers=HEADERS,
+            json={
+                "team_id": req.domain_id,
+                "team_alias": req.domain_name,
+            },
+        )
+        if resp.status_code not in (200, 201):
+            raise HTTPException(502, f"LiteLLM team/new failed: {resp.text}")
+        data = resp.json()
 
-    gen_request = GenerateKeyRequest(
-        key_alias=key_alias,
-        key=custom_key,
-        models=request.allowed_models if request.allowed_models else [],
-        rpm_limit=request.rpm_limit,
-        tpm_limit=request.tpm_limit,
-        metadata={"atom_agent_id": request.agent_id},
+    return ProvisionDomainResponse(
+        team_id=data.get("team_id", req.domain_id),
+        team_alias=data.get("team_alias", req.domain_name),
     )
 
-    try:
-        response = await generate_key_fn(
-            data=gen_request,
-            user_api_key_dict=user_api_key_dict,
+
+@router.post("/provision_agent", response_model=ProvisionAgentResponse)
+async def provision_agent(req: ProvisionAgentRequest):
+    """
+    Called by atom-studio when an agent is created.
+    Creates a LiteLLM virtual key scoped to the team (domain) with model + rate limits.
+    The returned virtual_key is stored AES-GCM encrypted in agents.litellm_virtual_key.
+
+    LiteLLM 1.83+ uses /key/generate instead of the removed /agent/new.
+    """
+    key_body: dict = {
+        "key_alias": f"{req.agent_name}-{req.agent_id[:8]}",  # globally unique
+        "user_id": req.agent_id,
+        "team_id": req.team_id,
+        "models": req.allowed_models,
+        "tpm_limit": req.tpm_limit,
+        "rpm_limit": req.rpm_limit,
+    }
+    if req.guardrails:
+        key_body["guardrails"] = req.guardrails
+
+    async with httpx.AsyncClient() as client:
+        resp = await client.post(
+            f"{LITELLM_BASE}/key/generate",
+            headers=HEADERS,
+            json=key_body,
         )
-    except Exception as exc:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Key generation failed: {exc}",
-        ) from exc
+        if resp.status_code not in (200, 201):
+            raise HTTPException(502, f"LiteLLM key/generate failed: {resp.text}")
+        data = resp.json()
+
+    virtual_key = data.get("key")
+    token_id = data.get("token_id") or data.get("id") or req.agent_id
+    if not virtual_key:
+        raise HTTPException(502, f"LiteLLM key/generate returned no key: {data}")
 
     return ProvisionAgentResponse(
-        virtual_key=response.key,
-        agent_id=request.agent_id,
+        litellm_agent_id=token_id,
+        virtual_key=virtual_key,
     )
+
+
+@router.delete("/deprovision_agent")
+async def deprovision_agent(req: DeprovisionAgentRequest):
+    """Called when an agent is deleted from atom-studio."""
+    async with httpx.AsyncClient() as client:
+        resp = await client.post(
+            f"{LITELLM_BASE}/key/delete",
+            headers=HEADERS,
+            json={"keys": [req.virtual_key]},
+        )
+        if resp.status_code not in (200, 201):
+            raise HTTPException(502, f"LiteLLM key/delete failed: {resp.text}")
+    return {"deleted": True}
+
+
+@router.delete("/deprovision_domain")
+async def deprovision_domain(req: DeprovisionDomainRequest):
+    """Called when a domain is deleted from atom-studio."""
+    async with httpx.AsyncClient() as client:
+        resp = await client.post(
+            f"{LITELLM_BASE}/team/delete",
+            headers=HEADERS,
+            json={"team_ids": [req.litellm_id]},
+        )
+        if resp.status_code not in (200, 201):
+            raise HTTPException(502, f"LiteLLM team/delete failed: {resp.text}")
+    return {"deleted": True}

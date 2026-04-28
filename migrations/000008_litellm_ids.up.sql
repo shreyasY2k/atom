@@ -1,0 +1,2 @@
+ALTER TABLE domains ADD COLUMN IF NOT EXISTS litellm_team_id TEXT;
+ALTER TABLE agents  ADD COLUMN IF NOT EXISTS litellm_agent_id TEXT;

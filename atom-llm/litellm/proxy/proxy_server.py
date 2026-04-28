@@ -13183,7 +13183,7 @@ app.include_router(anthropic_skills_router)
 
 # ATOM extensions — must be last so they can import from proxy internals
 try:
-    from atom_extensions.provision import atom_router as atom_provision_router
+    from atom_extensions.provision import router as atom_provision_router
     from atom_extensions.tools_skills import atom_tools_router
 
     app.include_router(atom_provision_router)

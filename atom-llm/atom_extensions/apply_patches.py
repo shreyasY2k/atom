@@ -61,7 +61,7 @@ if ATOM_ROUTER_MARKER not in src:
 
 # ATOM extensions — registered last so they can import from proxy internals
 try:
-    from atom_extensions.provision import atom_router as atom_provision_router
+    from atom_extensions.provision import router as atom_provision_router
     from atom_extensions.tools_skills import atom_tools_router
     app.include_router(atom_provision_router)
     app.include_router(atom_tools_router)

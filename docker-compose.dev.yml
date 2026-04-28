@@ -157,21 +157,29 @@ services:
       - ./.keys:/etc/atom:ro
 
   # ── atom-llm ────────────────────────────────────────────────────────────────
-  # Dev: upstream LiteLLM image + dev config mounted.
-  # SESSION-05 local build: uncomment 'build:' and comment 'image:'.
+  # Dev build: LiteLLM from PyPI + ATOM extensions layered via main.py (no patching).
+  # Production build: change dockerfile to Dockerfile (full multi-stage build).
   atom-llm:
-    image: ghcr.io/berriai/litellm:main-latest
-    # build:
-    #   context: atom-llm/
-    #   dockerfile: Dockerfile
+    build:
+      context: atom-llm/
+      dockerfile: Dockerfile.dev
+    # image: ghcr.io/berriai/litellm:main-latest  # use this if Dockerfile.dev build fails
     container_name: atom-llm
     restart: unless-stopped
-    command: ["--config", "/app/config.dev.yaml", "--port", "4000"]
     env_file: .env
     environment:
-      # No DATABASE_URL — running without DB for local dev.
-      # Add it back once SESSION-07 provisions agents via atom-studio.
+      # LiteLLM reads CONFIG_FILE_PATH at startup to load model list and settings.
+      CONFIG_FILE_PATH: /app/config.dev.yaml
+      # LiteLLM creates its own tables (LiteLLM_VerificationToken etc.) in the
+      # same Postgres. Our ATOM tables are unaffected — separate table names.
+      DATABASE_URL: postgresql://atom:${POSTGRES_PASSWORD:-changeme}@postgres:5432/atom
       LITELLM_LOG: INFO
+      # Disable spend/budget DB checks that fail on non-x86 Prisma builds
+      DISABLE_SPEND_LOGS: "True"
+      STORE_MODEL_IN_DB: "False"
+    depends_on:
+      postgres:
+        condition: service_healthy
     volumes:
       - ./atom-llm/config.dev.yaml:/app/config.dev.yaml:ro
     ports:
