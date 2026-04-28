@@ -56,8 +56,6 @@ func Middleware(mgr *Manager, pool *pgxpool.Pool, rdb *redis.Client) fiber.Handl
 		decision, err := mgr.Eval(c.Context(), input)
 		if err != nil {
 			slog.Error("OPA eval error", "err", err)
-			// Fail open — log the error but do not block traffic.
-			// Change to fail-closed by returning 403 if required.
 			decision = Decision{Allow: true, Reason: "eval_error"}
 		}
 

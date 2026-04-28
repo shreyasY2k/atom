@@ -116,8 +116,8 @@ func main() {
 	app.Use(ratelimit.Middleware(rdb))
 	app.Use(auditLogger.Middleware())
 
-	// Agent proxy routes
-	router.Mount(app, pool, rdb)
+	// Agent proxy routes (specific routes registered before wildcard)
+	router.Mount(app, cfg, pool, rdb)
 
 	// ── Start ─────────────────────────────────────────────────────────────────
 	addr := fmt.Sprintf(":%s", cfg.GatePort)

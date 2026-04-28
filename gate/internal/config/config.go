@@ -20,6 +20,10 @@ type Config struct {
 	OTELEndpoint       string
 	GatePort           string
 	KafkaBrokers       []string
+	// Upstream service URLs
+	AtomLLMURL    string // ATOM_LLM_URL
+	AtomStudioURL string // ATOM_STUDIO_API_URL
+	AtomMemoryURL string // ATOM_MEMORY_URL
 }
 
 func Load() (*Config, error) {
@@ -31,6 +35,9 @@ func Load() (*Config, error) {
 		OPABundlePath:      env("OPA_BUNDLE_PATH", "./policies"),
 		OTELEndpoint:       env("OTEL_EXPORTER_OTLP_ENDPOINT", ""),
 		GatePort:           env("GATE_PORT", "8080"),
+		AtomLLMURL:         env("ATOM_LLM_URL", "http://atom-llm:4000"),
+		AtomStudioURL:      env("ATOM_STUDIO_API_URL", "http://atom-studio-api:3001"),
+		AtomMemoryURL:      env("ATOM_MEMORY_URL", "http://atom-memory:8000"),
 	}
 
 	if brokers := env("KAFKA_BROKERS", ""); brokers != "" {

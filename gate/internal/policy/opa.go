@@ -47,9 +47,11 @@ func NewManager(ctx context.Context, policyDir string) (*Manager, error) {
 	if err != nil {
 		return nil, fmt.Errorf("create fsnotify watcher: %w", err)
 	}
-	if err := watcher.Add(policyDir); err != nil {
-		watcher.Close()
-		return nil, fmt.Errorf("watch policy dir %q: %w", policyDir, err)
+	for _, d := range productionDirs(policyDir) {
+		if watchErr := watcher.Add(d); watchErr != nil {
+			watcher.Close()
+			return nil, fmt.Errorf("watch policy dir %q: %w", d, watchErr)
+		}
 	}
 	m.watcher = watcher
 	go m.watchLoop(ctx)
@@ -88,11 +90,14 @@ func (m *Manager) Close() {
 }
 
 func (m *Manager) load(ctx context.Context) error {
-	allowPQ, err := prepareQuery(ctx, m.policyDir, "data.atom.authz.allow")
+	// Load only production policy directories; exclude tests/ to avoid
+	// interference with test helper rules at eval time.
+	prodDirs := productionDirs(m.policyDir)
+	allowPQ, err := prepareQuery(ctx, prodDirs, "data.atom.authz.allow")
 	if err != nil {
 		return fmt.Errorf("prepare allow query: %w", err)
 	}
-	denyPQ, err := prepareQuery(ctx, m.policyDir, "data.atom.authz.deny")
+	denyPQ, err := prepareQuery(ctx, prodDirs, "data.atom.authz.deny")
 	if err != nil {
 		return fmt.Errorf("prepare deny query: %w", err)
 	}
@@ -104,14 +109,50 @@ func (m *Manager) load(ctx context.Context) error {
 	return nil
 }
 
-func prepareQuery(ctx context.Context, policyDir, query string) (rego.PreparedEvalQuery, error) {
-	r := rego.New(
-		rego.Query(query),
-		rego.Load([]string{policyDir}, func(abspath string, info os.FileInfo, depth int) bool {
-			// Skip non-.rego files (return true = skip).
-			return filepath.Ext(abspath) != ".rego"
-		}),
-	)
+// productionDirs returns the policy sub-directories that contain runtime rules.
+// The tests/ directory is intentionally excluded.
+func productionDirs(policyDir string) []string {
+	candidates := []string{
+		filepath.Join(policyDir, "base"),
+		filepath.Join(policyDir, "custom"),
+	}
+	var dirs []string
+	for _, d := range candidates {
+		if info, err := os.Stat(d); err == nil && info.IsDir() {
+			dirs = append(dirs, d)
+		}
+	}
+	if len(dirs) == 0 {
+		// Fallback: load from root if the expected sub-dirs aren't present.
+		dirs = []string{policyDir}
+	}
+	return dirs
+}
+
+// prepareQuery loads each .rego file explicitly via rego.Module to avoid
+// OPA v1.x glob-loader edge cases (e.g. double-load, symlink traversal).
+func prepareQuery(ctx context.Context, policyDirs []string, query string) (rego.PreparedEvalQuery, error) {
+	opts := []func(*rego.Rego){rego.Query(query)}
+
+	for _, dir := range policyDirs {
+		entries, err := os.ReadDir(dir)
+		if err != nil {
+			continue // empty or missing directory is fine
+		}
+		for _, e := range entries {
+			if e.IsDir() || filepath.Ext(e.Name()) != ".rego" {
+				continue
+			}
+			abspath := filepath.Join(dir, e.Name())
+			src, readErr := os.ReadFile(abspath)
+			if readErr != nil {
+				return rego.PreparedEvalQuery{}, fmt.Errorf("read %q: %w", abspath, readErr)
+			}
+			opts = append(opts, rego.Module(abspath, string(src)))
+		}
+	}
+
+	r := rego.New(opts...)
 	pq, err := r.PrepareForEval(ctx)
 	if err != nil {
 		return rego.PreparedEvalQuery{}, fmt.Errorf("PrepareForEval(%q): %w", query, err)
