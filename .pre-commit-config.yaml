@@ -1,0 +1,49 @@
+repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v4.6.0
+    hooks:
+      - id: trailing-whitespace
+      - id: end-of-file-fixer
+      - id: check-yaml
+      - id: check-json
+      - id: check-merge-conflict
+      - id: detect-private-key
+
+  - repo: https://github.com/compilerla/conventional-pre-commit
+    rev: v3.4.0
+    hooks:
+      - id: conventional-pre-commit
+        stages: [commit-msg]
+
+  - repo: https://github.com/dnephin/pre-commit-golang
+    rev: v0.5.1
+    hooks:
+      - id: go-fmt
+        files: ^gate/|^atom-cli/
+      - id: go-vet
+        files: ^gate/|^atom-cli/
+
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.4.4
+    hooks:
+      - id: ruff
+        files: ^atom-llm/|^atom-sdk/|^atom-runtime/|^atom-memory/|^atom-studio/
+      - id: ruff-format
+        files: ^atom-llm/|^atom-sdk/|^atom-runtime/|^atom-memory/|^atom-studio/
+
+  - repo: local
+    hooks:
+      - id: opa-fmt
+        name: opa fmt
+        language: system
+        entry: opa fmt -w
+        files: \.rego$
+        pass_filenames: true
+
+      - id: opa-check
+        name: opa check
+        language: system
+        entry: opa check
+        files: \.rego$
+        pass_filenames: false
+        args: [policies/]

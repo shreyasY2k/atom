@@ -1,0 +1,77 @@
+# === Go ===
+gate/gate
+atom-cli/atom
+*.exe
+*.test
+*.out
+vendor/
+go.sum.bak
+
+# === Python ===
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+build/
+.venv/
+venv/
+.uv/
+*.egg
+.mypy_cache/
+.ruff_cache/
+.pytest_cache/
+
+# === Node / Studio ===
+node_modules/
+.next/
+.nuxt/
+dist/
+.pnpm-store/
+
+# === Environment & Secrets ===
+.env
+.env.local
+.env.*.local
+*.pem
+*.key
+*.p12
+*.pfx
+jwt_private*.pem
+jwt_public*.pem
+
+# === Kubernetes / Helm ===
+infra/helm/**/charts/
+infra/helm/**/*.lock
+*.kubeconfig
+kubeconfig
+
+# === OPA ===
+policies/bundle.tar.gz
+policies/*.bundle
+
+# === Editor ===
+.idea/
+.vscode/
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
+
+# === Build outputs ===
+dist/
+bin/
+out/
+*.zip
+!atom-implementation*.zip
+
+# === Test artefacts ===
+tests/load/results/
+coverage.out
+coverage.html
+htmlcov/
+.coverage
+
+# === Temp ===
+tmp/
+temp/
+*.tmp

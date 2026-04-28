@@ -1,0 +1,20 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: atom-system
+  labels:
+    app.kubernetes.io/part-of: atom
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: atom-infra
+  labels:
+    app.kubernetes.io/part-of: atom
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: atom-agents
+  labels:
+    app.kubernetes.io/part-of: atom

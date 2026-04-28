@@ -1,0 +1,210 @@
+name: atom-dev
+
+services:
+
+  # ── Postgres 16 with pgvector ───────────────────────────────────────────────
+  postgres:
+    image: pgvector/pgvector:pg16
+    container_name: atom-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: atom
+      POSTGRES_USER: atom
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-changeme}
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./infra/scripts/init-postgres.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U atom"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  # ── Redis 7 ────────────────────────────────────────────────────────────────
+  redis:
+    image: redis:7-alpine
+    container_name: atom-redis
+    restart: unless-stopped
+    command: redis-server --requirepass ${REDIS_PASSWORD:-changeme}
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD:-changeme}", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  # ── MinIO (S3-compatible object store) ─────────────────────────────────────
+  minio:
+    image: minio/minio:latest
+    container_name: atom-minio
+    restart: unless-stopped
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ACCESS_KEY:-minioadmin}
+      MINIO_ROOT_PASSWORD: ${MINIO_SECRET_KEY:-changeme}
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    volumes:
+      - minio_data:/data
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ── MinIO bucket init ───────────────────────────────────────────────────────
+  minio-init:
+    image: minio/mc:latest
+    container_name: atom-minio-init
+    depends_on:
+      minio:
+        condition: service_healthy
+    entrypoint: >
+      /bin/sh -c "
+        mc alias set local http://minio:9000 ${MINIO_ACCESS_KEY:-minioadmin} ${MINIO_SECRET_KEY:-changeme};
+        mc mb --ignore-existing local/atom-audit;
+        mc mb --ignore-existing local/atom-policies;
+        echo 'MinIO buckets ready';
+      "
+
+  # ── Redpanda (Kafka-compatible) ─────────────────────────────────────────────
+  redpanda:
+    image: redpandadata/redpanda:latest
+    container_name: atom-redpanda
+    restart: unless-stopped
+    command:
+      - redpanda start
+      - --smp 1
+      - --memory 512M
+      - --reserve-memory 0M
+      - --overprovisioned
+      - --kafka-addr PLAINTEXT://0.0.0.0:9092
+      - --advertise-kafka-addr PLAINTEXT://localhost:9092
+    ports:
+      - "9092:9092"
+      - "9644:9644"
+    volumes:
+      - redpanda_data:/var/lib/redpanda/data
+    healthcheck:
+      test: ["CMD", "rpk", "cluster", "info"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  # ── Kafka topic init ────────────────────────────────────────────────────────
+  redpanda-init:
+    image: redpandadata/redpanda:latest
+    container_name: atom-redpanda-init
+    depends_on:
+      redpanda:
+        condition: service_healthy
+    entrypoint: >
+      /bin/sh -c "
+        rpk topic create atom.audit atom.llm atom.agent.logs atom.deployments \
+          --brokers redpanda:9092 2>/dev/null || true;
+        echo 'Kafka topics ready';
+      "
+
+  # ── OPA (policy engine) ─────────────────────────────────────────────────────
+  opa:
+    image: openpolicyagent/opa:latest-rootless
+    container_name: atom-opa
+    restart: unless-stopped
+    command:
+      - run
+      - --server
+      - --watch
+      - --log-format=json
+      - /policies
+    ports:
+      - "8181:8181"
+    volumes:
+      - ./policies:/policies:ro
+
+  # ── GATE ────────────────────────────────────────────────────────────────────
+  gate:
+    build:
+      context: gate/
+      dockerfile: Dockerfile
+    container_name: atom-gate
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    env_file: .env
+    environment:
+      DATABASE_URL: postgresql://atom:${POSTGRES_PASSWORD:-changeme}@postgres:5432/atom
+      REDIS_URL: redis://:${REDIS_PASSWORD:-changeme}@redis:6379
+      OPA_BUNDLE_PATH: /policies
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./policies:/policies:ro
+      - ./.keys:/etc/atom:ro
+
+  # ── atom-llm ────────────────────────────────────────────────────────────────
+  atom-llm:
+    build:
+      context: atom-llm/
+      dockerfile: Dockerfile
+    container_name: atom-llm
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redpanda:
+        condition: service_healthy
+    env_file: .env
+    environment:
+      DATABASE_URL: postgresql://atom:${POSTGRES_PASSWORD:-changeme}@postgres:5432/atom
+    ports:
+      - "4000:4000"
+
+  # ── atom-studio ─────────────────────────────────────────────────────────────
+  atom-studio:
+    build:
+      context: atom-studio/
+      dockerfile: Dockerfile
+    container_name: atom-studio
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    env_file: .env
+    environment:
+      DATABASE_URL: postgresql://atom:${POSTGRES_PASSWORD:-changeme}@postgres:5432/atom
+      ATOM_LLM_URL: http://atom-llm:4000
+      ATOM_RUNTIME_URL: http://atom-runtime:8090
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./.keys:/etc/atom:ro
+
+  # ── Grafana ──────────────────────────────────────────────────────────────────
+  grafana:
+    image: grafana/grafana:latest
+    container_name: atom-grafana
+    restart: unless-stopped
+    environment:
+      GF_SECURITY_ADMIN_PASSWORD: admin
+      GF_USERS_ALLOW_SIGN_UP: "false"
+    ports:
+      - "3001:3000"
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./infra/grafana/dashboards:/etc/grafana/provisioning/dashboards:ro
+
+volumes:
+  postgres_data:
+  redis_data:
+  minio_data:
+  redpanda_data:
+  grafana_data:
