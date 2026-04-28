@@ -75,3 +75,48 @@ htmlcov/
 tmp/
 temp/
 *.tmp
+
+# =============================================================================
+# === Upstream clone bulk — only ATOM-specific files are tracked            ===
+# =============================================================================
+
+# atom-llm: LiteLLM is a PyPI dependency — only our extensions/config live here
+atom-llm/*
+!atom-llm/atom_extensions/
+!atom-llm/atom_extensions/**
+!atom-llm/main.py
+!atom-llm/Dockerfile
+!atom-llm/Dockerfile.dev
+!atom-llm/config.dev.yaml
+!atom-llm/UPSTREAM_DIFF.md
+!atom-llm/LICENSE
+!atom-llm/CLAUDE.md
+
+# agentscope-based clones: keep src/ (ATOM modifications); drop CI/docs/tests
+atom-runtime/.github/
+atom-runtime/.gemini/
+atom-runtime/docs/
+atom-runtime/examples/
+atom-runtime/tests/
+atom-runtime/assets/
+
+atom-memory/.github/
+atom-memory/.gemini/
+atom-memory/docs/
+atom-memory/examples/
+atom-memory/tests/
+atom-memory/assets/
+
+atom-sdk/.github/
+atom-sdk/.gemini/
+atom-sdk/docs/
+atom-sdk/examples/
+atom-sdk/tests/
+atom-sdk/assets/
+
+agentscope-studio/.github/
+agentscope-studio/.gemini/
+agentscope-studio/docs/
+agentscope-studio/examples/
+agentscope-studio/tests/
+agentscope-studio/assets/
