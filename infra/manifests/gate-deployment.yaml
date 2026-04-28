@@ -1,0 +1,93 @@
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: gate
+  namespace: atom-system
+  labels:
+    app: gate
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: gate
+  template:
+    metadata:
+      labels:
+        app: gate
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+      containers:
+        - name: gate
+          image: atom-gate:local
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 8080
+              name: http
+          envFrom:
+            - secretRef:
+                name: atom-credentials
+          env:
+            - name: DATABASE_URL
+              value: postgresql://atom:changeme@postgres.atom-infra.svc.cluster.local:5432/atom?sslmode=disable
+            - name: REDIS_URL
+              value: redis://:changeme@redis-master.atom-infra.svc.cluster.local:6379
+            - name: OPA_BUNDLE_PATH
+              value: /policies
+            - name: KAFKA_BROKERS
+              value: redpanda.atom-infra.svc.cluster.local:9092
+            - name: OTEL_EXPORTER_OTLP_ENDPOINT
+              value: http://alloy.atom-system.svc.cluster.local:4318
+          volumeMounts:
+            - name: jwt-keys
+              mountPath: /etc/atom
+              readOnly: true
+            - name: policies
+              mountPath: /policies
+              readOnly: true
+          resources:
+            requests:
+              cpu: 100m
+              memory: 64Mi
+            limits:
+              cpu: 500m
+              memory: 256Mi
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: 8080
+            initialDelaySeconds: 5
+            periodSeconds: 5
+            failureThreshold: 3
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: 8080
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            failureThreshold: 3
+      volumes:
+        - name: jwt-keys
+          secret:
+            secretName: atom-jwt-keys
+        - name: policies
+          configMap:
+            name: opa-policies
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: gate
+  namespace: atom-system
+  labels:
+    app: gate
+spec:
+  selector:
+    app: gate
+  ports:
+    - port: 8080
+      targetPort: 8080
+      name: http
