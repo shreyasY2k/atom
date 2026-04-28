@@ -19,9 +19,9 @@ repos:
     rev: v0.5.1
     hooks:
       - id: go-fmt
-        files: ^gate/|^atom-cli/
+        files: ^(gate|atom-cli)/.*\.go$
       - id: go-vet
-        files: ^gate/|^atom-cli/
+        files: ^(gate|atom-cli)/.*\.go$
 
   - repo: https://github.com/astral-sh/ruff-pre-commit
     rev: v0.4.4

@@ -1,4 +1,4 @@
-package atom.authz_test
+package atom.authz
 
 import future.keywords.if
 

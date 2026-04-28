@@ -1,0 +1,13 @@
+[tool.uv.workspace]
+# Workspace members are wired in progressively as upstreams are adapted:
+#
+#   atom-llm    → SESSION-05: LiteLLM has its own [tool.uv.workspace]; must be
+#                 flattened before it can join this workspace.
+#   atom-sdk    → SESSION-06: rename package "agentscope" → "atom-sdk"
+#   atom-runtime → SESSION-11: rename package "agentscope" → "atom-runtime"
+#   atom-memory  → SESSION-12: rename package "agentscope" → "atom-memory"
+#   atom-studio  → SESSION-07: rename package "agentscope" → "atom-studio"
+#
+# Until then, install each component in its own venv or directly:
+#   cd atom-llm && uv venv && uv pip install -e .
+members = []
