@@ -31,7 +31,7 @@ VALUES (
 )
 ON CONFLICT (id) DO NOTHING;
 
-INSERT INTO agents (id, domain_id, owner_id, name, description, status, memory_config_id)
+INSERT INTO agents (id, domain_id, owner_id, name, description, status, memory_config_id, litellm_virtual_key)
 VALUES (
     '00000000-0000-0000-0000-000000000100',
     '00000000-0000-0000-0000-000000000010',
@@ -39,8 +39,9 @@ VALUES (
     'dev-agent',
     'Development test agent',
     'draft',
-    '00000000-0000-0000-0000-000000000020'
+    '00000000-0000-0000-0000-000000000020',
+    'sk-atom-dev'   -- matches LITELLM_MASTER_KEY in dev; replaced by provision_agent in production
 )
-ON CONFLICT (id) DO NOTHING;
+ON CONFLICT (id) DO UPDATE SET litellm_virtual_key = EXCLUDED.litellm_virtual_key;
 
 COMMIT;

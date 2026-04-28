@@ -24,6 +24,10 @@ type Config struct {
 	AtomLLMURL    string // ATOM_LLM_URL
 	AtomStudioURL string // ATOM_STUDIO_API_URL
 	AtomMemoryURL string // ATOM_MEMORY_URL
+	// AtomLLMKey is sent as Authorization: Bearer <key> when GATE forwards
+	// LLM calls to atom-llm. The agent JWT is consumed by GATE; atom-llm
+	// authenticates via its own LiteLLM master key.
+	AtomLLMKey string // ATOM_LLM_KEY (= LITELLM_MASTER_KEY in atom-llm)
 }
 
 func Load() (*Config, error) {
@@ -38,6 +42,7 @@ func Load() (*Config, error) {
 		AtomLLMURL:         env("ATOM_LLM_URL", "http://atom-llm:4000"),
 		AtomStudioURL:      env("ATOM_STUDIO_API_URL", "http://atom-studio-api:3001"),
 		AtomMemoryURL:      env("ATOM_MEMORY_URL", "http://atom-memory:8000"),
+		AtomLLMKey:         env("ATOM_LLM_KEY", ""),
 	}
 
 	if brokers := env("KAFKA_BROKERS", ""); brokers != "" {
