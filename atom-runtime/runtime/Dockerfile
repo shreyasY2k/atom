@@ -2,10 +2,10 @@ FROM python:3.11-slim
 
 WORKDIR /app
 
+# Copy source first so editable install creates correct .pth pointer
 COPY pyproject.toml .
-RUN pip install --no-cache-dir -e .
-
 COPY src/ src/
+RUN pip install --no-cache-dir -e .
 
 EXPOSE 8090
 

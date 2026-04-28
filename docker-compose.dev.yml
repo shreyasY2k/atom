@@ -283,6 +283,10 @@ services:
       - ${KUBECONFIG:-~/.kube/config}:/root/.kube/config:ro
 
   # ── Grafana ──────────────────────────────────────────────────────────────────
+  # Basic Grafana for quick local inspection (no Tempo datasource).
+  # For the full monitoring stack (Tempo + dashboards), use:
+  #   make monitoring-up   # deploys to k8s
+  #   kubectl port-forward -n atom-system svc/grafana 3006:3000
   grafana:
     image: grafana/grafana:latest
     container_name: atom-grafana
@@ -291,7 +295,7 @@ services:
       GF_SECURITY_ADMIN_PASSWORD: admin
       GF_USERS_ALLOW_SIGN_UP: "false"
     ports:
-      - "3001:3000"
+      - "3005:3000"
     volumes:
       - grafana_data:/var/lib/grafana
       - ./infra/grafana/dashboards:/etc/grafana/provisioning/dashboards:ro

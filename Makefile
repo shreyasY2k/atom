@@ -88,14 +88,16 @@ infra-down: ## Tear down kind cluster
 dev-up: ## Start all services locally via docker-compose (single command)
 	@docker compose -f docker-compose.dev.yml up -d
 	@echo "✓ Dev stack up."
-	@echo "  studio:  http://localhost:3000 (nginx)"
-	@echo "  studio:  http://localhost:5173 (vite dev — cd atom-studio/frontend && npm run dev)"
-	@echo "  gate:    http://localhost:8080"
-	@echo "  llm:     http://localhost:4000"
-	@echo "  minio:   http://localhost:9001"
 	@echo ""
-	@echo "Monitoring stack (Grafana/Tempo/Alloy) is in Kubernetes."
-	@echo "Run 'make monitoring-up' to deploy + port-forward."
+	@echo "  atom-studio UI:   http://localhost:3000  (nginx prod build)"
+	@echo "  atom-studio API:  http://localhost:3001"
+	@echo "  GATE:             http://localhost:8080"
+	@echo "  atom-llm:         http://localhost:4000"
+	@echo "  MinIO console:    http://localhost:9001"
+	@echo "  Grafana (basic):  http://localhost:3005  (admin/admin)"
+	@echo ""
+	@echo "  For hot-reload studio:  cd atom-studio/frontend && npm run dev  → :5173"
+	@echo "  For full monitoring:    make monitoring-up  (deploys Alloy/Tempo/Grafana to k8s)"
 
 dev-down: ## Stop docker-compose dev stack
 	@docker compose -f docker-compose.dev.yml down
