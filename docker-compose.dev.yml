@@ -121,7 +121,9 @@ services:
       - --server
       - --watch
       - --log-format=json
-      - /policies
+      - --ignore=..*
+      - /policies/base
+      - /policies/custom
     ports:
       - "8181:8181"
     volumes:
