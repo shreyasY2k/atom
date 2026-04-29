@@ -113,14 +113,14 @@ export function HitlDecisionDrawer({ item, open, onClose }: Props) {
         {/* Body */}
         <div className="px-6 py-4 space-y-4">
           {/* Deployment-specific summary */}
-          {isDeployment && item.payload?.image && (
+          {isDeployment && !!item.payload?.image && (
             <div className="space-y-1">
               <p className="text-xs font-medium text-muted-foreground">Image</p>
               <code className="block rounded-md bg-muted px-3 py-2 text-xs font-mono break-all leading-relaxed">
-                {item.payload.image as string}
+                {String(item.payload.image)}
               </code>
-              {item.payload.message && (
-                <p className="text-sm text-muted-foreground mt-1">{item.payload.message as string}</p>
+              {!!item.payload.message && (
+                <p className="text-sm text-muted-foreground mt-1">{String(item.payload.message)}</p>
               )}
             </div>
           )}

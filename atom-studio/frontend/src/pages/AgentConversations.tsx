@@ -6,7 +6,7 @@ import { ChevronLeft, ChevronRight, ExternalLink, Wrench, Brain } from 'lucide-r
 import api from '@/lib/api'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import { Card, CardContent, CardHeader } from '@/components/ui/card'
 
 interface Step {
   type: 'thinking' | 'tool_use' | 'tool_result'
