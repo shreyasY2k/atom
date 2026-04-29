@@ -14,6 +14,7 @@ type Config struct {
 	StudioURL    string `json:"studio_url"`
 	AccessToken  string `json:"access_token"`
 	RefreshToken string `json:"refresh_token"`
+	AtomRoot     string `json:"atom_root"` // path to ATOM monorepo root (contains atom-sdk/)
 }
 
 func path() (string, error) {

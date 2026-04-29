@@ -1,5 +1,4 @@
 # atom-sdk (agentscope fork) is installed from .atom-sdk/ by the Dockerfile.
-# Do NOT add agentscope or atom-sdk here — they conflict with the local install.
 fastapi>=0.111.0
 uvicorn[standard]>=0.29.0
 python-dotenv>=1.0.0

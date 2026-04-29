@@ -7,7 +7,6 @@ WORKDIR /app
 COPY .atom-sdk /tmp/atom-sdk
 RUN pip install --no-cache-dir /tmp/atom-sdk && rm -rf /tmp/atom-sdk
 
-# Install project dependencies (fastapi, uvicorn, etc.)
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 

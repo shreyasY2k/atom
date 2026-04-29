@@ -81,6 +81,13 @@ func runDeploy(_ *cobra.Command, _ []string) error {
 		}
 	}
 
+	// Copy atom-sdk into .atom-sdk/ so Dockerfile can install it locally.
+	if !deploySkip {
+		if err := deploy.CopyAtomSDK(cfg.AtomRoot); err != nil {
+			fmt.Printf("Warning: could not copy atom-sdk (%s) — set ATOM_ROOT or re-run atom login\n", err)
+		}
+	}
+
 	// Build
 	if !deploySkip {
 		fmt.Printf("Building image %s ...\n", image)

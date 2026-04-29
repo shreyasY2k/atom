@@ -87,6 +87,9 @@ tmp/
 temp/
 *.tmp
 
+# === atom deploy build artifact ===
+**/.atom-sdk/
+
 # =============================================================================
 # === Upstream clone bulk — only ATOM-specific files are tracked            ===
 # =============================================================================

@@ -1,23 +1,14 @@
 """
-{{.ProjectName}} — HTTP agent server (production)
+frontoffice — HTTP server wrapper for production deployment.
 
-Wraps the ReActAgent in a FastAPI service so it can run as a container
-behind the ATOM GATE. Uses atom-sdk (AtomChatModel) so all LLM calls
-are automatically routed through GATE → atom-llm.
-
-Environment variables (injected by atom-runtime):
-    ATOM_GATE_URL   — e.g. http://gate:8080
-    ATOM_DOMAIN_ID  — domain UUID
-    ATOM_AGENT_ID   — agent UUID
-    ATOM_AGENT_JWT  — agent RS256 JWT
+Wraps the ReAct agent in a FastAPI service so it can run as a container
+behind the ATOM GATE. Listens on port 8080.
 
 Endpoints:
-    GET  /healthz  — liveness probe
-    POST /run      — {"message": "..."} → {"reply": "..."}
+  GET  /healthz      — liveness probe (GATE + atom-runtime poll this)
+  POST /run          — run the agent on a single message; returns the response
 """
-
 import os
-
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -31,7 +22,7 @@ from pydantic import BaseModel
 
 from tools import build_toolkit
 
-app = FastAPI(title="{{.ProjectName}}")
+app = FastAPI(title="frontoffice")
 
 agentscope.init()
 
@@ -41,11 +32,11 @@ _model = AtomChatModel(
 )
 
 _agent = ReActAgent(
-    name="{{.ProjectName}}",
+    name="frontoffice",
     model=_model,
     service_toolkit=build_toolkit(),
     sys_prompt=(
-        "{{pystr .Description}}  "
+        "You are a helpful front-office assistant. "
         "Think step by step. Use tools when you need external information."
     ),
     max_iters=10,
