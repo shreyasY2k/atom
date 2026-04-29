@@ -1,169 +1,359 @@
 # ATOM — Agentic Transformation & Operations Manager
 
-> A secure, auditable, BFSI-grade framework for developing, governing, and deploying AI agents.
+> A secure, auditable, BFSI-grade platform for developing, governing, and deploying AI agents.
 
 ---
 
 ## What ATOM Is
 
-ATOM is a **single-tenant, on-premises agentic platform** built for financial services organisations.
-It enforces the principle that **no agent ever touches the outside world directly** — every call flows
+ATOM is a **single-tenant, on-premises agentic platform** built for financial-services organisations.
+Its core guarantee: **no agent ever touches the outside world directly** — every LLM call flows
 through GATE, where it is authenticated, policy-checked, rate-limited, and appended to an
-immutable audit chain.
+immutable hash-chained audit log.
+
+**Sessions 00–14 are complete.** This README documents the current working state.
+
+---
+
+## Quick Start (docker-compose dev)
+
+> Prerequisites: Docker Desktop, Go 1.22+, Python 3.11+, `make`, `openssl`
+
+```bash
+# 1. Clone
+git clone https://github.com/your-org/atom.git && cd atom
+
+# 2. Install toolchain (Go, Python, kind, kubectl, OPA, golang-migrate, pre-commit)
+make bootstrap
+
+# 3. Generate JWT key pair
+make generate-keys          # writes .keys/jwt_private.pem + jwt_public.pem
+
+# 4. Create environment file
+cp .env.example .env
+# Edit .env — set these at minimum:
+#   POSTGRES_PASSWORD=changeme
+#   REDIS_PASSWORD=changeme
+#   PLATFORM_HMAC_SECRET=$(openssl rand -hex 32)
+#   ATOM_ENCRYPTION_KEY=$(openssl rand -hex 32)
+#   LITELLM_MASTER_KEY=sk-atom-changeme
+#   ATOM_LLM_KEY=sk-atom-changeme
+#   GEMINI_API_KEY=...   (or OPENAI_API_KEY / ANTHROPIC_API_KEY)
+
+# 5. Start the full stack (~20 containers)
+make dev-up
+
+# 6. Apply database migrations and load seed data
+make migrate-dev
+make seed-dev
+
+# 7. Install atom CLI
+make cli-install
+```
+
+Open **http://localhost:3000** → login:
+- Email: `admin@atom.local`
+- Password: `changeme`
+
+---
+
+## Architecture
+
+```
+External caller ──▶  GATE :8080  ──▶  agent container :8080
+                       │  │               │
+                       │  └──▶ atom-llm :4000 ──▶ LLM provider
+                       │                 │
+                       ▼                 ▼
+                    Postgres        Kafka (Redpanda)
+                    Redis           └─▶ log-archiver ──▶ MinIO
+                    OPA             └─▶ Studio WebSocket (live logs)
+
+atom-studio :3001/3000 ── manages domains, agents, HITL, deployments
+atom-runtime :8090     ── deploys approved agents as Docker containers (dev)
+                           or k8s pods (prod)
+
+Grafana Alloy ─▶ Loki (all container logs) + Tempo (OTLP traces) ─▶ Grafana :3005
+```
+
+Every agent runs as an isolated container. GATE enforces JWT auth, OPA policy,
+and rate limits on every request, then logs it to the immutable `audit_log_chain`.
+
+---
+
+## Service Map
+
+| Service | URL | Credentials | Purpose |
+|---|---|---|---|
+| atom-studio UI | http://localhost:3000 | admin@atom.local / changeme | Management portal |
+| atom-studio API | http://localhost:3001/docs | — | REST API + OpenAPI docs |
+| GATE | http://localhost:8080 | — | Auth / policy / audit proxy |
+| atom-llm | http://localhost:4000 | — | LiteLLM LLM gateway |
+| atom-runtime | http://localhost:8090 | — | Agent deployment controller |
+| Grafana | http://localhost:3005 | admin / admin | Logs, traces, dashboards |
+| Alloy UI | http://localhost:12345 | — | Collector pipeline viz |
+| Loki | http://localhost:3100 | — | Log aggregation API |
+| Tempo | http://localhost:3200 | — | Distributed tracing API |
+| MinIO console | http://localhost:9001 | minioadmin / changeme | Audit archive browser |
+| Postgres | localhost:5432 | atom / changeme | Primary database |
+| Redpanda (external) | localhost:19092 | — | Kafka-compatible broker |
+| agentscope-studio | http://localhost:3002 | — | Agent run trace viewer |
 
 ---
 
 ## Repository Layout
 
 ```
-atom/                          ← monorepo root
-├── gate/                      ← Go service: auth, policy, routing, audit
-├── atom-llm/                  ← Forked LiteLLM: LLM gateway + tool/skill config
-├── atom-sdk/                  ← Forked agentscope: Python SDK for agent developers
-├── atom-runtime/              ← Forked agentscope-runtime: k8s agent deployment
-├── atom-memory/               ← Forked agentscope-reme: pgvector + Redis memory
-├── atom-studio/               ← Forked agentscope-studio: management UI + API
-├── atom-cli/                  ← Go CLI: atom create / validate / deploy agent
-├── policies/                  ← OPA Rego policies (source of truth)
-│   ├── base/                  ← Core policies shipped with ATOM
-│   └── custom/                ← Org-specific policy overrides
-├── infra/                     ← Kubernetes manifests, Helm values, kind config
-│   ├── kind/                  ← kind cluster config
-│   ├── helm/                  ← Helm chart values per component
-│   └── manifests/             ← Raw k8s manifests
-├── migrations/                ← golang-migrate SQL files
-├── decisions/                 ← Architecture Decision Records (ADR-001 … ADR-014)
-├── sessions/                  ← Claude Code implementation session files (SESSION-00.md … SESSION-15.md)
-├── docs/                      ← Developer guide and reference docs
-├── ARCHITECTURE.md            ← System architecture + all flow diagrams (Mermaid)
-├── RUNBOOK.md                 ← Operational procedures (key rotation, scaling, chain validation, …)
-├── prompts/                   ← Starter prompts for each session
-├── Makefile                   ← Root make targets
-└── docker-compose.dev.yml     ← Local dev (non-k8s) fast iteration
+atom/
+├── gate/                      Go: JWT auth, OPA policy, HMAC audit chain, GATE proxy
+├── atom-llm/                  LiteLLM fork: LLM gateway + Kafka audit + ATOM extensions
+├── atom-sdk/                  agentscope fork: Python SDK — AtomChatModel, HITL, Toolkit
+├── atom-runtime/              Agent deployment controller (Docker dev / k8s prod)
+├── atom-memory/               pgvector + Redis memory backends
+├── atom-studio/
+│   ├── backend/               FastAPI: auth, domains, agents, HITL, deployments,
+│   │                          audit log, conversations view, WebSocket log stream
+│   └── frontend/              React + Vite: Studio management UI
+├── atom-cli/                  Go CLI: atom login / create / deploy / logs
+├── infra/
+│   ├── alloy/config.alloy     Grafana Alloy River config (OTLP + Docker logs)
+│   ├── grafana/               Dashboards + datasource provisioning YAML
+│   ├── log-archiver/          Python: Kafka → MinIO JSONL batch archiver
+│   ├── manifests/             Kubernetes manifests (all services)
+│   └── tempo/tempo.yaml       Tempo storage config
+├── migrations/                golang-migrate SQL files (000001 – 000011)
+├── policies/                  OPA Rego policies (base + custom)
+├── docs/kafka-schemas.md      Kafka topic message schemas + MinIO layout
+├── decisions/                 Architecture Decision Records
+├── sessions/                  SESSION-00 through SESSION-14 implementation notes
+├── Makefile                   All build / dev / deploy / test targets
+├── docker-compose.dev.yml     Full local stack definition
+└── .env.example               Environment variable template with descriptions
 ```
 
 ---
 
-## Technology Stack
+## Developer Workflow
 
-| Layer | Technology | Rationale |
-|---|---|---|
-| Gateway | Go + Fiber v3 | Performance, small binary, k8s native |
-| Policy engine | OPA + Rego | Policy-as-code, hot reload, BFSI compliance ready |
-| LLM gateway | LiteLLM OSS (forked) | 100+ provider support, virtual key management |
-| Agent SDK | agentscope (forked) | Mature multi-agent framework |
-| Studio UI | agentscope-studio (forked) | Existing stack preserved |
-| Agent runtime | agentscope-runtime (forked) | k8s-native agent deployment |
-| Memory | agentscope-reme (forked) + pgvector + Redis | Long-term (vector) + short-term (cache) |
-| Auth | JWT + Postgres (custom) | No external IdP dependency, full control |
-| Primary DB | PostgreSQL 16 | Config, schema, audit metadata |
-| Vector DB | pgvector (Postgres extension) | Co-located, avoids separate vector store |
-| Cache / rate-limit | Redis 7 | Sub-millisecond token lookups, rate counters |
-| Object storage | MinIO | S3-compatible, self-hosted, data sovereignty |
-| Log streaming | Kafka (Redpanda) | High throughput, replay, BFSI audit trail |
-| Observability | OTEL + Grafana Alloy + Tempo + Grafana | Full trace/metric/log pipeline |
-| Local k8s | kind (Kubernetes in Docker) | Lightweight, reproducible dev cluster |
-| CLI | Go + Cobra | Single static binary for developers |
-
----
-
-## Personas
-
-| Persona | What they do |
-|---|---|
-| **Platform admin** | Deploys ATOM, manages OPA policies, monitors system health |
-| **Domain developer** | Uses atom-studio to create domains and agents, uses atom-cli to build and deploy |
-| **Agent** (non-human identity) | Sends/receives requests through GATE with its unique JWT; owned by a human user |
-| **External caller** | Bank system, fintech service, or another internal agent calling an ATOM agent endpoint |
-
----
-
-## Core Invariants
-
-1. **Every request goes through GATE.** No agent exposes a direct endpoint outside GATE.
-2. **Every GATE request is logged.** Log entries form a hash chain `{prev_hash, event, hmac(secret, prev_hash||event)}`.
-3. **Every agent has a non-human JWT identity.** Issued at creation time in atom-studio; revocable.
-4. **All LLM calls are GATE-mediated.** Agents call atom-llm through GATE, never directly.
-5. **All deployments are approval-gated.** `atom deploy` submits to studio; an approver must accept before k8s rollout.
-6. **Policy is code.** OPA Rego rules in `policies/` are versioned, tested, and hot-reloaded without restart.
-
----
-
-## Quick Start
+### Create and deploy an agent
 
 ```bash
-# 1. Clone this repo
-git clone https://github.com/your-org/atom.git && cd atom
+# 1. Log in to Studio
+atom login
+# Studio URL: http://localhost:3001  |  Email: admin@atom.local  |  Password: changeme
 
-# 2. Clone the five upstream forks into the monorepo (SESSION-00)
-#    atom-llm (LiteLLM), atom-sdk, atom-studio, atom-runtime, atom-memory (agentscope)
-bash scripts/clone-upstreams.sh
+# 2. Scaffold a new agent project
+atom create
+# Prompts: project name, description, LLM provider, tools, memory, HITL
+# Generates: agent.py server.py tools.py config.py Dockerfile requirements.txt
 
-# 3. Install required tools
-make bootstrap
-
-# 4. Set up secrets
-cp .env.example .env
-make generate-keys       # generates RSA-4096 JWT key pair in .keys/
-# Edit .env — set key paths and any real LLM API keys
-
-# 5. Spin up kind cluster + infrastructure
-make infra-up
-
-# 6. Apply database schema (after SESSION-02 creates migration files)
-make migrate-up
-
-# 7. Start local dev stack (docker-compose — faster iteration than k8s)
-make dev-up
-
-# 8. Open atom-studio
-open http://localhost:3000
-
-# 9. Install atom-cli
-make cli-install
-
-# 10. Create your first agent
-atom login --studio http://localhost:3000
-atom create          # interactive wizard → generates project
+# 3. Fill in the agent's .env
 cd <project-name>
-cp .env.example .env && vim .env   # set LLM_API_KEY
-python agent.py      # runs in dev mode
-atom validate
-# prod workflow (after Studio provisioning)
-# set ATOM_MODE=prod + ATOM_AGENT_JWT in .env, then:
-atom deploy          # scan + submit for approval
+# Set: ATOM_AGENT_ID, ATOM_AGENT_JWT, ATOM_GATE_URL, ATOM_MODEL_NAME
+
+# 4. Deploy (builds Docker image, submits for HITL approval)
+atom deploy --agent-id <uuid>
+
+# 5. Approve in Studio
+open http://localhost:3000/hitl   # click the pending card → Approve
+
+# 6. Call the deployed agent
+curl -X POST http://localhost:8080/domain/<domain-id>/agent/<agent-id>/run \
+  -H "Authorization: Bearer <agent-jwt>" \
+  -H "Content-Type: application/json" \
+  -d '{"message": "Summarise RBI DPDP compliance requirements"}'
+
+# 7. Stream live logs
+atom logs <agent-id>
+```
+
+### Monitor in Studio
+
+| Feature | Navigate to |
+|---|---|
+| Live log stream | Agents → Agent → **Live Logs** |
+| Conversation history | Agents → Agent → **Conversations** |
+| Audit chain + verify | Sidebar → **Audit Log** → Verify Chain button |
+| All service logs | Grafana → Explore → Loki: `{service="gate"}` |
+| Distributed traces | Grafana → Explore → Tempo → search by trace ID |
+| Archived audit batches | MinIO console → atom-audit bucket |
+
+### Useful make targets
+
+```bash
+make dev-up              # Start everything
+make dev-down            # Stop (keep volumes)
+make dev-down-clean      # Stop + wipe all data
+
+make dev-rebuild         # Rebuild all images + restart (after code change)
+make dev-rebuild-ui      # Rebuild frontend only
+make dev-rebuild-api     # Rebuild backend only
+make dev-rebuild-gate    # Rebuild GATE only
+
+make dev-status          # Container health overview
+make logs-gate           # Tail GATE
+make logs-studio         # Tail atom-studio-api
+make logs-alloy          # Tail Grafana Alloy
+
+make migrate-dev         # Apply DB migrations to docker-compose postgres
+make seed-dev            # Load seed data (admin user, sample domain)
+
+make cli-install         # Build + install atom CLI
+make lint                # Run all linters (Go vet + ruff + OPA check)
+make test                # Run all tests
 ```
 
 ---
 
-## Implementation Sessions
+## Key Concepts
 
-Work through these in order. Each file in `sessions/` contains tasks, acceptance criteria, and a
-ready-to-paste Claude Code starter prompt.
+### GATE
+All external and inter-service calls go through GATE on `:8080`.
 
-| # | Session | Est. days |
+- **JWT** — agents carry RS256 tokens issued by atom-studio; rotated via `regenerate-token`
+- **OPA policies** — every request evaluated against `policies/base/` and `policies/custom/`
+  Edit Rego files → OPA hot-reloads automatically (no restart)
+- **Audit chain** — every request written to `audit_log_chain` (Postgres) with HMAC integrity
+  linking, and published to `atom.audit` Kafka topic
+- **Proxy routing** — `/v1/*` → atom-llm · `/hitl/*` → studio · `/memory/*` → atom-memory
+  · everything else → agent pod
+
+### Kafka Topics
+
+| Topic | Produced by | Consumed by |
 |---|---|---|
-| 00 | Monorepo setup | 0.5 |
-| 01 | Infrastructure on kind | 1 |
-| 02 | Database schema | 0.5 |
-| 03 | GATE core (JWT, routing, audit) | 2 |
-| 04 | GATE + OPA integration | 1.5 |
-| 05 | atom-llm (LiteLLM fork) | 1.5 |
-| 06 | atom-sdk (agentscope fork) | 1 |
-| 07 | atom-studio auth + domains | 1.5 |
-| 08 | atom-studio agent provisioning | 2 |
-| 09 | atom-studio HITL + deployment approval | 1.5 |
-| 10 | atom-cli | 1.5 |
-| 11 | atom-runtime (k8s deployment) | 1.5 |
-| 12 | atom-memory (pgvector + Redis) | 1 |
-| 13 | Monitoring (OTEL + Grafana stack) | 1 |
-| 14 | Kafka logging pipeline | 1 |
-| 15 | E2E testing + hardening | 1.5 |
+| `atom.audit` | GATE (every request) | log-archiver, Studio audit page |
+| `atom.llm` | atom-llm (every LLM call) | log-archiver |
+| `atom.agent.logs` | agent containers + test-log API | log-archiver, Studio Live Logs |
+| `atom.deployments` | atom-studio-api (lifecycle events) | log-archiver |
 
-**Total estimate: ~21 developer-days** (solo dev; pair dev reduces this by ~30%)
+Full schemas: `docs/kafka-schemas.md`
+
+### Agent Token Types
+`agent_tokens.token_type` distinguishes two token types:
+
+| Type | Issued by | Revoked by |
+|---|---|---|
+| `client` | `POST /regenerate-token` | Next `regenerate-token` call |
+| `pod` | `trigger_deployment` in atom-studio | Next approved deployment only |
+
+Pod tokens are **never** revoked by client key rotation, so running containers keep working.
+
+### HITL (Human-in-the-Loop)
+Deployment approvals and custom business decisions require human sign-off. When triggered,
+atom-studio pushes a WebSocket notification to all connected Studio tabs. The approving admin
+clicks Approve/Reject in the HITL Queue dialog. Unanswered requests time out (configurable,
+default 24 h) and fall back to the agent's configured `hitl_fallback` policy.
 
 ---
 
-## Architecture Decisions
+## Environment Variables
 
-All major decisions are documented in `decisions/`. Start with ADR-001 for monorepo rationale.
+| Variable | Required | Generate with |
+|---|---|---|
+| `POSTGRES_PASSWORD` | ✓ | any strong password |
+| `REDIS_PASSWORD` | ✓ | any strong password |
+| `PLATFORM_HMAC_SECRET` | ✓ | `openssl rand -hex 32` |
+| `ATOM_ENCRYPTION_KEY` | ✓ | `openssl rand -hex 32` |
+| `LITELLM_MASTER_KEY` | ✓ | `sk-atom-$(openssl rand -hex 16)` |
+| `ATOM_LLM_KEY` | ✓ | same as `LITELLM_MASTER_KEY` |
+| `MINIO_SECRET_KEY` | ✓ | any strong password |
+| `JWT_PRIVATE_KEY_PATH` | ✓ | `make generate-keys` → `.keys/jwt_private.pem` |
+| `JWT_PUBLIC_KEY_PATH` | ✓ | `make generate-keys` → `.keys/jwt_public.pem` |
+| `GEMINI_API_KEY` | for Gemini | from Google AI Studio |
+| `OPENAI_API_KEY` | for OpenAI | from platform.openai.com |
+| `ANTHROPIC_API_KEY` | for Anthropic | from console.anthropic.com |
+
+---
+
+## Troubleshooting
+
+**502 Bad Gateway on Studio UI login**
+```bash
+docker compose -f docker-compose.dev.yml up -d --force-recreate atom-studio-ui
+```
+
+**GATE returns `token_revoked`**
+```bash
+TOKEN=$(curl -s -X POST http://localhost:3001/api/auth/login \
+  -H "Content-Type: application/json" \
+  -d '{"email":"admin@atom.local","password":"changeme"}' \
+  | python3 -c "import sys,json; print(json.load(sys.stdin)['access_token'])")
+curl -X POST http://localhost:3001/api/domains/<d>/agents/<a>/regenerate-token \
+  -H "Authorization: Bearer $TOKEN"
+# Use the returned token for both the curl request AND the agent container env
+```
+
+**GATE returns `invalid_token`**
+```bash
+# Verify keys match
+openssl rsa -in .keys/jwt_private.pem -pubout | diff - .keys/jwt_public.pem \
+  && echo "MATCH" || echo "MISMATCH — re-run: make generate-keys"
+```
+
+**Kafka consumers not connecting**
+Redpanda uses dual listeners: containers use `redpanda:9092` (INTERNAL),
+host tools use `localhost:19092` (EXTERNAL).
+```bash
+docker exec atom-redpanda rpk topic list --brokers localhost:19092
+```
+
+**New Studio pages not visible**
+The Vite bundle is compiled at Docker build time. After code changes:
+```bash
+make dev-rebuild-ui
+```
+
+**Conversations page crashes**
+asyncpg returns JSONB as raw strings in some configurations.
+```bash
+make dev-rebuild-api   # picks up the _parse_jsonb_list fix
+```
+
+---
+
+## Tech Stack
+
+| Layer | Technology |
+|---|---|
+| API Gateway | Go + Fiber v3 |
+| Policy engine | OPA + Rego (hot-reload) |
+| LLM gateway | LiteLLM OSS (forked → atom-llm) |
+| Agent SDK | agentscope (forked → atom-sdk) + AtomChatModel |
+| Agent runtime | Docker (dev) / Kubernetes (prod) via atom-runtime |
+| Memory | pgvector (vector search) + Redis (session cache) |
+| Studio | FastAPI + React/Vite (Tanstack Router + Query) |
+| CLI | Go + Cobra |
+| Primary DB | PostgreSQL 16 + pgvector extension |
+| Object storage | MinIO (S3-compatible, on-prem) |
+| Message broker | Redpanda (Kafka-compatible) |
+| Log aggregation | Grafana Loki (via Alloy Docker log collection) |
+| Distributed tracing | Grafana Tempo (via Alloy OTLP receiver) |
+| Observability collector | Grafana Alloy |
+| Visualisation | Grafana (Loki + Tempo datasources auto-provisioned) |
+| Local k8s | kind (Kubernetes in Docker) |
+
+---
+
+## Completed Sessions
+
+| # | Topic |
+|---|---|
+| 00 | Monorepo setup + upstream clones |
+| 01 | k8s infrastructure (kind, Postgres, Redis, MinIO, Redpanda, OPA) |
+| 02 | Database schema (migrations 000001–000011) |
+| 03 | GATE: JWT auth, OPA integration, routing, HMAC audit chain |
+| 04 | GATE: rate limiting, Kafka publish, policy enforcement |
+| 05 | atom-llm: LiteLLM fork, virtual keys, Kafka audit logger |
+| 06 | atom-sdk: agentscope fork, AtomChatModel, HITL hooks, Toolkit API |
+| 07 | atom-studio: FastAPI backend, JWT auth, domains, agents |
+| 08 | atom-studio: agent provisioning, LiteLLM virtual key management |
+| 09 | atom-studio: HITL queue, deployment approval flow, WebSocket |
+| 10 | atom-cli: `login` `create` `deploy` `logs` commands |
+| 11 | atom-runtime: k8s controller + Docker backend for docker-compose dev |
+| 12 | atom-memory: pgvector + Redis backends, MemoryManager |
+| 13 | Monitoring: Grafana Alloy, Loki, Tempo, OTEL instrumentation |
+| 14 | Kafka pipeline: log-archiver → MinIO, live logs, audit page, conversations view |
+
+See `sessions/SESSION-XX.md` for detailed implementation notes and decisions.
+All major decisions are in `decisions/` — start with ADR-001 for monorepo rationale.
