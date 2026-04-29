@@ -76,6 +76,8 @@ def _run_container(
     # Forward Kafka brokers so the agent can stream logs to atom.agent.logs
     if kb := _os.environ.get("KAFKA_BROKERS"):
         env["KAFKA_BROKERS"] = kb
+    # Studio URL so the agent can record conversation runs
+    env["ATOM_STUDIO_URL"] = _os.environ.get("ATOM_STUDIO_API_URL", "http://atom-studio-api:3001")
 
     container = client.containers.run(
         image,

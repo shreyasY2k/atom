@@ -230,6 +230,8 @@ services:
       JWT_PUBLIC_KEY_PATH: /etc/atom/jwt_public.pem
       KAFKA_BROKERS: redpanda:9092
       PLATFORM_HMAC_SECRET: ${PLATFORM_HMAC_SECRET:-changeme-hmac-secret}
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://alloy:4318
+      OTEL_SERVICE_NAME: atom-studio
     ports:
       - "3001:3001"
     volumes:

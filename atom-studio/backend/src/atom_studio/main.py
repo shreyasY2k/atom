@@ -15,6 +15,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from .agents.router import global_router as agents_global_router
 from .agents.router import router as agents_router
 from .audit.router import router as audit_router
+from .runs.router import router as runs_router
 from .auth.router import router as auth_router
 from .auth.users_router import router as users_router
 from .database import init_pool
@@ -97,6 +98,7 @@ app.include_router(hitl_router, prefix="/api/hitl", tags=["hitl"])
 app.include_router(deployments_router, prefix="/api/deployments", tags=["deployments"])
 app.include_router(runtime_router, prefix="/api/runtime", tags=["runtime"])
 app.include_router(audit_router, prefix="/api/audit", tags=["audit"])
+app.include_router(runs_router, prefix="/api/agents/{agent_id}/runs", tags=["runs"])
 app.include_router(ws_router, prefix="/ws")
 
 

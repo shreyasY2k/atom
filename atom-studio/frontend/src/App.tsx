@@ -15,6 +15,7 @@ import { Domains } from '@/pages/Domains'
 import { Agents } from '@/pages/Agents'
 import { AgentWizard } from '@/pages/AgentWizard'
 import { AgentDetail } from '@/pages/AgentDetail'
+import { AgentConversations } from '@/pages/AgentConversations'
 import { AgentLogs } from '@/pages/AgentLogs'
 import { Audit } from '@/pages/Audit'
 import { HitlQueue } from '@/pages/HitlQueue'
@@ -120,6 +121,21 @@ const agentLogsRoute = createRoute({
   },
 })
 
+const agentConversationsRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: '/agents/$agentId/conversations',
+  component: function AgentConversationsPage() {
+    const { agentId } = agentConversationsRoute.useParams()
+    return (
+      <RequireAuth>
+        <Layout>
+          <AgentConversations agentId={agentId} />
+        </Layout>
+      </RequireAuth>
+    )
+  },
+})
+
 const auditRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: '/audit',
@@ -140,6 +156,7 @@ const routeTree = rootRoute.addChildren([
   agentNewRoute,
   agentDetailRoute,
   agentLogsRoute,
+  agentConversationsRoute,
   auditRoute,
   hitlRoute,
 ])
