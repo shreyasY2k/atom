@@ -14,6 +14,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from .agents.router import global_router as agents_global_router
 from .agents.router import router as agents_router
+from .audit.router import router as audit_router
 from .auth.router import router as auth_router
 from .auth.users_router import router as users_router
 from .database import init_pool
@@ -22,8 +23,10 @@ from .deployments.router import runtime_router
 from .domains.router import router as domains_router
 from .hitl.router import router as hitl_router
 from .hitl.service import expire_stale_hitl
+from .kafka_producer import init_producer, stop_producer
 from .skills.router import router as skills_router
 from .tools.router import router as tools_router
+from .ws.log_broadcaster import broadcaster
 from .ws.router import ws_router
 
 logger = logging.getLogger(__name__)
@@ -62,9 +65,13 @@ def _setup_otel(app: FastAPI) -> None:
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     await init_pool()
+    await init_producer()
+    await broadcaster.start()
     task = asyncio.create_task(expire_stale_hitl())
     yield
     task.cancel()
+    await broadcaster.stop()
+    await stop_producer()
 
 
 app = FastAPI(title="ATOM Studio API", version="0.1.0", lifespan=lifespan)
@@ -89,6 +96,7 @@ app.include_router(skills_router, prefix="/api/skills", tags=["skills"])
 app.include_router(hitl_router, prefix="/api/hitl", tags=["hitl"])
 app.include_router(deployments_router, prefix="/api/deployments", tags=["deployments"])
 app.include_router(runtime_router, prefix="/api/runtime", tags=["runtime"])
+app.include_router(audit_router, prefix="/api/audit", tags=["audit"])
 app.include_router(ws_router, prefix="/ws")
 
 

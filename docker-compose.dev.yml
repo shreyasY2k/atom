@@ -84,10 +84,11 @@ services:
       - --memory 512M
       - --reserve-memory 0M
       - --overprovisioned
-      - --kafka-addr PLAINTEXT://0.0.0.0:9092
-      - --advertise-kafka-addr PLAINTEXT://localhost:9092
+      - --kafka-addr INTERNAL://0.0.0.0:9092,EXTERNAL://0.0.0.0:19092
+      - --advertise-kafka-addr INTERNAL://redpanda:9092,EXTERNAL://localhost:19092
     ports:
-      - "9092:9092"
+      - "9092:9092"   # INTERNAL — for inter-container traffic (used by KAFKA_BROKERS=redpanda:9092)
+      - "19092:19092" # EXTERNAL — for host-side tools (rpk, kafkacat, etc.)
       - "9644:9644"
     volumes:
       - redpanda_data:/var/lib/redpanda/data
@@ -141,6 +142,8 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
+      redpanda:
+        condition: service_healthy
     env_file: .env
     environment:
       DATABASE_URL: postgresql://atom:${POSTGRES_PASSWORD:-changeme}@postgres:5432/atom
@@ -150,6 +153,8 @@ services:
       ATOM_LLM_URL: http://atom-llm:4000
       ATOM_STUDIO_API_URL: http://atom-studio-api:3001
       ATOM_MEMORY_URL: http://atom-memory:8000
+      KAFKA_BROKERS: redpanda:9092
+      PLATFORM_HMAC_SECRET: ${PLATFORM_HMAC_SECRET:-changeme-hmac-secret}
       # OTEL: kubectl port-forward svc/alloy 4318:4318 -n atom-system must be running.
       # Go's otlptracehttp.WithEndpoint expects host:port (no scheme); WithInsecure() makes it HTTP.
       OTEL_EXPORTER_OTLP_ENDPOINT: host.docker.internal:4318
@@ -184,8 +189,11 @@ services:
       # Python OTEL expects full URL. Use host.docker.internal to reach host port-forward.
       OTEL_EXPORTER_OTLP_ENDPOINT: http://host.docker.internal:4318
       OTEL_SERVICE_NAME: atom-llm
+      KAFKA_BROKERS: redpanda:9092
     depends_on:
       postgres:
+        condition: service_healthy
+      redpanda:
         condition: service_healthy
     volumes:
       - ./atom-llm/config.dev.yaml:/app/config.dev.yaml:ro
@@ -210,6 +218,8 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
+      redpanda:
+        condition: service_healthy
     env_file: .env
     environment:
       DATABASE_URL: postgresql://atom:${POSTGRES_PASSWORD:-changeme}@postgres:5432/atom
@@ -218,6 +228,8 @@ services:
       ATOM_RUNTIME_URL: http://atom-runtime:8090
       JWT_PRIVATE_KEY_PATH: /etc/atom/jwt_private.pem
       JWT_PUBLIC_KEY_PATH: /etc/atom/jwt_public.pem
+      KAFKA_BROKERS: redpanda:9092
+      PLATFORM_HMAC_SECRET: ${PLATFORM_HMAC_SECRET:-changeme-hmac-secret}
     ports:
       - "3001:3001"
     volumes:
@@ -281,6 +293,31 @@ services:
       # Mount the kind kubeconfig. The server URL in the config must be
       # reachable from inside the container (use host.docker.internal, not 127.0.0.1).
       - ${KUBECONFIG:-~/.kube/config}:/root/.kube/config:ro
+
+  # ── log-archiver (Kafka → MinIO) ─────────────────────────────────────────────
+  # SESSION-14: consumes all four Kafka topics as consumer group "log-archiver"
+  # and archives batched JSON lines to MinIO under atom-audit/{topic}/yyyy/mm/dd/hh/.
+  log-archiver:
+    build:
+      context: infra/log-archiver/
+      dockerfile: Dockerfile
+    container_name: atom-log-archiver
+    restart: unless-stopped
+    depends_on:
+      redpanda:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+      redpanda-init:
+        condition: service_completed_successfully
+      minio-init:
+        condition: service_completed_successfully
+    environment:
+      KAFKA_BROKERS: redpanda:9092
+      MINIO_ENDPOINT: http://minio:9000
+      MINIO_ACCESS_KEY: ${MINIO_ACCESS_KEY:-minioadmin}
+      MINIO_SECRET_KEY: ${MINIO_SECRET_KEY:-changeme}
+      MINIO_BUCKET: atom-audit
 
   # ── Grafana ──────────────────────────────────────────────────────────────────
   # Basic Grafana for quick local inspection (no Tempo datasource).

@@ -43,6 +43,14 @@ spec:
               value: /etc/atom/jwt_private.pem
             - name: JWT_PUBLIC_KEY_PATH
               value: /etc/atom/jwt_public.pem
+            - name: KAFKA_BROKERS
+              value: redpanda.atom-infra.svc.cluster.local:9092
+            - name: PLATFORM_HMAC_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: atom-credentials
+                  key: platform_hmac_secret
+                  optional: true
             # Python OTEL exporter expects a full URL
             - name: OTEL_EXPORTER_OTLP_ENDPOINT
               value: http://alloy.atom-system.svc.cluster.local:4318

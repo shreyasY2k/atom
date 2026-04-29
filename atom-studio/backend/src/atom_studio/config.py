@@ -16,6 +16,8 @@ class Settings(BaseSettings):
     atom_runtime_url: str = "http://atom-runtime:8090"
     access_token_expire_minutes: int = 15
     refresh_token_expire_days: int = 7
+    kafka_brokers: str = ""
+    platform_hmac_secret: str = ""
 
     @property
     def jwt_private_key(self) -> str:

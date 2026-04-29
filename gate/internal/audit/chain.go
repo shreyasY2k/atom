@@ -153,7 +153,9 @@ func (l *Logger) write(ctx context.Context, j job) error {
 	}
 
 	if l.kafka != nil {
-		_ = l.kafka.WriteMessages(ctx, kafkago.Message{Value: eventJSON})
+		// Key = agent_id for partition consistency; fall back to empty key.
+		key := []byte(j.event.AgentID)
+		_ = l.kafka.WriteMessages(ctx, kafkago.Message{Key: key, Value: eventJSON})
 	}
 	return nil
 }

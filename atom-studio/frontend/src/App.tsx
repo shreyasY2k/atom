@@ -15,6 +15,8 @@ import { Domains } from '@/pages/Domains'
 import { Agents } from '@/pages/Agents'
 import { AgentWizard } from '@/pages/AgentWizard'
 import { AgentDetail } from '@/pages/AgentDetail'
+import { AgentLogs } from '@/pages/AgentLogs'
+import { Audit } from '@/pages/Audit'
 import { HitlQueue } from '@/pages/HitlQueue'
 
 const queryClient = new QueryClient()
@@ -103,6 +105,33 @@ const hitlRoute = createRoute({
   ),
 })
 
+const agentLogsRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: '/agents/$agentId/logs',
+  component: function AgentLogsPage() {
+    const { agentId } = agentLogsRoute.useParams()
+    return (
+      <RequireAuth>
+        <Layout>
+          <AgentLogs agentId={agentId} />
+        </Layout>
+      </RequireAuth>
+    )
+  },
+})
+
+const auditRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: '/audit',
+  component: () => (
+    <RequireAuth>
+      <Layout>
+        <Audit />
+      </Layout>
+    </RequireAuth>
+  ),
+})
+
 const routeTree = rootRoute.addChildren([
   indexRoute,
   loginRoute,
@@ -110,6 +139,8 @@ const routeTree = rootRoute.addChildren([
   agentsRoute,
   agentNewRoute,
   agentDetailRoute,
+  agentLogsRoute,
+  auditRoute,
   hitlRoute,
 ])
 

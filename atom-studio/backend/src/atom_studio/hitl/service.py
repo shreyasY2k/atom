@@ -3,6 +3,7 @@ import json
 from datetime import datetime, timedelta, timezone
 
 from ..database import get_conn
+from ..kafka_producer import emit as kafka_emit
 from ..ws.manager import manager
 
 
@@ -37,6 +38,16 @@ async def create_hitl_request(
             "expires_at": expires_at.isoformat(),
         }
     )
+    await kafka_emit(
+        "atom.deployments",
+        {
+            "event": "hitl_created",
+            "hitl_id": str(row["id"]),
+            "agent_id": agent_id,
+            "workflow_type": workflow_type,
+            "expires_at": expires_at.isoformat(),
+        },
+    )
     return dict(row)
 
 
@@ -67,6 +78,17 @@ async def decide(
             "approved": approved,
             "note": note,
         }
+    )
+
+    await kafka_emit(
+        "atom.deployments",
+        {
+            "event": "hitl_decided",
+            "hitl_id": hitl_id,
+            "approved": approved,
+            "decided_by": decided_by_user_id,
+            "note": note,
+        },
     )
 
     if approved:

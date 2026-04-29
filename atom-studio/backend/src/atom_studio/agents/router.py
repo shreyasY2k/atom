@@ -1,6 +1,7 @@
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Body, Depends, HTTPException, status
 
 from ..auth.middleware import require_auth
+from ..ws.emit_agent_log import emit_agent_log
 from .service import (
     AgentCreatePayload,
     create_agent,
@@ -56,6 +57,21 @@ async def regenerate_token_route(domain_id: str, agent_id: str, _: dict = Depend
         raise HTTPException(status.HTTP_404_NOT_FOUND, detail="agent not found")
     raw_jwt = await regenerate_token(agent_id)
     return {"token": raw_jwt}
+
+
+@router.post("/{agent_id}/test-log", status_code=202)
+async def test_log_route(
+    domain_id: str,
+    agent_id: str,
+    message: str = Body(..., embed=True),
+    _: dict = Depends(require_auth),
+):
+    """Emit a test log line to atom.agent.logs for integration testing."""
+    agent = await get_agent(domain_id, agent_id)
+    if not agent:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, detail="agent not found")
+    await emit_agent_log(agent_id, message)
+    return {"queued": True}
 
 
 # ── Global agent listing (mounted at /api/agents) ─────────────────────────────

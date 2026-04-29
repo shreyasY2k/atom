@@ -1,0 +1,65 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: log-archiver
+  namespace: atom-system
+  labels:
+    app: log-archiver
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: log-archiver
+  template:
+    metadata:
+      labels:
+        app: log-archiver
+    spec:
+      containers:
+        - name: log-archiver
+          image: atom/log-archiver:latest
+          imagePullPolicy: IfNotPresent
+          env:
+            - name: KAFKA_BROKERS
+              value: redpanda.atom-infra.svc.cluster.local:9092
+            - name: MINIO_ENDPOINT
+              valueFrom:
+                secretKeyRef:
+                  name: minio-credentials
+                  key: endpoint
+            - name: MINIO_ACCESS_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: minio-credentials
+                  key: access_key
+            - name: MINIO_SECRET_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: minio-credentials
+                  key: secret_key
+            - name: MINIO_BUCKET
+              value: atom-audit
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              cpu: 200m
+              memory: 256Mi
+          livenessProbe:
+            exec:
+              command: ["python", "-c", "import sys; sys.exit(0)"]
+            initialDelaySeconds: 10
+            periodSeconds: 30
+      restartPolicy: Always
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: minio-credentials
+  namespace: atom-system
+type: Opaque
+stringData:
+  endpoint: http://minio.atom-infra.svc.cluster.local:9000
+  access_key: minioadmin
+  secret_key: changeme

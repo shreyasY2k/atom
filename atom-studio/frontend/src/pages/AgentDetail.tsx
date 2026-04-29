@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { useNavigate, Link } from '@tanstack/react-router'
 import { format } from 'date-fns'
-import { RefreshCw, Trash2, ChevronLeft } from 'lucide-react'
+import { RefreshCw, Trash2, ChevronLeft, Terminal } from 'lucide-react'
 import api from '@/lib/api'
 import { toast } from '@/hooks/use-toast'
 import { Badge } from '@/components/ui/badge'
@@ -265,6 +265,12 @@ export function AgentDetail({ domainId, agentId }: AgentDetailProps) {
 
       {/* Actions */}
       <div className="flex gap-2 pt-2">
+        <Button variant="outline" asChild>
+          <Link to="/agents/$agentId/logs" params={{ agentId }}>
+            <Terminal className="mr-2 h-4 w-4" />
+            Live Logs
+          </Link>
+        </Button>
         <Button
           variant="outline"
           onClick={() => setConfirmRegen(true)}

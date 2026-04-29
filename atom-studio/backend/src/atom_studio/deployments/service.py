@@ -4,6 +4,7 @@ import json
 import httpx
 
 from ..config import get_settings
+from ..kafka_producer import emit as kafka_emit
 
 # atom-runtime URL can be overridden at runtime via /api/runtime/register
 _runtime_url: str | None = None
@@ -63,6 +64,19 @@ async def submit_deployment(
         timeout_s=86400,
         conn=conn,
     )
+
+    await kafka_emit(
+        "atom.deployments",
+        {
+            "event": "deployment_submitted",
+            "deployment_id": str(deployment["id"]),
+            "agent_id": agent_id,
+            "version": deployment["version"],
+            "image": image,
+            "git_sha": git_sha,
+            "submitted_by": submitted_by,
+        },
+    )
     return dict(deployment)
 
 
@@ -107,6 +121,16 @@ async def trigger_deployment(hitl_payload: dict, conn) -> None:
         "INSERT INTO agent_tokens (agent_id, token_hash) VALUES ($1,$2)",
         agent_row["id"],
         token_hash,
+    )
+
+    await kafka_emit(
+        "atom.deployments",
+        {
+            "event": "deployment_approved",
+            "deployment_id": deployment_id,
+            "agent_id": str(agent_row["id"]),
+            "image": manifest.get("image") or hitl_payload.get("image"),
+        },
     )
 
     try:

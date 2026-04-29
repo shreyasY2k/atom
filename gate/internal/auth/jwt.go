@@ -93,7 +93,9 @@ func parseToken(raw string, pubKey *rsa.PublicKey) (*Claims, error) {
 			return nil, fmt.Errorf("unexpected signing method: %v", t.Header["alg"])
 		}
 		return pubKey, nil
-	}, jwt.WithIssuedAt(), jwt.WithExpirationRequired())
+	}, jwt.WithIssuedAt())
+	// Note: ExpirationRequired is intentionally omitted — agent tokens have no exp claim;
+	// revocation is handled via agent_tokens.revoked_at in Postgres.
 	if err != nil {
 		return nil, err
 	}

@@ -10,7 +10,7 @@ const navItems = [
   { label: 'Domains', href: '/domains', icon: Globe, enabled: true },
   { label: 'Agents', href: '/agents', icon: Bot, enabled: true },
   { label: 'HITL Queue', href: '/hitl', icon: UserCheck, enabled: true },
-  { label: 'Audit Log', href: '/audit', icon: BookOpen, enabled: false },
+  { label: 'Audit Log', href: '/audit', icon: BookOpen, enabled: true },
 ]
 
 export function Layout({ children }: { children: React.ReactNode }) {
