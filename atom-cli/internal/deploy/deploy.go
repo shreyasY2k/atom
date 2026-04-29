@@ -10,8 +10,8 @@ import (
 	"strings"
 )
 
+// deployReq matches DeploymentSubmitPayload — agent_id is a path param, not body.
 type deployReq struct {
-	AgentID string `json:"agent_id"`
 	Image   string `json:"image"`
 	Message string `json:"message,omitempty"`
 }
@@ -32,10 +32,10 @@ func BuildImage(dir, image string) error {
 	return nil
 }
 
-// Submit calls the atom-studio deploy API.
+// Submit calls POST /api/deployments/{agent_id} on atom-studio.
 func Submit(studioURL, token, agentID, image, message string) (*deployResp, error) {
-	body, _ := json.Marshal(deployReq{AgentID: agentID, Image: image, Message: message})
-	url := strings.TrimRight(studioURL, "/") + "/api/deployments/"
+	body, _ := json.Marshal(deployReq{Image: image, Message: message})
+	url := strings.TrimRight(studioURL, "/") + "/api/deployments/" + agentID
 
 	req, _ := http.NewRequest(http.MethodPost, url, bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
