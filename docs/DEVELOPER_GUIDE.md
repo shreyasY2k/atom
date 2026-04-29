@@ -1,6 +1,7 @@
 # ATOM Developer Guide
 
-How to build an agent, test locally, add tools, and write Rego policies.
+How to build an agent, test locally (docker-compose) and in production (kind k8s),
+add tools, and write Rego policies.
 
 ---
 
@@ -170,7 +171,37 @@ make policy-test
 
 ---
 
-## 6. Commit Convention
+## 6. Local Dev vs Prod Mode
+
+| Feature | docker-compose (`make dev-up`) | kind k8s (`make k8s-deploy`) |
+|---------|-------------------------------|------------------------------|
+| GATE URL | `http://localhost:8080` | port-forward `svc/gate 8080:8080` |
+| Studio URL | `http://localhost:3001` | port-forward `svc/atom-studio-api 3001:3001` |
+| Agent JWT | issued by studio at agent creation | same — RS256 RS4096 key pair |
+| Agent pods | docker containers via atom-runtime docker backend | Kubernetes pods in `atom-agents` ns |
+| ATOM_MODE env | `development` (no k8s RBAC needed) | `production` (full NetworkPolicy enforcement) |
+| LiteLLM DB | local Postgres | in-cluster Postgres (atom-infra) |
+
+**Set prod mode in your agent project:**
+```bash
+export ATOM_MODE=prod
+export ATOM_GATE_URL=http://localhost:8080   # via port-forward
+export ATOM_AGENT_JWT=<token-from-studio>
+atom validate    # must exit 0
+atom deploy      # submits to k8s via HITL
+```
+
+**Useful port-forwards for k8s dev:**
+```bash
+kubectl port-forward svc/gate            8080:8080 -n atom-system &
+kubectl port-forward svc/atom-studio-api 3001:3001 -n atom-system &
+kubectl port-forward svc/atom-llm        4000:4000 -n atom-system &
+kubectl port-forward svc/postgres        5432:5432 -n atom-infra  &
+```
+
+---
+
+## 7. Commit Convention
 
 All commits must follow [Conventional Commits](https://www.conventionalcommits.org/):
 
@@ -182,5 +213,5 @@ test(policies): add cross-domain denial test case
 docs(sessions): clarify SESSION-05 acceptance criteria
 ```
 
-Allowed types: `feat`, `fix`, `chore`, `docs`, `test`, `refactor`, `perf`, `ci`, `build`, `revert`  
+Allowed types: `feat`, `fix`, `chore`, `docs`, `test`, `refactor`, `perf`, `ci`, `build`, `revert`
 Allowed scopes: `gate`, `atom-llm`, `atom-sdk`, `atom-runtime`, `atom-memory`, `atom-studio`, `atom-cli`, `policies`, `infra`, `migrations`, `docs`, `sessions`, `deps`, `all`

@@ -26,7 +26,7 @@ spec:
               name: http
           env:
             - name: DATABASE_URL
-              value: postgresql://atom:changeme@postgres.atom-infra.svc.cluster.local:5432/atom
+              value: postgresql://atom:changeme@postgres-postgresql.atom-infra.svc.cluster.local:5432/atom
             - name: KAFKA_BROKERS
               value: redpanda.atom-infra.svc.cluster.local:9092
             - name: STORE_MODEL_IN_DB

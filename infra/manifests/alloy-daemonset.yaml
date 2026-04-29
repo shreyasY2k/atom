@@ -79,9 +79,9 @@ data:
         metadata = ["k8s.pod.name", "k8s.namespace.name", "k8s.pod.uid"]
         labels = [
           {
-            from     = "pod"
-            key      = "atom.io/agent-id"
-            tag_name = "agent_id"
+            from      = "pod"
+            key       = "atom.io/agent-id"
+            tag_name  = "agent_id"
           },
         ]
       }

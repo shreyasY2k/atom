@@ -18,29 +18,32 @@ spec:
         - podSelector:
             matchLabels:
               app: gate
+        - podSelector:
+            matchLabels:
+              app: atom-studio-api
       ports:
         - protocol: TCP
           port: 4000
   egress:
-    # Postgres
+    # Postgres (bitnami chart uses app.kubernetes.io/name=postgresql)
     - to:
         - namespaceSelector:
             matchLabels:
               kubernetes.io/metadata.name: atom-infra
           podSelector:
             matchLabels:
-              app: postgres
+              app.kubernetes.io/name: postgresql
       ports:
         - protocol: TCP
           port: 5432
-    # Redis
+    # Redis (bitnami chart uses app.kubernetes.io/name=redis)
     - to:
         - namespaceSelector:
             matchLabels:
               kubernetes.io/metadata.name: atom-infra
           podSelector:
             matchLabels:
-              app: redis
+              app.kubernetes.io/name: redis
       ports:
         - protocol: TCP
           port: 6379

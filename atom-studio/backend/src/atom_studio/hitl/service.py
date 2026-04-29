@@ -114,7 +114,7 @@ async def decide(
 async def expire_stale_hitl() -> None:
     """Background loop: expire pending HITL records whose deadline has passed."""
     while True:
-        await asyncio.sleep(60)
+        await asyncio.sleep(5)
         async with get_conn() as conn:
             rows = await conn.fetch(
                 """

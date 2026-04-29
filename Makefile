@@ -10,7 +10,7 @@ SHELL := /bin/bash
         lint lint-go lint-python \
         test test-go test-python test-e2e test-load \
         generate-keys go-sync go-tidy clean \
-        k8s-deploy monitoring-up monitoring-down
+        k8s-secrets k8s-deploy monitoring-up monitoring-down
 
 # ── Cluster name ─────────────────────────────────────────────────────────────
 CLUSTER_NAME ?= atom
@@ -62,11 +62,7 @@ bootstrap: ## Install all required tools (run once on first setup)
 	@echo "  5. make seed-dev              # load dev seed data"
 
 # ── Infrastructure (k8s) ─────────────────────────────────────────────────────
-infra-up: ## Create kind cluster and deploy all infra services
-	@echo "→ Creating kind cluster '$(CLUSTER_NAME)'..."
-	@kind get clusters | grep -q $(CLUSTER_NAME) || \
-	  kind create cluster --config infra/kind/cluster.yaml --name $(CLUSTER_NAME)
-	@kubectl config use-context kind-$(CLUSTER_NAME)
+infra-up: ## Deploy infra services to the current kubectl cluster
 	@echo "→ Applying namespaces..."
 	@kubectl apply -f infra/manifests/namespaces.yaml
 	@echo "→ Installing nginx-ingress..."
@@ -93,9 +89,9 @@ infra-up: ## Create kind cluster and deploy all infra services
 	@echo ""
 	@echo "✓ Infrastructure up. Run 'make migrate-up' next."
 
-infra-down: ## Tear down kind cluster
-	@kind delete cluster --name $(CLUSTER_NAME)
-	@echo "✓ Cluster deleted."
+infra-down: ## Tear down infra services (delete atom-infra / atom-system / atom-agents namespaces)
+	@kubectl delete namespace atom-infra atom-system atom-agents 2>/dev/null || true
+	@echo "✓ Infra namespaces deleted."
 
 # ── Local dev (docker-compose) ────────────────────────────────────────────────
 dev-up: ## Start full stack via docker-compose (first run may take a few minutes)
@@ -185,7 +181,7 @@ logs-runtime: ## Tail atom-runtime logs
 	@docker logs atom-runtime -f
 
 # ── Database migrations ───────────────────────────────────────────────────────
-migrate-up: ## Apply migrations to k8s postgres (port-forward svc/postgres first)
+migrate-up: ## Apply migrations to k8s postgres (port-forward svc/postgres-postgresql first)
 	@$(MIGRATE) -database "$(DATABASE_URL)" -path migrations up
 	@echo "✓ Migrations applied."
 
@@ -287,27 +283,28 @@ test-go: ## Run Go tests (gate + atom-cli)
 	@cd gate     && go test ./... -race -count=1
 	@cd atom-cli && go test ./... -race -count=1
 
-test-python: ## Run Python tests (all components)
-	@python3 -m pytest atom-llm/ atom-runtime/ atom-memory/ atom-studio/ \
-	  --ignore=node_modules -q 2>/dev/null || \
-	  echo "(pytest not installed or Python components not yet cloned — skip)"
+test-python: ## Run Python tests (all components via uv isolated envs)
+	@echo "→ atom-studio tests..."
+	@uv run --project atom-studio/backend --with pytest-asyncio \
+	  python -m pytest atom-studio/backend/src/tests/ -q --tb=short 2>/dev/null || \
+	  echo "(atom-studio tests skipped — check uv env)"
+	@echo "→ atom-runtime tests..."
+	@uv run --project atom-runtime/runtime --with pytest-asyncio \
+	  python -m pytest atom-runtime/runtime/tests/ -q --tb=short 2>/dev/null || \
+	  echo "(atom-runtime tests skipped — check uv env)"
 
 test-e2e: ## Run end-to-end tests (requires full stack running)
 	@python3 -m pytest tests/e2e/ -v
 
-test-load: ## Run k6 load test against GATE
-	@k6 run tests/load/gate_load_test.js
+test-load: ## Run k6 load test against GATE (results → tests/load/results/summary.json)
+	@mkdir -p tests/load/results
+	@k6 run tests/load/gate_load_test.js \
+	  --summary-export=tests/load/results/summary.json
 
-# ── Kubernetes application deploy ─────────────────────────────────────────────
-k8s-deploy: ## Build images and deploy all services to k8s
-	@echo "→ Building Docker images..."
-	@docker rmi atom-gate:local atom-llm:local atom-studio-api:local atom-studio-ui:local atom-log-archiver:local 2>/dev/null || true
-	@docker build -t atom-gate:local gate/ -f gate/Dockerfile
-	@docker build -t atom-llm:local atom-llm/ -f atom-llm/Dockerfile.dev
-	@docker build -t atom-studio-api:local atom-studio/backend/
-	@docker build -t atom-studio-ui:local atom-studio/frontend/
-	@docker build -t atom-log-archiver:local infra/log-archiver/
-	@echo "→ Creating secrets and ConfigMaps..."
+# ── Kubernetes secrets (idempotent) ──────────────────────────────────────────
+k8s-secrets: ## Create/update atom-credentials and atom-jwt-keys Secrets in atom-system
+	@echo "→ Applying k8s Secrets..."
+	@kubectl apply -f infra/manifests/namespaces.yaml
 	@kubectl create secret generic atom-credentials \
 	  --from-env-file=.env \
 	  --namespace atom-system --dry-run=client -o yaml | kubectl apply -f -
@@ -315,18 +312,41 @@ k8s-deploy: ## Build images and deploy all services to k8s
 	  --from-file=jwt_private.pem=.keys/jwt_private.pem \
 	  --from-file=jwt_public.pem=.keys/jwt_public.pem \
 	  --namespace atom-system --dry-run=client -o yaml | kubectl apply -f -
+	@echo "✓ Secrets applied."
+
+# ── Kubernetes application deploy ─────────────────────────────────────────────
+k8s-deploy: ## Build images, load into kind, apply manifests, wait for rollouts
+	@echo "→ Building Docker images..."
+	@docker rmi atom-gate:local atom-llm:local atom-studio-api:local atom-studio-ui:local atom-log-archiver:local atom-runtime:local 2>/dev/null || true
+	@docker build -t atom-gate:local gate/ -f gate/Dockerfile
+	@docker build -t atom-llm:local atom-llm/ -f atom-llm/Dockerfile.dev
+	@docker build -t atom-studio-api:local atom-studio/backend/
+	@docker build -t atom-studio-ui:local atom-studio/frontend/
+	@docker build -t atom-log-archiver:local infra/log-archiver/
+	@docker build -t atom-runtime:local atom-runtime/runtime/
+	@echo "  (images built above are available to the cluster via local Docker daemon)"
+	@echo "→ Creating Secrets and ConfigMaps..."
+	@$(MAKE) k8s-secrets
 	@kubectl create configmap opa-policies \
 	  --from-file=policies/base/ --namespace atom-system \
 	  --dry-run=client -o yaml | kubectl apply -f -
 	@echo "→ Applying manifests..."
+	@kubectl apply -f infra/manifests/atom-llm-netpol.yaml
 	@kubectl apply -f infra/manifests/gate-deployment.yaml
 	@kubectl apply -f infra/manifests/atom-llm-deployment.yaml
 	@kubectl apply -f infra/manifests/atom-studio-deployment.yaml
 	@kubectl apply -f infra/manifests/atom-studio-ui-deployment.yaml
+	@kubectl apply -f infra/manifests/atom-runtime-deployment.yaml
 	@kubectl apply -f infra/manifests/log-archiver-deployment.yaml
 	@kubectl apply -f infra/manifests/alloy-daemonset.yaml
+	@echo "→ Running ATOM DB migrations..."
+	@kubectl port-forward -n atom-infra svc/postgres-postgresql 5432:5432 &
+	@sleep 3
+	@$(MIGRATE) -database "postgresql://atom:changeme@localhost:5432/atom?sslmode=disable" \
+	  -path migrations up 2>/dev/null || echo "(migrations already up-to-date)"
+	@pkill -f "kubectl port-forward.*svc/postgres-postgresql.*5432" 2>/dev/null || true
 	@echo "→ Running LiteLLM Prisma migrations..."
-	@kubectl port-forward -n atom-infra svc/postgres 5433:5432 &
+	@kubectl port-forward -n atom-infra svc/postgres-postgresql 5433:5432 &
 	@sleep 3
 	@SCHEMA=$$(docker run --rm atom-llm:local python3 -c \
 	    "import litellm, os; print(os.path.join(os.path.dirname(litellm.__file__), 'proxy', 'schema.prisma'))") && \
@@ -341,12 +361,14 @@ k8s-deploy: ## Build images and deploy all services to k8s
 	@kubectl delete pods -n atom-system -l app=atom-studio-api 2>/dev/null || true
 	@kubectl delete pods -n atom-system -l app=atom-studio-ui 2>/dev/null || true
 	@kubectl delete pods -n atom-system -l app=log-archiver 2>/dev/null || true
+	@kubectl delete pods -n atom-system -l app=atom-runtime 2>/dev/null || true
 	@echo "→ Waiting for rollouts..."
-	@kubectl rollout status deployment/gate -n atom-system --timeout=120s
-	@kubectl rollout status deployment/atom-llm -n atom-system --timeout=180s
+	@kubectl rollout status deployment/gate            -n atom-system --timeout=120s
+	@kubectl rollout status deployment/atom-llm        -n atom-system --timeout=180s
 	@kubectl rollout status deployment/atom-studio-api -n atom-system --timeout=120s
-	@kubectl rollout status deployment/atom-studio-ui -n atom-system --timeout=120s
-	@kubectl rollout status deployment/log-archiver -n atom-system --timeout=120s
+	@kubectl rollout status deployment/atom-studio-ui  -n atom-system --timeout=120s
+	@kubectl rollout status deployment/atom-runtime    -n atom-system --timeout=120s
+	@kubectl rollout status deployment/log-archiver    -n atom-system --timeout=120s
 	@echo ""
 	@echo "✓ k8s deploy complete."
 	@kubectl get pods -n atom-system

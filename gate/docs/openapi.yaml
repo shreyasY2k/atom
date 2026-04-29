@@ -1,0 +1,306 @@
+openapi: "3.1.0"
+info:
+  title: ATOM GATE API
+  version: "1.0.0"
+  description: |
+    GATE is the ATOM platform ingress proxy.  Every agent request passes through
+    GATE, which validates the JWT, enforces OPA policies, writes an HMAC-chained
+    audit record, applies per-agent rate limits, and forwards to the appropriate
+    upstream (atom-llm, atom-studio HITL, atom-memory, or the agent pod).
+
+servers:
+  - url: http://localhost:8080
+    description: Local dev / kind port-forward
+
+security:
+  - bearerAuth: []
+
+paths:
+  /healthz:
+    get:
+      summary: Liveness probe
+      operationId: healthz
+      security: []
+      responses:
+        "200":
+          description: Service is alive
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HealthResponse"
+
+  /readyz:
+    get:
+      summary: Readiness probe
+      operationId: readyz
+      security: []
+      responses:
+        "200":
+          description: Service is ready to accept traffic
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HealthResponse"
+        "503":
+          description: Not ready (database or Redis unavailable)
+
+  /domain/{domain_id}/agent/{agent_id}/v1/{path}:
+    parameters:
+      - $ref: "#/components/parameters/domain_id"
+      - $ref: "#/components/parameters/agent_id"
+      - name: path
+        in: path
+        required: true
+        schema:
+          type: string
+        description: LiteLLM-compatible path (e.g. `chat/completions`, `models`)
+    post:
+      summary: Proxy LLM request to atom-llm
+      operationId: llmProxy
+      description: |
+        Authenticated LLM call.  GATE rewrites the Authorization header to the
+        agent's LiteLLM virtual key before forwarding to atom-llm:4000.
+        The caller's JWT is validated and logged but never forwarded.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/LLMRequest"
+      responses:
+        "200":
+          description: LLM response (mirrors OpenAI-compatible response)
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+        "502":
+          $ref: "#/components/responses/BadGateway"
+
+  /domain/{domain_id}/agent/{agent_id}/hitl/{path}:
+    parameters:
+      - $ref: "#/components/parameters/domain_id"
+      - $ref: "#/components/parameters/agent_id"
+      - name: path
+        in: path
+        required: true
+        schema:
+          type: string
+    post:
+      summary: Proxy HITL request to atom-studio-api
+      operationId: hitlProxy
+      description: |
+        Forwards `/hitl/*` to `atom-studio-api:3001/api/hitl/*`.
+        Used by the agent SDK to submit human-in-the-loop decisions.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+      responses:
+        "200":
+          description: HITL response from atom-studio
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+
+  /domain/{domain_id}/agent/{agent_id}/memory/{path}:
+    parameters:
+      - $ref: "#/components/parameters/domain_id"
+      - $ref: "#/components/parameters/agent_id"
+      - name: path
+        in: path
+        required: true
+        schema:
+          type: string
+    post:
+      summary: Proxy memory request to atom-memory
+      operationId: memoryProxy
+      description: |
+        Forwards `/memory/*` to `atom-memory:8000/memory/*`.
+        Provides pgvector + Redis-backed short-term memory.
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+      responses:
+        "200":
+          description: Memory service response
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /domain/{domain_id}/agent/{agent_id}/{path}:
+    parameters:
+      - $ref: "#/components/parameters/domain_id"
+      - $ref: "#/components/parameters/agent_id"
+      - name: path
+        in: path
+        required: true
+        schema:
+          type: string
+        description: Any path forwarded to the agent pod (e.g. `echo`, `healthz`, `run`)
+    post:
+      summary: Proxy request to agent pod
+      operationId: agentProxy
+      description: |
+        Resolves the agent's Kubernetes ClusterIP service from Postgres (Redis-cached)
+        and forwards the request.  GATE injects `X-ATOM-Domain-ID` and `X-ATOM-Agent-ID`
+        headers.  An HMAC-chained audit record is written for every forwarded request.
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+          application/octet-stream:
+            schema:
+              type: string
+              format: binary
+      responses:
+        "200":
+          description: Agent pod response (body is pass-through)
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+        "502":
+          $ref: "#/components/responses/BadGateway"
+    get:
+      summary: Proxy GET request to agent pod
+      operationId: agentProxyGet
+      responses:
+        "200":
+          description: Agent pod GET response
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: |
+        RS256 JWT issued by atom-studio.
+        Agent tokens contain `type: "agent"`, `agent_id`, `domain_id`.
+        Human tokens contain `type: "user"`, `sub` (user UUID), `role`.
+
+  parameters:
+    domain_id:
+      name: domain_id
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+      description: Domain UUID (must match the `domain_id` claim in the JWT)
+    agent_id:
+      name: agent_id
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+      description: Agent UUID
+
+  schemas:
+    HealthResponse:
+      type: object
+      properties:
+        status:
+          type: string
+          example: ok
+
+    LLMRequest:
+      type: object
+      description: OpenAI-compatible chat completion request
+      properties:
+        model:
+          type: string
+          example: gemini-2.5-flash
+        messages:
+          type: array
+          items:
+            $ref: "#/components/schemas/ChatMessage"
+        stream:
+          type: boolean
+          default: false
+        temperature:
+          type: number
+          minimum: 0
+          maximum: 2
+      required:
+        - model
+        - messages
+
+    ChatMessage:
+      type: object
+      properties:
+        role:
+          type: string
+          enum: [system, user, assistant]
+        content:
+          type: string
+      required:
+        - role
+        - content
+
+    ErrorResponse:
+      type: object
+      properties:
+        error:
+          type: string
+      example:
+        error: token_expired
+
+  responses:
+    Unauthorized:
+      description: Missing, expired, or invalid JWT
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+          example:
+            error: token_expired
+
+    Forbidden:
+      description: JWT is valid but the request violates an OPA policy
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+          example:
+            error: policy_denied
+
+    RateLimited:
+      description: Per-agent RPM limit exceeded
+      headers:
+        Retry-After:
+          schema:
+            type: integer
+          description: Seconds until the rate limit window resets
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+          example:
+            error: rate_limit_exceeded
+
+    BadGateway:
+      description: Upstream service (atom-llm or agent pod) is unavailable
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+          example:
+            error: upstream_unavailable

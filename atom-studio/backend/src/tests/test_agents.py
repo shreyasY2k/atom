@@ -243,13 +243,14 @@ async def test_delete_agent_not_found(client):
 
 async def test_regenerate_token(client):
     mock_conn = make_mock_conn()
-    # Calls in order: get_agent (fetchrow + fetch*2), then regenerate_token (fetchrow*2 + execute*2)
+    # regenerate_token uses conn.fetch (not fetchrow) for old tokens, so
+    # fetchrow is called twice: once for get_agent, once for the domain_id lookup.
     mock_conn.fetchrow.side_effect = [
         _agent_row(),  # get_agent
-        {"token_hash": "old-hash"},  # old token lookup
-        {"domain_id": DOMAIN_ID},  # agent for JWT issuance
+        {"domain_id": DOMAIN_ID},  # agent domain_id lookup in regenerate_token
     ]
-    mock_conn.fetch.return_value = []  # tools/skills in get_agent
+    # fetch returns [] for tools/skills (get_agent) and [] for old_clients (no revocation)
+    mock_conn.fetch.return_value = []
     mock_conn.execute = AsyncMock(return_value=None)
 
     mock_redis = AsyncMock()
