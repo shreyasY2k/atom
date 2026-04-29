@@ -65,17 +65,24 @@ def _run_container(
     _remove_existing(client, name)
 
     logger.info("Starting container %s from image %s on network %s", name, image, network)
+    import os as _os  # noqa: PLC0415
+
+    env = {
+        "ATOM_AGENT_JWT": agent_jwt,
+        "ATOM_AGENT_ID": agent_id,
+        "ATOM_DOMAIN_ID": domain_id,
+        "ATOM_GATE_URL": gate_url,
+    }
+    # Forward Kafka brokers so the agent can stream logs to atom.agent.logs
+    if kb := _os.environ.get("KAFKA_BROKERS"):
+        env["KAFKA_BROKERS"] = kb
+
     container = client.containers.run(
         image,
         name=name,
         detach=True,
         network=network,
-        environment={
-            "ATOM_AGENT_JWT": agent_jwt,
-            "ATOM_AGENT_ID": agent_id,
-            "ATOM_DOMAIN_ID": domain_id,
-            "ATOM_GATE_URL": gate_url,
-        },
+        environment=env,
         labels={
             "atom.io/agent-id": agent_id,
             "atom.io/domain-id": domain_id,

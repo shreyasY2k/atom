@@ -293,6 +293,7 @@ services:
       RUNTIME_BACKEND: docker
       DOCKER_NETWORK: atom-dev_default
       DOCKER_AGENT_GATE_URL: http://gate:8080
+      KAFKA_BROKERS: redpanda:9092
     ports:
       - "8090:8090"
     volumes:
