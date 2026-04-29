@@ -1,44 +1,45 @@
 """
 Tool implementations for frontoffice.
 
-In dev mode these run locally.
-In prod mode, register these as ATOM tools in atom-studio (Tools → New Tool)
-and provision them to your agent. The agent will call them via GATE.
+Uses atom-sdk's agentscope.tool API:
+  - Toolkit                  (replaces ServiceToolkit)
+  - ToolResponse + TextBlock (replaces ServiceResponse / ServiceExecStatus)
 """
-from agentscope.service import ServiceExecStatus, ServiceResponse, ServiceToolkit
 import urllib.request
 
+from agentscope.message import TextBlock
+from agentscope.tool import Toolkit, ToolResponse
 
-def web_search(query: str) -> ServiceResponse:
+
+def web_search(query: str) -> ToolResponse:
     """Search the web for information about the given query."""
     # TODO: replace stub with a real search API (e.g. Brave, Serper, Tavily)
     print(f"[web_search] query: {query}")
-    return ServiceResponse(
-        status=ServiceExecStatus.SUCCESS,
-        content=f"Stub result for: {query}. Replace this with a real search implementation.",
+    return ToolResponse(
+        content=[TextBlock(type="text", text=f"Stub result for: {query}. Replace with a real search implementation.")],
     )
 
-def http_get(url: str) -> ServiceResponse:
+
+def http_get(url: str) -> ToolResponse:
     """Make an HTTP GET request and return the response body."""
     try:
         with urllib.request.urlopen(url) as resp:  # noqa: S310
-            return ServiceResponse(status=ServiceExecStatus.SUCCESS, content=resp.read().decode())
+            return ToolResponse(content=[TextBlock(type="text", text=resp.read().decode())])
     except Exception as e:
-        return ServiceResponse(status=ServiceExecStatus.ERROR, content=str(e))
+        return ToolResponse(content=[TextBlock(type="text", text=f"Error: {e}")])
 
-def memory_recall(query: str) -> ServiceResponse:
+
+def memory_recall(query: str) -> ToolResponse:
     """Recall facts from agent memory."""
-    # TODO: wire up a real memory store here
     print(f"[memory_recall] query: {query}")
-    return ServiceResponse(
-        status=ServiceExecStatus.SUCCESS,
-        content=f"Stub memory recall for: {query}.",
+    return ToolResponse(
+        content=[TextBlock(type="text", text=f"Stub memory recall for: {query}.")],
     )
 
 
-def build_toolkit() -> ServiceToolkit:
-    toolkit = ServiceToolkit()
-    toolkit.add(web_search)
-    toolkit.add(http_get)
-    toolkit.add(memory_recall)
+def build_toolkit() -> Toolkit:
+    toolkit = Toolkit()
+    toolkit.register_tool_function(web_search)
+    toolkit.register_tool_function(http_get)
+    toolkit.register_tool_function(memory_recall)
     return toolkit

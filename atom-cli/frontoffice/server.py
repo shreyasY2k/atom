@@ -34,7 +34,7 @@ _model = AtomChatModel(
 _agent = ReActAgent(
     name="frontoffice",
     model=_model,
-    service_toolkit=build_toolkit(),
+    toolkit=build_toolkit(),
     sys_prompt=(
         "You are a helpful front-office assistant. "
         "Think step by step. Use tools when you need external information."

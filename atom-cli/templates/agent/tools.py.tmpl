@@ -1,81 +1,76 @@
 """
 Tool implementations for {{.ProjectName}}.
 
-In dev mode these run locally.
-In prod mode, register these as ATOM tools in atom-studio (Tools → New Tool)
-and provision them to your agent. The agent will call them via GATE.
+Uses atom-sdk's agentscope.tool API:
+  - Toolkit                  (replaces ServiceToolkit)
+  - ToolResponse + TextBlock (replaces ServiceResponse / ServiceExecStatus)
 """
-from agentscope.service import ServiceExecStatus, ServiceResponse, ServiceToolkit
-{{- if .HasFileReader}}
-import os
-{{- end}}
-{{- if .HasHTTPGet}}
 import urllib.request
-{{- end}}
+
+from agentscope.message import TextBlock
+from agentscope.tool import Toolkit, ToolResponse
 
 {{if .HasWebSearch}}
-def web_search(query: str) -> ServiceResponse:
+def web_search(query: str) -> ToolResponse:
     """Search the web for information about the given query."""
     # TODO: replace stub with a real search API (e.g. Brave, Serper, Tavily)
     print(f"[web_search] query: {query}")
-    return ServiceResponse(
-        status=ServiceExecStatus.SUCCESS,
-        content=f"Stub result for: {query}. Replace this with a real search implementation.",
+    return ToolResponse(
+        content=[TextBlock(type="text", text=f"Stub result for: {query}. Replace with a real search implementation.")],
     )
 {{end}}
 {{- if .HasCalculator}}
-def calculator(expression: str) -> ServiceResponse:
+def calculator(expression: str) -> ToolResponse:
     """Evaluate a mathematical expression and return the result."""
     try:
         result = eval(expression, {"__builtins__": {}})  # noqa: S307
-        return ServiceResponse(status=ServiceExecStatus.SUCCESS, content=str(result))
+        return ToolResponse(content=[TextBlock(type="text", text=str(result))])
     except Exception as e:
-        return ServiceResponse(status=ServiceExecStatus.ERROR, content=str(e))
+        return ToolResponse(content=[TextBlock(type="text", text=f"Error: {e}")])
 {{end}}
 {{- if .HasFileReader}}
-def file_reader(path: str) -> ServiceResponse:
+def file_reader(path: str) -> ToolResponse:
     """Read a local file and return its contents."""
     try:
         with open(path) as f:
-            return ServiceResponse(status=ServiceExecStatus.SUCCESS, content=f.read())
+            return ToolResponse(content=[TextBlock(type="text", text=f.read())])
     except Exception as e:
-        return ServiceResponse(status=ServiceExecStatus.ERROR, content=str(e))
+        return ToolResponse(content=[TextBlock(type="text", text=f"Error: {e}")])
 {{end}}
 {{- if .HasHTTPGet}}
-def http_get(url: str) -> ServiceResponse:
+def http_get(url: str) -> ToolResponse:
     """Make an HTTP GET request and return the response body."""
     try:
         with urllib.request.urlopen(url) as resp:  # noqa: S310
-            return ServiceResponse(status=ServiceExecStatus.SUCCESS, content=resp.read().decode())
+            return ToolResponse(content=[TextBlock(type="text", text=resp.read().decode())])
     except Exception as e:
-        return ServiceResponse(status=ServiceExecStatus.ERROR, content=str(e))
+        return ToolResponse(content=[TextBlock(type="text", text=f"Error: {e}")])
 {{end}}
 {{- if .HasMemoryRecall}}
-def memory_recall(query: str) -> ServiceResponse:
+def memory_recall(query: str) -> ToolResponse:
     """Recall facts from agent memory."""
     # TODO: wire up a real memory store here
     print(f"[memory_recall] query: {query}")
-    return ServiceResponse(
-        status=ServiceExecStatus.SUCCESS,
-        content=f"Stub memory recall for: {query}.",
+    return ToolResponse(
+        content=[TextBlock(type="text", text=f"Stub memory recall for: {query}.")],
     )
 {{end}}
 
-def build_toolkit() -> ServiceToolkit:
-    toolkit = ServiceToolkit()
+def build_toolkit() -> Toolkit:
+    toolkit = Toolkit()
 {{- if .HasWebSearch}}
-    toolkit.add(web_search)
+    toolkit.register_tool_function(web_search)
 {{- end}}
 {{- if .HasCalculator}}
-    toolkit.add(calculator)
+    toolkit.register_tool_function(calculator)
 {{- end}}
 {{- if .HasFileReader}}
-    toolkit.add(file_reader)
+    toolkit.register_tool_function(file_reader)
 {{- end}}
 {{- if .HasHTTPGet}}
-    toolkit.add(http_get)
+    toolkit.register_tool_function(http_get)
 {{- end}}
 {{- if .HasMemoryRecall}}
-    toolkit.add(memory_recall)
+    toolkit.register_tool_function(memory_recall)
 {{- end}}
     return toolkit
