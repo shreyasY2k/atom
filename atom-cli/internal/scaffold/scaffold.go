@@ -46,12 +46,14 @@ func Generate(a *wizard.Answers) error {
 	// outFile → template path (relative to embedded FS root)
 	files := map[string]string{
 		"agent.py":         "agent/agent.py.tmpl",
+		"server.py":        "agent/server.py.tmpl",
 		"tools.py":         "agent/tools.py.tmpl",
 		"config.py":        "agent/config.py.tmpl",
 		"requirements.txt": "agent/requirements.txt.tmpl",
 		".env.example":     "agent/env.example.tmpl",
 		".gitignore":       "agent/gitignore.tmpl",
 		"README.md":        "agent/README.md.tmpl",
+		"Dockerfile":       "agent/Dockerfile.tmpl",
 	}
 
 	for outFile, tmplPath := range files {

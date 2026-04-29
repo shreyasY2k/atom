@@ -23,4 +23,7 @@ func Execute() {
 
 func init() {
 	rootCmd.AddCommand(createCmd)
+	rootCmd.AddCommand(loginCmd)
+	rootCmd.AddCommand(deployCmd)
+	rootCmd.AddCommand(logsCmd)
 }
