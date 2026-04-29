@@ -15,6 +15,7 @@ load_dotenv()
 
 import agentscope
 from agentscope.agent import ReActAgent
+from agentscope.formatter import OpenAIChatFormatter
 from agentscope.message import Msg
 from agentscope.model import AtomChatModel
 from fastapi import FastAPI
@@ -34,6 +35,7 @@ _model = AtomChatModel(
 _agent = ReActAgent(
     name="frontoffice",
     model=_model,
+    formatter=OpenAIChatFormatter(),
     toolkit=build_toolkit(),
     sys_prompt=(
         "You are a helpful front-office assistant. "
@@ -58,5 +60,8 @@ async def healthz():
 
 @app.post("/run", response_model=RunResponse)
 async def run(req: RunRequest):
-    response = _agent(Msg(name="user", content=req.message, role="user"))
-    return RunResponse(reply=str(response.content))
+    response = await _agent(Msg(name="user", content=req.message, role="user"))
+    # Extract text blocks from the response content
+    blocks = response.get_content_blocks("text")
+    reply = " ".join(b.get("text", "") for b in blocks) if blocks else str(response.content)
+    return RunResponse(reply=reply)

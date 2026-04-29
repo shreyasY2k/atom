@@ -28,6 +28,10 @@ type Config struct {
 	// LLM calls to atom-llm. The agent JWT is consumed by GATE; atom-llm
 	// authenticates via its own LiteLLM master key.
 	AtomLLMKey string // ATOM_LLM_KEY (= LITELLM_MASTER_KEY in atom-llm)
+
+	// AtomEncryptionKey is the hex-encoded AES-256 key used by atom-studio to
+	// encrypt litellm_virtual_key at rest. GATE uses it to decrypt before forwarding.
+	AtomEncryptionKey string // ATOM_ENCRYPTION_KEY
 }
 
 func Load() (*Config, error) {
@@ -43,6 +47,7 @@ func Load() (*Config, error) {
 		AtomStudioURL:      env("ATOM_STUDIO_API_URL", "http://atom-studio-api:3001"),
 		AtomMemoryURL:      env("ATOM_MEMORY_URL", "http://atom-memory:8000"),
 		AtomLLMKey:         env("ATOM_LLM_KEY", ""),
+		AtomEncryptionKey:  env("ATOM_ENCRYPTION_KEY", ""),
 	}
 
 	if brokers := env("KAFKA_BROKERS", ""); brokers != "" {

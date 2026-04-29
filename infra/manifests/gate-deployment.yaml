@@ -38,7 +38,7 @@ spec:
               value: /policies
             - name: KAFKA_BROKERS
               value: redpanda.atom-infra.svc.cluster.local:9092
-            # PLATFORM_HMAC_SECRET injected via envFrom: atom-credentials (from .env)
+            # PLATFORM_HMAC_SECRET + ATOM_ENCRYPTION_KEY injected via envFrom: atom-credentials (from .env)
             # JWT key paths — override relative paths in atom-credentials secret.
             - name: JWT_PUBLIC_KEY_PATH
               value: /etc/atom/jwt_public.pem

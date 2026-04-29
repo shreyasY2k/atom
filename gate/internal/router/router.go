@@ -2,6 +2,10 @@ package router
 
 import (
 	"context"
+	"crypto/aes"
+	"crypto/cipher"
+	"encoding/base64"
+	"encoding/hex"
 	"fmt"
 	"log/slog"
 	"strings"
@@ -22,6 +26,36 @@ const (
 	virtualKeyCacheKey  = "agent:llmkey:"
 )
 
+// decryptVirtualKey decrypts an AES-GCM ciphertext (nonce||ct base64-encoded)
+// using the hex-encoded 32-byte key atom-studio uses for ATOM_ENCRYPTION_KEY.
+func decryptVirtualKey(encrypted, hexKey string) (string, error) {
+	keyBytes, err := hex.DecodeString(hexKey)
+	if err != nil {
+		return "", fmt.Errorf("bad hex key: %w", err)
+	}
+	data, err := base64.StdEncoding.DecodeString(encrypted)
+	if err != nil {
+		return "", fmt.Errorf("base64 decode: %w", err)
+	}
+	block, err := aes.NewCipher(keyBytes)
+	if err != nil {
+		return "", fmt.Errorf("new cipher: %w", err)
+	}
+	gcm, err := cipher.NewGCM(block)
+	if err != nil {
+		return "", fmt.Errorf("new gcm: %w", err)
+	}
+	if len(data) < gcm.NonceSize() {
+		return "", fmt.Errorf("ciphertext too short")
+	}
+	nonce, ct := data[:gcm.NonceSize()], data[gcm.NonceSize():]
+	plain, err := gcm.Open(nil, nonce, ct, nil)
+	if err != nil {
+		return "", fmt.Errorf("gcm decrypt: %w", err)
+	}
+	return string(plain), nil
+}
+
 // Mount registers all agent-scoped proxy routes on the Fiber app.
 // Routes are registered specific-first so Fiber's top-down matching
 // sends /v1/* to atom-llm, /hitl/* to atom-studio, /memory/* to
@@ -37,7 +71,7 @@ func Mount(app *fiber.App, cfg *config.Config, pool *pgxpool.Pool, rdb *redis.Cl
 	// 1. LLM calls → atom-llm  (/v1/* → atom-llm:4000/v1/*)
 	//    GATE looks up agents.litellm_virtual_key for this agent (Redis-cached).
 	//    Falls back to ATOM_LLM_KEY env var if the agent has no key provisioned yet.
-	app.All(base+"/v1/*", llmProxy(client, cfg.AtomLLMURL, cfg.AtomLLMKey, pool, rdb))
+	app.All(base+"/v1/*", llmProxy(client, cfg.AtomLLMURL, cfg.AtomLLMKey, cfg.AtomEncryptionKey, pool, rdb))
 
 	// 2. HITL calls → atom-studio-api  (/hitl/* → atom-studio-api:3001/api/hitl/*)
 	app.All(base+"/hitl/*", staticProxy(client, cfg.AtomStudioURL, "/api/hitl/", ""))
@@ -73,10 +107,10 @@ func staticProxy(client *fasthttp.Client, upstreamRoot, upstreamBase, upstreamKe
 }
 
 // llmProxy forwards /v1/* to atom-llm, replacing Authorization with the
-// agent's LiteLLM virtual key from Postgres (Redis-cached).
+// agent's LiteLLM virtual key from Postgres (Redis-cached, AES-GCM decrypted).
 // Falls back to fallbackKey (ATOM_LLM_KEY env var) when the agent has no
 // virtual key yet — useful before atom-studio has provisioned one.
-func llmProxy(client *fasthttp.Client, upstreamRoot, fallbackKey string, pool *pgxpool.Pool, rdb *redis.Client) fiber.Handler {
+func llmProxy(client *fasthttp.Client, upstreamRoot, fallbackKey, encryptionKey string, pool *pgxpool.Pool, rdb *redis.Client) fiber.Handler {
 	return func(c fiber.Ctx) error {
 		domainID := c.Params("domain_id")
 		agentID := c.Params("agent_id")
@@ -90,7 +124,7 @@ func llmProxy(client *fasthttp.Client, upstreamRoot, fallbackKey string, pool *p
 			targetURL += "?" + qs
 		}
 
-		llmKey, err := resolveVirtualKey(c.Context(), agentID, pool, rdb, fallbackKey)
+		llmKey, err := resolveVirtualKey(c.Context(), agentID, pool, rdb, fallbackKey, encryptionKey)
 		if err != nil || llmKey == "" {
 			slog.Warn("no LiteLLM virtual key for agent", "agent_id", agentID, "err", err)
 			return c.Status(fiber.StatusForbidden).JSON(fiber.Map{"error": "agent_not_provisioned"})
@@ -182,10 +216,10 @@ func resolveServiceName(ctx context.Context, agentID string, pool *pgxpool.Pool,
 	return svcName, nil
 }
 
-// resolveVirtualKey returns the agent's LiteLLM virtual key from Postgres
-// (Redis-cached for serviceNameCacheTTL seconds).
-// Returns fallback if the agent has no virtual key set.
-func resolveVirtualKey(ctx context.Context, agentID string, pool *pgxpool.Pool, rdb *redis.Client, fallback string) (string, error) {
+// resolveVirtualKey returns the agent's decrypted LiteLLM virtual key from
+// Postgres (Redis-cached). The key is stored AES-GCM encrypted by atom-studio;
+// encryptionKey is the hex-encoded ATOM_ENCRYPTION_KEY used to decrypt it.
+func resolveVirtualKey(ctx context.Context, agentID string, pool *pgxpool.Pool, rdb *redis.Client, fallback, encryptionKey string) (string, error) {
 	cacheKey := virtualKeyCacheKey + agentID
 
 	if cached, err := rdb.Get(ctx, cacheKey).Result(); err == nil {
@@ -196,13 +230,22 @@ func resolveVirtualKey(ctx context.Context, agentID string, pool *pgxpool.Pool, 
 	if err := pool.QueryRow(ctx,
 		`SELECT litellm_virtual_key FROM agents WHERE id = $1`,
 		agentID).Scan(&virtualKey); err != nil {
-		return fallback, nil // agent not found — return fallback, not error
+		return fallback, nil
 	}
 
 	if virtualKey == nil || *virtualKey == "" {
-		return fallback, nil // not provisioned yet
+		return fallback, nil
 	}
 
-	_ = rdb.Set(ctx, cacheKey, *virtualKey, serviceNameCacheTTL)
-	return *virtualKey, nil
+	plainKey := *virtualKey
+	if encryptionKey != "" {
+		if decrypted, err := decryptVirtualKey(*virtualKey, encryptionKey); err == nil {
+			plainKey = decrypted
+		} else {
+			slog.Warn("failed to decrypt virtual key", "agent_id", agentID, "err", err)
+		}
+	}
+
+	_ = rdb.Set(ctx, cacheKey, plainKey, serviceNameCacheTTL)
+	return plainKey, nil
 }
