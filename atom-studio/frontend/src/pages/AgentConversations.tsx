@@ -22,7 +22,7 @@ interface Run {
   trace_id: string | null
   user_msg: string
   reply: string
-  steps: Step[] | null | undefined
+  steps: Step[] | string | null | undefined
   latency_ms: number | null
   created_at: string
 }
@@ -38,6 +38,15 @@ const TEMPO_BASE = 'http://localhost:3005/explore?orgId=1&left={"datasource":"te
 
 function traceLink(traceId: string) {
   return TEMPO_BASE.replace('$ID', traceId)
+}
+
+// asyncpg may return JSONB as a raw JSON string; parse defensively.
+function safeSteps(steps: Step[] | string | null | undefined): Step[] {
+  if (Array.isArray(steps)) return steps
+  if (typeof steps === 'string') {
+    try { const p = JSON.parse(steps); return Array.isArray(p) ? p : [] } catch { return [] }
+  }
+  return []
 }
 
 interface AgentConversationsProps {
@@ -86,8 +95,8 @@ export function AgentConversations({ agentId }: AgentConversationsProps) {
                   {run.latency_ms != null && (
                     <span className="text-xs text-muted-foreground">{run.latency_ms}ms</span>
                   )}
-                  {(run.steps ?? []).length > 0 && (
-                    <Badge variant="secondary" className="text-xs">{(run.steps ?? []).length} steps</Badge>
+                  {safeSteps(run.steps).length > 0 && (
+                    <Badge variant="secondary" className="text-xs">{safeSteps(run.steps).length} steps</Badge>
                   )}
                   {run.trace_id && (
                     <a
@@ -118,7 +127,7 @@ export function AgentConversations({ agentId }: AgentConversationsProps) {
                 </div>
 
                 {/* Thinking / tool steps */}
-                {(run.steps ?? []).map((step, i) => (
+                {safeSteps(run.steps).map((step, i) => (
                   <StepBlock key={i} step={step} />
                 ))}
 

@@ -1,6 +1,7 @@
 """
 /api/agents/{agent_id}/runs — conversation run storage and retrieval.
 
+
 The agent's server.py calls POST /runs to record each conversation.
 atom-studio UI reads GET /runs for the chat-style conversation view.
 """
@@ -8,12 +9,24 @@ atom-studio UI reads GET /runs for the chat-style conversation view.
 import json
 import uuid
 from datetime import timezone
+from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 
 from ..auth.middleware import require_auth
 from ..database import get_conn
+
+
+def _parse_jsonb_list(value: Any) -> list:
+    """asyncpg returns JSONB columns as raw JSON strings; parse them here."""
+    if isinstance(value, list):
+        return value
+    if isinstance(value, str):
+        parsed = json.loads(value)
+        return parsed if isinstance(parsed, list) else []
+    return []
+
 
 router = APIRouter()
 
@@ -92,7 +105,7 @@ async def list_runs(
                 "trace_id": r["trace_id"],
                 "user_msg": r["user_msg"],
                 "reply": r["reply"],
-                "steps": r["steps"],
+                "steps": _parse_jsonb_list(r["steps"]),
                 "latency_ms": r["latency_ms"],
                 "created_at": r["created_at"].replace(tzinfo=timezone.utc).isoformat(),
             }
