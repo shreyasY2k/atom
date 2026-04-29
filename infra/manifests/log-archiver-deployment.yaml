@@ -17,26 +17,17 @@ spec:
     spec:
       containers:
         - name: log-archiver
-          image: atom/log-archiver:latest
+          image: atom-log-archiver:local
           imagePullPolicy: IfNotPresent
+          # MINIO_ACCESS_KEY, MINIO_SECRET_KEY injected via atom-credentials (from .env)
+          envFrom:
+            - secretRef:
+                name: atom-credentials
           env:
             - name: KAFKA_BROKERS
               value: redpanda.atom-infra.svc.cluster.local:9092
             - name: MINIO_ENDPOINT
-              valueFrom:
-                secretKeyRef:
-                  name: minio-credentials
-                  key: endpoint
-            - name: MINIO_ACCESS_KEY
-              valueFrom:
-                secretKeyRef:
-                  name: minio-credentials
-                  key: access_key
-            - name: MINIO_SECRET_KEY
-              valueFrom:
-                secretKeyRef:
-                  name: minio-credentials
-                  key: secret_key
+              value: http://minio.atom-infra.svc.cluster.local:9000
             - name: MINIO_BUCKET
               value: atom-audit
           resources:
@@ -51,15 +42,3 @@ spec:
               command: ["python", "-c", "import sys; sys.exit(0)"]
             initialDelaySeconds: 10
             periodSeconds: 30
-      restartPolicy: Always
----
-apiVersion: v1
-kind: Secret
-metadata:
-  name: minio-credentials
-  namespace: atom-system
-type: Opaque
-stringData:
-  endpoint: http://minio.atom-infra.svc.cluster.local:9000
-  access_key: minioadmin
-  secret_key: changeme

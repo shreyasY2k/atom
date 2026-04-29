@@ -163,6 +163,8 @@ k8s-deploy: ## Build images and deploy GATE + atom-llm + atom-studio to k8s
 	@docker build -t atom-llm:local atom-llm/ -f atom-llm/Dockerfile.dev
 	@docker build -t atom-studio-api:local atom-studio/backend/
 	@docker build -t atom-studio-ui:local atom-studio/frontend/
+	@echo "→ Building log-archiver image..."
+	@docker build -t atom-log-archiver:local infra/log-archiver/
 	@echo "→ Creating secrets and ConfigMaps..."
 	@kubectl create secret generic atom-jwt-keys \
 	  --from-file=jwt_private.pem=.keys/jwt_private.pem \
@@ -176,6 +178,8 @@ k8s-deploy: ## Build images and deploy GATE + atom-llm + atom-studio to k8s
 	@kubectl apply -f infra/manifests/atom-llm-deployment.yaml
 	@kubectl apply -f infra/manifests/atom-studio-deployment.yaml
 	@kubectl apply -f infra/manifests/atom-studio-ui-deployment.yaml
+	@kubectl apply -f infra/manifests/log-archiver-deployment.yaml
+	@kubectl apply -f infra/manifests/alloy-daemonset.yaml
 	@echo "→ Running LiteLLM Prisma migrations..."
 	@kubectl port-forward -n atom-infra svc/postgres 5433:5432 &
 	@sleep 3
@@ -191,11 +195,13 @@ k8s-deploy: ## Build images and deploy GATE + atom-llm + atom-studio to k8s
 	@kubectl delete pods -n atom-system -l app=atom-llm 2>/dev/null || true
 	@kubectl delete pods -n atom-system -l app=atom-studio-api 2>/dev/null || true
 	@kubectl delete pods -n atom-system -l app=atom-studio-ui 2>/dev/null || true
+	@kubectl delete pods -n atom-system -l app=log-archiver 2>/dev/null || true
 	@echo "→ Waiting for rollouts..."
 	@kubectl rollout status deployment/gate -n atom-system --timeout=120s
 	@kubectl rollout status deployment/atom-llm -n atom-system --timeout=180s
 	@kubectl rollout status deployment/atom-studio-api -n atom-system --timeout=120s
 	@kubectl rollout status deployment/atom-studio-ui -n atom-system --timeout=120s
+	@kubectl rollout status deployment/log-archiver -n atom-system --timeout=120s
 	@echo ""
 	@echo "✓ k8s deploy complete."
 	@kubectl get pods -n atom-system
