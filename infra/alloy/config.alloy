@@ -1,0 +1,90 @@
+// ── ATOM Alloy config (docker-compose dev) ───────────────────────────────
+// Collects:
+//   1. OTLP traces from all ATOM services → Tempo
+//   2. Docker container stdout/stderr logs → Loki (labelled by service + agent_id)
+//   3. atom.agent.logs Kafka topic → Loki (live agent request/reply logs)
+
+// ── 1. OTLP receiver ─────────────────────────────────────────────────────
+// Receives traces from gate (Go otlptracehttp), atom-llm, atom-studio-api,
+// atom-runtime (Python OTLP HTTP). Port 4318 = HTTP, 4317 = gRPC.
+
+otelcol.receiver.otlp "default" {
+  grpc {
+    endpoint = "0.0.0.0:4317"
+  }
+  http {
+    endpoint = "0.0.0.0:4318"
+  }
+
+  output {
+    traces = [otelcol.processor.batch.default.input]
+  }
+}
+
+otelcol.processor.batch "default" {
+  output {
+    traces = [otelcol.exporter.otlp.tempo.input]
+  }
+}
+
+otelcol.exporter.otlp "tempo" {
+  client {
+    endpoint = "tempo:4317"
+    tls {
+      insecure = true
+    }
+  }
+}
+
+// ── 2. Docker container log collection ───────────────────────────────────
+// Discovers all containers on the Docker socket, relabels by compose service
+// and agent_id (for frontoffice/agent containers), then ships to Loki.
+
+discovery.docker "atom_containers" {
+  host             = "unix:///var/run/docker.sock"
+  refresh_interval = "5s"
+}
+
+discovery.relabel "atom_containers" {
+  targets = discovery.docker.atom_containers.targets
+
+  // Strip leading slash from container name
+  rule {
+    source_labels = ["__meta_docker_container_name"]
+    regex         = "/(.*)"
+    target_label  = "container"
+  }
+
+  // Use compose service label if present
+  rule {
+    source_labels = ["__meta_docker_container_label_com_docker_compose_service"]
+    target_label  = "service"
+  }
+
+  // Extract agent_id from atom.io/agent-id label (set by atom-runtime docker backend)
+  rule {
+    source_labels = ["__meta_docker_container_label_atom_io_agent_id"]
+    target_label  = "agent_id"
+  }
+
+  // Static label
+  rule {
+    target_label = "env"
+    replacement  = "dev"
+  }
+}
+
+loki.source.docker "atom_containers" {
+  host          = "unix:///var/run/docker.sock"
+  targets       = discovery.relabel.atom_containers.output
+  forward_to    = [loki.write.default.receiver]
+  refresh_interval = "5s"
+}
+
+// ── 3. Loki writer ───────────────────────────────────────────────────────
+
+loki.write "default" {
+  endpoint {
+    url = "http://loki:3100/loki/api/v1/push"
+  }
+}

@@ -155,9 +155,9 @@ services:
       ATOM_MEMORY_URL: http://atom-memory:8000
       KAFKA_BROKERS: redpanda:9092
       PLATFORM_HMAC_SECRET: ${PLATFORM_HMAC_SECRET:-changeme-hmac-secret}
-      # OTEL: kubectl port-forward svc/alloy 4318:4318 -n atom-system must be running.
-      # Go's otlptracehttp.WithEndpoint expects host:port (no scheme); WithInsecure() makes it HTTP.
-      OTEL_EXPORTER_OTLP_ENDPOINT: host.docker.internal:4318
+      # Go otlptracehttp expects host:port (no scheme); WithInsecure() makes it HTTP.
+      OTEL_EXPORTER_OTLP_ENDPOINT: alloy:4318
+      OTEL_SERVICE_NAME: gate
     ports:
       - "8080:8080"
     volumes:
@@ -187,7 +187,7 @@ services:
       STORE_MODEL_IN_DB: "False"
       # OTEL tracing — send to local Alloy (port-forward from k8s) or docker-compose Alloy.
       # Python OTEL expects full URL. Use host.docker.internal to reach host port-forward.
-      OTEL_EXPORTER_OTLP_ENDPOINT: http://host.docker.internal:4318
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://alloy:4318
       OTEL_SERVICE_NAME: atom-llm
       KAFKA_BROKERS: redpanda:9092
     depends_on:
@@ -294,6 +294,8 @@ services:
       DOCKER_NETWORK: atom-dev_default
       DOCKER_AGENT_GATE_URL: http://gate:8080
       KAFKA_BROKERS: redpanda:9092
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://alloy:4318
+      OTEL_SERVICE_NAME: atom-runtime
     ports:
       - "8090:8090"
     volumes:
@@ -327,23 +329,68 @@ services:
       MINIO_SECRET_KEY: ${MINIO_SECRET_KEY:-changeme}
       MINIO_BUCKET: atom-audit
 
+  # ── Grafana Alloy (observability collector) ───────────────────────────────
+  # Receives OTLP traces from all ATOM services → Tempo
+  # Collects Docker container logs → Loki
+  alloy:
+    image: grafana/alloy:latest
+    container_name: atom-alloy
+    restart: unless-stopped
+    command: run /etc/alloy/config.alloy --storage.path=/tmp/alloy
+    depends_on:
+      - loki
+      - tempo
+    volumes:
+      - ./infra/alloy:/etc/alloy:ro
+      - /var/run/docker.sock:/var/run/docker.sock
+    ports:
+      - "4317:4317"   # OTLP gRPC
+      - "4318:4318"   # OTLP HTTP (← services send traces here)
+      - "12345:12345" # Alloy UI (http://localhost:12345)
+
+  # ── Loki (log aggregation) ────────────────────────────────────────────────
+  loki:
+    image: grafana/loki:latest
+    container_name: atom-loki
+    restart: unless-stopped
+    command: -config.file=/etc/loki/local-config.yaml
+    ports:
+      - "3100:3100"
+    volumes:
+      - loki_data:/loki
+
+  # ── Tempo (distributed tracing) ───────────────────────────────────────────
+  tempo:
+    image: grafana/tempo:latest
+    container_name: atom-tempo
+    restart: unless-stopped
+    command: -config.file=/etc/tempo/tempo.yaml
+    volumes:
+      - ./infra/tempo/tempo.yaml:/etc/tempo/tempo.yaml:ro
+      - tempo_data:/var/tempo
+    ports:
+      - "3200:3200"   # Tempo HTTP API / UI
+      - "4319:4317"   # OTLP gRPC (external; internal uses port 4317 directly)
+
   # ── Grafana ──────────────────────────────────────────────────────────────────
-  # Basic Grafana for quick local inspection (no Tempo datasource).
-  # For the full monitoring stack (Tempo + dashboards), use:
-  #   make monitoring-up   # deploys to k8s
-  #   kubectl port-forward -n atom-system svc/grafana 3006:3000
   grafana:
     image: grafana/grafana:latest
     container_name: atom-grafana
     restart: unless-stopped
+    depends_on:
+      - loki
+      - tempo
     environment:
       GF_SECURITY_ADMIN_PASSWORD: admin
       GF_USERS_ALLOW_SIGN_UP: "false"
+      GF_FEATURE_TOGGLES_ENABLE: traceqlEditor
     ports:
       - "3005:3000"
     volumes:
       - grafana_data:/var/lib/grafana
-      - ./infra/grafana/dashboards:/etc/grafana/provisioning/dashboards:ro
+      - ./infra/grafana/dashboards:/etc/grafana/dashboards:ro
+      - ./infra/grafana/provisioning/datasources:/etc/grafana/provisioning/datasources:ro
+      - ./infra/grafana/provisioning/dashboards:/etc/grafana/provisioning/dashboards:ro
 
 volumes:
   postgres_data:
@@ -351,3 +398,5 @@ volumes:
   minio_data:
   redpanda_data:
   grafana_data:
+  loki_data:
+  tempo_data:

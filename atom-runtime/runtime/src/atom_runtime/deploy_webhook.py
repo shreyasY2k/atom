@@ -10,6 +10,7 @@ Endpoints:
 import asyncio
 import json
 import logging
+import os
 from contextlib import asynccontextmanager
 
 import httpx
@@ -30,6 +31,33 @@ from .manifest_builder import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+def _setup_otel(app: FastAPI) -> None:
+    endpoint = os.environ.get("OTEL_EXPORTER_OTLP_ENDPOINT", "").rstrip("/")
+    if not endpoint:
+        return
+    try:
+        from opentelemetry import trace  # noqa: PLC0415
+        from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExporter  # noqa: PLC0415
+        from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor  # noqa: PLC0415
+        from opentelemetry.sdk.resources import Resource  # noqa: PLC0415
+        from opentelemetry.sdk.trace import TracerProvider  # noqa: PLC0415
+        from opentelemetry.sdk.trace.export import BatchSpanProcessor  # noqa: PLC0415
+        from opentelemetry.semconv.resource import ResourceAttributes  # noqa: PLC0415
+
+        service_name = os.environ.get("OTEL_SERVICE_NAME", "atom-runtime")
+        resource = Resource.create({ResourceAttributes.SERVICE_NAME: service_name})
+        provider = TracerProvider(resource=resource)
+        exporter = OTLPSpanExporter(endpoint=f"{endpoint}/v1/traces")
+        provider.add_span_processor(BatchSpanProcessor(exporter))
+        trace.set_tracer_provider(provider)
+        FastAPIInstrumentor.instrument_app(app)
+        logger.info("OTEL tracing enabled → %s (service=%s)", endpoint, service_name)
+    except ImportError:
+        logger.warning("opentelemetry packages not installed — OTEL tracing disabled")
+    except Exception as exc:
+        logger.warning("OTEL setup failed (%s) — tracing disabled", exc)
 
 
 # ── Startup registration ──────────────────────────────────────────────────────
@@ -60,6 +88,7 @@ async def lifespan(app: FastAPI):
 # ── App ───────────────────────────────────────────────────────────────────────
 
 app = FastAPI(title="ATOM Runtime", version="0.1.0", lifespan=lifespan)
+_setup_otel(app)
 
 
 # ── Request / response models ─────────────────────────────────────────────────

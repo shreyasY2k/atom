@@ -13,6 +13,9 @@ dependencies = [
     "pydantic-settings>=2.2.0",
     "kubernetes>=29.0.0",
     "docker>=7.0.0",
+    "opentelemetry-sdk>=1.25.0",
+    "opentelemetry-exporter-otlp-proto-http>=1.25.0",
+    "opentelemetry-instrumentation-fastapi>=0.46b0",
 ]
 
 [project.optional-dependencies]

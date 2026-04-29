@@ -1,0 +1,66 @@
+{
+  "title": "ATOM Service Logs",
+  "uid": "atom-service-logs",
+  "schemaVersion": 38,
+  "version": 1,
+  "refresh": "10s",
+  "time": { "from": "now-1h", "to": "now" },
+  "panels": [
+    {
+      "id": 1,
+      "title": "All Service Logs",
+      "type": "logs",
+      "gridPos": { "h": 20, "w": 24, "x": 0, "y": 0 },
+      "options": {
+        "dedupStrategy": "none",
+        "enableLogDetails": true,
+        "prettifyLogMessage": false,
+        "showLabels": true,
+        "showTime": true,
+        "wrapLogMessage": true
+      },
+      "targets": [
+        {
+          "datasource": { "type": "loki", "uid": "loki" },
+          "expr": "{env=\"dev\", service=~\"$service\"}",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 2,
+      "title": "Agent Logs",
+      "type": "logs",
+      "gridPos": { "h": 20, "w": 24, "x": 0, "y": 20 },
+      "options": {
+        "dedupStrategy": "none",
+        "enableLogDetails": true,
+        "showLabels": true,
+        "showTime": true,
+        "wrapLogMessage": true
+      },
+      "targets": [
+        {
+          "datasource": { "type": "loki", "uid": "loki" },
+          "expr": "{env=\"dev\", agent_id=~\".+\"}",
+          "refId": "A"
+        }
+      ]
+    }
+  ],
+  "templating": {
+    "list": [
+      {
+        "name": "service",
+        "type": "query",
+        "datasource": { "type": "loki", "uid": "loki" },
+        "query": "label_values(service)",
+        "current": { "text": "All", "value": ".+" },
+        "includeAll": true,
+        "allValue": ".+",
+        "multi": true,
+        "refresh": 1
+      }
+    ]
+  }
+}
