@@ -113,12 +113,13 @@ async def trigger_deployment(hitl_payload: dict, conn) -> None:
 
     agent_jwt = issue_agent_jwt(str(agent_row["id"]), str(agent_row["domain_id"]))
     token_hash = hashlib.sha256(agent_jwt.encode()).hexdigest()
+    # Revoke existing pod tokens (previous deployments); client tokens are untouched.
     await conn.execute(
-        "UPDATE agent_tokens SET revoked_at=now() WHERE agent_id=$1 AND revoked_at IS NULL",
+        "UPDATE agent_tokens SET revoked_at=now() WHERE agent_id=$1 AND revoked_at IS NULL AND token_type='pod'",
         agent_row["id"],
     )
     await conn.execute(
-        "INSERT INTO agent_tokens (agent_id, token_hash) VALUES ($1,$2)",
+        "INSERT INTO agent_tokens (agent_id, token_hash, token_type) VALUES ($1,$2,'pod')",
         agent_row["id"],
         token_hash,
     )

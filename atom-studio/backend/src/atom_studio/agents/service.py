@@ -199,22 +199,24 @@ async def regenerate_token(agent_id: str) -> str:
     redis = await get_redis()
 
     async with get_conn() as conn:
-        old = await conn.fetchrow(
-            "SELECT token_hash FROM agent_tokens WHERE agent_id=$1 AND revoked_at IS NULL",
+        # Only revoke client tokens — pod tokens must remain valid for the running container.
+        old_clients = await conn.fetch(
+            "SELECT token_hash FROM agent_tokens WHERE agent_id=$1 AND revoked_at IS NULL AND token_type='client'",
             agent_id,
         )
-        if old:
+        if old_clients:
             await conn.execute(
-                "UPDATE agent_tokens SET revoked_at=now() WHERE agent_id=$1 AND revoked_at IS NULL",
+                "UPDATE agent_tokens SET revoked_at=now() WHERE agent_id=$1 AND revoked_at IS NULL AND token_type='client'",
                 agent_id,
             )
-            await redis.set(f"token_revoked:{old['token_hash']}", "1", ex=86400)
+            for row in old_clients:
+                await redis.set(f"token_revoked:{row['token_hash']}", "1", ex=86400)
 
         agent = await conn.fetchrow("SELECT domain_id FROM agents WHERE id=$1", agent_id)
         raw_jwt = issue_agent_jwt(agent_id, str(agent["domain_id"]))
         token_hash = hashlib.sha256(raw_jwt.encode()).hexdigest()
         await conn.execute(
-            "INSERT INTO agent_tokens (agent_id, token_hash) VALUES ($1,$2)",
+            "INSERT INTO agent_tokens (agent_id, token_hash, token_type) VALUES ($1,$2,'client')",
             agent_id,
             token_hash,
         )
