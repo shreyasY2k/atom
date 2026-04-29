@@ -84,13 +84,21 @@ async def health():
 
 @app.post("/runtime/deploy", status_code=202)
 async def deploy(req: DeployRequest, background_tasks: BackgroundTasks):
-    background_tasks.add_task(run_deployment, req)
+    settings = get_settings()
+    if settings.runtime_backend == "docker":
+        background_tasks.add_task(run_deployment_docker, req)
+    else:
+        background_tasks.add_task(run_deployment, req)
     return {"deployment_id": req.deployment_id, "accepted": True}
 
 
 @app.post("/runtime/rollback/{deployment_id}", status_code=202)
 async def rollback(deployment_id: str, background_tasks: BackgroundTasks):
-    background_tasks.add_task(run_rollback, deployment_id)
+    settings = get_settings()
+    if settings.runtime_backend == "docker":
+        background_tasks.add_task(run_rollback_docker, deployment_id)
+    else:
+        background_tasks.add_task(run_rollback, deployment_id)
     return {"deployment_id": deployment_id, "accepted": True}
 
 
@@ -314,3 +322,115 @@ async def _notify_studio(deployment_id: str, status: str, error: str | None) -> 
             )
     except Exception as exc:
         logger.warning("Could not notify studio for %s: %s", deployment_id, exc)
+
+
+# ── Docker backend ────────────────────────────────────────────────────────────
+
+
+async def run_deployment_docker(req: DeployRequest) -> None:
+    from . import docker_backend  # noqa: PLC0415
+
+    settings = get_settings()
+    logger.info("Docker deploy: agent=%s image=%s", req.agent_id, req.image)
+
+    try:
+        ready, svc_addr = await docker_backend.deploy(
+            agent_id=req.agent_id,
+            domain_id=req.domain_id,
+            image=req.image,
+            agent_jwt=req.agent_jwt,
+            gate_url=settings.docker_agent_gate_url,
+            network=settings.docker_network,
+        )
+
+        status = "deployed" if ready else "failed"
+        async with get_conn() as conn:
+            await conn.execute(
+                "UPDATE deployments SET status=$1, deployed_at=now() WHERE id=$2",
+                status,
+                req.deployment_id,
+            )
+            if ready:
+                await conn.execute(
+                    """
+                    UPDATE agents
+                    SET status='deployed', cluster_service_name=$1, updated_at=now()
+                    WHERE id=$2
+                    """,
+                    svc_addr,
+                    req.agent_id,
+                )
+
+        error = None if ready else "Container did not become healthy within timeout"
+        await _notify_studio(req.deployment_id, status, error)
+
+    except Exception as exc:
+        logger.exception("Docker deployment %s failed: %s", req.deployment_id, exc)
+        try:
+            async with get_conn() as conn:
+                await conn.execute(
+                    "UPDATE deployments SET status='failed' WHERE id=$1", req.deployment_id
+                )
+        except Exception:
+            pass
+        await _notify_studio(req.deployment_id, "failed", str(exc))
+
+
+async def run_rollback_docker(deployment_id: str) -> None:
+    from . import docker_backend  # noqa: PLC0415
+
+    settings = get_settings()
+    try:
+        async with get_conn() as conn:
+            dep = await conn.fetchrow(
+                "SELECT agent_id, manifest_json FROM deployments WHERE id=$1", deployment_id
+            )
+            if not dep:
+                await _notify_studio(deployment_id, "failed", "Deployment not found")
+                return
+
+            agent_id = str(dep["agent_id"])
+            prev = await conn.fetchrow(
+                """
+                SELECT manifest_json FROM deployments
+                WHERE agent_id=$1 AND status='deployed' AND id != $2
+                ORDER BY version DESC LIMIT 1
+                """,
+                agent_id,
+                deployment_id,
+            )
+            if not prev:
+                await _notify_studio(deployment_id, "failed", "No previous deployed version")
+                return
+
+            agent_row = await conn.fetchrow("SELECT domain_id FROM agents WHERE id=$1", agent_id)
+
+        import json as _json  # noqa: PLC0415
+
+        prev_manifest = prev["manifest_json"]
+        if isinstance(prev_manifest, str):
+            prev_manifest = _json.loads(prev_manifest)
+        prev_image = prev_manifest.get("image")
+        if not prev_image:
+            await _notify_studio(deployment_id, "failed", "Previous manifest has no image")
+            return
+
+        ok = await docker_backend.rollback(
+            agent_id=agent_id,
+            prev_image=prev_image,
+            domain_id=str(agent_row["domain_id"]) if agent_row else "",
+            agent_jwt="",
+            gate_url=settings.docker_agent_gate_url,
+            network=settings.docker_network,
+        )
+
+        status = "rolled_back" if ok else "failed"
+        async with get_conn() as conn:
+            await conn.execute(
+                "UPDATE deployments SET status=$1 WHERE id=$2", status, deployment_id
+            )
+        await _notify_studio(deployment_id, status, None if ok else "Docker rollback failed")
+
+    except Exception as exc:
+        logger.exception("Docker rollback %s failed: %s", deployment_id, exc)
+        await _notify_studio(deployment_id, "failed", str(exc))

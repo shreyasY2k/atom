@@ -28,6 +28,13 @@ class Settings(BaseSettings):
     # Path to kubeconfig; None = auto-detect (in-cluster if running as a pod, else ~/.kube/config)
     kubeconfig: str | None = None
 
+    # Backend: "k8s" (default) or "docker" (docker-compose dev — runs agents as containers)
+    runtime_backend: str = "k8s"
+
+    # Docker-backend settings (only used when runtime_backend="docker")
+    docker_network: str = "atom-dev_default"
+    docker_agent_gate_url: str = "http://gate:8080"
+
 
 @lru_cache
 def get_settings() -> Settings:
