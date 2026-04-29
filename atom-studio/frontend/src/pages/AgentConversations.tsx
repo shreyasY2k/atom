@@ -22,7 +22,7 @@ interface Run {
   trace_id: string | null
   user_msg: string
   reply: string
-  steps: Step[]
+  steps: Step[] | null | undefined
   latency_ms: number | null
   created_at: string
 }
@@ -86,8 +86,8 @@ export function AgentConversations({ agentId }: AgentConversationsProps) {
                   {run.latency_ms != null && (
                     <span className="text-xs text-muted-foreground">{run.latency_ms}ms</span>
                   )}
-                  {run.steps.length > 0 && (
-                    <Badge variant="secondary" className="text-xs">{run.steps.length} steps</Badge>
+                  {(run.steps ?? []).length > 0 && (
+                    <Badge variant="secondary" className="text-xs">{(run.steps ?? []).length} steps</Badge>
                   )}
                   {run.trace_id && (
                     <a
@@ -118,7 +118,7 @@ export function AgentConversations({ agentId }: AgentConversationsProps) {
                 </div>
 
                 {/* Thinking / tool steps */}
-                {run.steps.map((step, i) => (
+                {(run.steps ?? []).map((step, i) => (
                   <StepBlock key={i} step={step} />
                 ))}
 
