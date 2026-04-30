@@ -1,15 +1,13 @@
-# infra/helm/tempo-values.yaml — Grafana Tempo (SESSION-13)
-# Single-binary mode; local PVC storage for dev.
-# Enables the metrics-generator to produce RED metrics (rate/error/duration)
-# from spans so Grafana can render latency histograms.
+# infra/helm/tempo-values.yaml — Grafana Tempo (single-binary)
 #
-# Deploy:
-#   helm upgrade --install tempo grafana/tempo \
-#     --namespace atom-system --create-namespace \
-#     -f infra/helm/tempo-values.yaml --wait
+# Enables metrics-generator with local-blocks so TraceQL metrics queries
+# (| rate(), | quantile_over_time()) work without Prometheus.
+#
+# Tempo HTTP server: port 3200
+# OTLP gRPC: 4317  |  OTLP HTTP: 4318
 
 tempo:
-  # ── Storage ────────────────────────────────────────────────────────────────
+  # ── Storage ──────────────────────────────────────────────────────────────────
   storage:
     trace:
       backend: local
@@ -18,8 +16,7 @@ tempo:
       wal:
         path: /var/tempo/wal
 
-  # ── Receivers ──────────────────────────────────────────────────────────────
-  # Accept OTLP from Alloy.
+  # ── OTLP receivers ───────────────────────────────────────────────────────────
   receivers:
     otlp:
       protocols:
@@ -28,21 +25,36 @@ tempo:
         http:
           endpoint: "0.0.0.0:4318"
 
-  # ── Metrics generator ──────────────────────────────────────────────────────
-  # Disabled in dev — enable and point remoteWriteUrl at Prometheus if needed.
+  # ── Metrics generator — local-blocks ────────────────────────────────────────
+  # Serves TraceQL | rate() / | quantile_over_time() from Tempo directly.
+  # No Prometheus needed for dev; set remote_write if you want RED metrics there.
   metricsGenerator:
-    enabled: false
+    enabled: true
+    processor:
+      local_blocks:
+        max_live_traces: 50000
+        flush_to_storage: true
+    storage:
+      path: /var/tempo/generator/wal
+      remote_write: []
 
-  # ── Compaction / retention ─────────────────────────────────────────────────
+  # Activate local-blocks processor for all tenants
+  overrides:
+    defaults:
+      metrics_generator:
+        processors:
+          - local-blocks
+
+  # ── Compaction / retention ────────────────────────────────────────────────────
   compactor:
     compaction:
       block_retention: 336h   # 14 days
 
-  # ── Server ─────────────────────────────────────────────────────────────────
+  # ── Server ───────────────────────────────────────────────────────────────────
   server:
-    grpc_listen_port: 9095
+    http_listen_port: 3200
 
-# ── Persistence ───────────────────────────────────────────────────────────────
+# ── Persistence ──────────────────────────────────────────────────────────────
 persistence:
   enabled: true
   size: 5Gi
@@ -54,12 +66,11 @@ serviceAccount:
 service:
   type: ClusterIP
 
-# ── Health probes ─────────────────────────────────────────────────────────────
-# Tempo's HTTP server listens on 3100; patch the chart's default probe (3200).
+# ── Health probes — port 3200 (Tempo HTTP) NOT 3100 (that is Loki) ────────────
 livenessProbe:
   httpGet:
     path: /ready
-    port: 3100
+    port: 3200
   initialDelaySeconds: 30
   timeoutSeconds: 5
   periodSeconds: 10
@@ -68,7 +79,7 @@ livenessProbe:
 readinessProbe:
   httpGet:
     path: /ready
-    port: 3100
+    port: 3200
   initialDelaySeconds: 20
   timeoutSeconds: 5
   periodSeconds: 10

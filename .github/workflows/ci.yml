@@ -24,7 +24,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: astral-sh/setup-uv@v3
+      - uses: astral-sh/setup-uv@v5
       - name: Generate JWT key pair for tests
         run: |
           mkdir -p .keys
@@ -40,7 +40,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: astral-sh/setup-uv@v3
+      - uses: astral-sh/setup-uv@v5
       - run: |
           uv run --project atom-runtime/runtime \
             --with pytest-asyncio \
@@ -66,5 +66,5 @@ jobs:
           go-version-file: gate/go.mod
       - run: cd gate && go vet ./...
       - run: cd atom-cli && go vet ./...
-      - uses: astral-sh/setup-uv@v3
+      - uses: astral-sh/setup-uv@v5
       - run: uv run --with ruff ruff check atom-studio/ atom-runtime/runtime/ infra/log-archiver/
