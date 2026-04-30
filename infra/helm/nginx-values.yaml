@@ -1,13 +1,28 @@
+# infra/helm/nginx-values.yaml — nginx-ingress for kind cluster
+#
+# Pins the controller to the control-plane node (which has port 80/443
+# mapped to the host via kind extraPortMappings) so ingress is reachable
+# at http://localhost without a port-forward.
+
 controller:
-  # Docker Desktop Kubernetes exposes LoadBalancer services on localhost
-  service:
-    type: LoadBalancer
+  hostPort:
+    enabled: true
+    ports:
+      http: 80
+      https: 443
+
   nodeSelector:
-    ingress-ready: "true"
+    "kubernetes.io/hostname": "atom-control-plane"
+
+  tolerations:
+    - key: node-role.kubernetes.io/control-plane
+      operator: Exists
+      effect: NoSchedule
+
   resources:
     requests:
       cpu: 100m
-      memory: 128Mi
+      memory: 90Mi
     limits:
       cpu: 500m
       memory: 256Mi

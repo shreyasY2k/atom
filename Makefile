@@ -76,10 +76,11 @@ infra-up: ## Create kind cluster + local registry + deploy all infra services
 	  --overwrite 2>/dev/null || true
 	@echo "→ Applying namespaces..."
 	@kubectl apply -f infra/manifests/namespaces.yaml
-	@echo "→ Installing nginx-ingress..."
+	@echo "→ Installing nginx-ingress (pinned to control-plane, hostPort 80/443)..."
 	@helm upgrade --install ingress-nginx ingress-nginx \
 	  --repo https://kubernetes.github.io/ingress-nginx \
 	  --namespace ingress-nginx --create-namespace \
+	  -f infra/helm/nginx-values.yaml \
 	  --wait
 	@echo "→ Deploying Postgres (pgvector)..."
 	@helm upgrade --install postgres oci://registry-1.docker.io/bitnamicharts/postgresql \
@@ -457,34 +458,29 @@ monitoring-down: ## Remove monitoring stack from k8s
 	@echo "✓ Monitoring stack removed."
 
 # ── Ingress ───────────────────────────────────────────────────────────────────
-ingress-up: ## Apply ingress rules and port-forward nginx to localhost:8088
+ingress-up: ## Apply ingress rules (kind: port 80 direct; Docker Desktop: port-forward :8088)
 	@kubectl apply -f infra/manifests/ingress.yaml
-	@pkill -f "port-forward.*ingress-nginx.*8088" 2>/dev/null || true
-	@kubectl port-forward -n ingress-nginx svc/ingress-nginx-controller 8088:80 &
-	@sleep 2
-	@echo "✓ Ingress available at http://localhost:8088"
-	@echo "  Add /etc/hosts entries with: sudo make ingress-hosts"
+	@if kind get clusters 2>/dev/null | grep -q "^$(CLUSTER_NAME)$$"; then \
+	  echo "✓ Ingress applied. kind cluster maps port 80 → localhost:80 directly."; \
+	  echo "  Run: sudo make ingress-hosts  (one-time)"; \
+	  echo "  Then open http://studio.atom.local  (no port needed)"; \
+	else \
+	  pkill -f "port-forward.*ingress-nginx.*8088" 2>/dev/null || true; \
+	  kubectl port-forward -n ingress-nginx svc/ingress-nginx-controller 8088:80 &; \
+	  sleep 2; \
+	  echo "✓ Ingress port-forwarded to localhost:8088"; \
+	fi
 	@echo ""
-	@echo "  Application:"
-	@echo "    http://gate.atom.local:8088          GATE — agent proxy"
-	@echo "    http://api.atom.local:8088/docs      atom-studio API"
-	@echo "    http://studio.atom.local:8088        atom-studio UI"
-	@echo "    http://runtime.atom.local:8088       atom-runtime"
-	@echo ""
-	@echo "  Observability:"
-	@echo "    http://grafana.atom.local:8088       Grafana  (admin/atom-grafana-dev)"
-	@echo "    http://alloy.atom.local:8088         Alloy    (OTLP receiver UI)"
-	@echo "    http://loki.atom.local:8088          Loki     (log API)"
-	@echo "    http://tempo.atom.local:8088         Tempo    (trace API)"
-	@echo ""
-	@echo "  Storage:"
-	@echo "    http://minio.atom.local:8088         MinIO    S3 API"
-	@echo "    http://minio-ui.atom.local:8088      MinIO    console (minioadmin/changeme)"
-	@echo "    http://opa.atom.local:8088           OPA      policy engine"
+	@echo "  Services (http on port 80 for kind / :8088 for Docker Desktop):"
+	@echo "    http://studio.atom.local        atom-studio  (admin@atom.local / admin123)"
+	@echo "    http://gate.atom.local          GATE         (Bearer JWT)"
+	@echo "    http://api.atom.local/docs      API          (Swagger UI)"
+	@echo "    http://grafana.atom.local       Grafana      (admin / atom-grafana-dev)"
+	@echo "    http://minio-ui.atom.local      MinIO        (minioadmin / changeme)"
 
-ingress-hosts: ## Append *.atom.local entries to /etc/hosts (requires sudo)
+ingress-hosts: ## Append *.atom.local → 127.0.0.1 to /etc/hosts (requires sudo)
 	@echo "127.0.0.1  gate.atom.local api.atom.local studio.atom.local runtime.atom.local grafana.atom.local alloy.atom.local loki.atom.local tempo.atom.local minio.atom.local minio-ui.atom.local opa.atom.local" | tee -a /etc/hosts
-	@echo "✓ /etc/hosts updated"
+	@echo "✓ /etc/hosts updated. Access services at http://<name>.atom.local (no port)"
 
 # ── Keys ──────────────────────────────────────────────────────────────────────
 generate-keys: ## Generate RSA-4096 JWT key pair (run once on first setup)
