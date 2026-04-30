@@ -10,13 +10,17 @@ SHELL := /bin/bash
         lint lint-go lint-python \
         test test-go test-python test-e2e test-load \
         generate-keys go-sync go-tidy clean \
-        registry-up k8s-secrets k8s-deploy monitoring-up monitoring-down \
+        registry-up ghcr-push ghcr-login deploy-from-ghcr \
+        k8s-secrets k8s-deploy monitoring-up monitoring-down \
         ingress-up ingress-hosts
 
 # ── Cluster + registry ───────────────────────────────────────────────────────
 CLUSTER_NAME  ?= atom
-REGISTRY      ?= localhost:5001
 KUBECONFIG    ?= $(HOME)/.kube/config
+# GitHub Container Registry org — set to your GitHub username or org.
+# Images are published at ghcr.io/$(GHCR_ORG)/atom-<service>:latest
+GHCR_ORG     ?= shreyasy2k
+GHCR_REGISTRY = ghcr.io/$(GHCR_ORG)
 
 # ── Database URL (from .env or env) ──────────────────────────────────────────
 include .env
@@ -329,6 +333,45 @@ registry-up: ## Ensure local Docker registry is running on :5001
 	  || true
 	@echo "✓ Registry running at localhost:5001"
 
+# ── GHCR image push (maintainer / CI) ────────────────────────────────────────
+ghcr-push: ## Build all images and push to GHCR (requires docker login ghcr.io)
+	@echo "→ Building and pushing to $(GHCR_REGISTRY)..."
+	@docker build -t $(GHCR_REGISTRY)/atom-gate:latest         gate/ -f gate/Dockerfile
+	@docker push  $(GHCR_REGISTRY)/atom-gate:latest
+	@docker build -t $(GHCR_REGISTRY)/atom-llm:latest          atom-llm/ -f atom-llm/Dockerfile.dev
+	@docker push  $(GHCR_REGISTRY)/atom-llm:latest
+	@docker build -t $(GHCR_REGISTRY)/atom-studio-api:latest   atom-studio/backend/
+	@docker push  $(GHCR_REGISTRY)/atom-studio-api:latest
+	@docker build -t $(GHCR_REGISTRY)/atom-studio-ui:latest    atom-studio/frontend/
+	@docker push  $(GHCR_REGISTRY)/atom-studio-ui:latest
+	@docker build -t $(GHCR_REGISTRY)/atom-log-archiver:latest infra/log-archiver/
+	@docker push  $(GHCR_REGISTRY)/atom-log-archiver:latest
+	@docker build -t $(GHCR_REGISTRY)/atom-runtime:latest      atom-runtime/runtime/
+	@docker push  $(GHCR_REGISTRY)/atom-runtime:latest
+	@echo "✓ All images pushed to $(GHCR_REGISTRY)"
+
+ghcr-login: ## Log in to GHCR (set GHCR_TOKEN env var or use --password-stdin)
+	@echo "$$GHCR_TOKEN" | docker login ghcr.io -u $(GHCR_ORG) --password-stdin
+
+# ── Operator deploy (pulls from GHCR — no local build needed) ────────────────
+deploy-from-ghcr: ## Apply manifests; images pulled from GHCR automatically
+	@echo "→ Deploying ATOM from GHCR images ($(GHCR_REGISTRY))..."
+	@$(MAKE) k8s-secrets
+	@kubectl apply -f infra/manifests/cluster-config.yaml
+	@kubectl create configmap opa-policies \
+	  --from-file=policies/base/ --namespace atom-system \
+	  --dry-run=client -o yaml | kubectl apply -f -
+	@kubectl apply -f infra/manifests/atom-llm-netpol.yaml
+	@kubectl apply -f infra/manifests/gate-deployment.yaml
+	@kubectl apply -f infra/manifests/atom-llm-deployment.yaml
+	@kubectl apply -f infra/manifests/atom-studio-deployment.yaml
+	@kubectl apply -f infra/manifests/atom-studio-ui-deployment.yaml
+	@kubectl apply -f infra/manifests/atom-runtime-deployment.yaml
+	@kubectl apply -f infra/manifests/log-archiver-deployment.yaml
+	@kubectl apply -f infra/manifests/alloy-daemonset.yaml
+	@echo "✓ Manifests applied. Images will be pulled from GHCR on first pod start."
+	@echo "  Run: make seed-k8s   to create admin user."
+
 # ── Kubernetes secrets (idempotent) ──────────────────────────────────────────
 k8s-secrets: ## Create atom-credentials (passwords only) + atom-jwt-keys Secrets
 	@echo "→ Applying namespaces and Secrets..."
@@ -356,18 +399,19 @@ k8s-deploy: ## Build images → push to local registry → apply manifests → m
 	@echo "→ Ensuring local registry is running..."
 	@$(MAKE) registry-up
 	@echo "→ Building Docker images and loading into kind cluster '$(CLUSTER_NAME)'..."
-	@docker build -t atom-gate:local           gate/ -f gate/Dockerfile
-	@kind load docker-image atom-gate:local          --name $(CLUSTER_NAME)
-	@docker build -t atom-llm:local            atom-llm/ -f atom-llm/Dockerfile.dev
-	@kind load docker-image atom-llm:local           --name $(CLUSTER_NAME)
-	@docker build -t atom-studio-api:local     atom-studio/backend/
-	@kind load docker-image atom-studio-api:local    --name $(CLUSTER_NAME)
-	@docker build -t atom-studio-ui:local      atom-studio/frontend/
-	@kind load docker-image atom-studio-ui:local     --name $(CLUSTER_NAME)
-	@docker build -t atom-log-archiver:local   infra/log-archiver/
-	@kind load docker-image atom-log-archiver:local  --name $(CLUSTER_NAME)
-	@docker build -t atom-runtime:local        atom-runtime/runtime/
-	@kind load docker-image atom-runtime:local       --name $(CLUSTER_NAME)
+	@echo "  (tagged as $(GHCR_REGISTRY)/<service>:latest so manifests need no change)"
+	@docker build -t $(GHCR_REGISTRY)/atom-gate:latest         gate/ -f gate/Dockerfile
+	@kind load docker-image $(GHCR_REGISTRY)/atom-gate:latest         --name $(CLUSTER_NAME)
+	@docker build -t $(GHCR_REGISTRY)/atom-llm:latest          atom-llm/ -f atom-llm/Dockerfile.dev
+	@kind load docker-image $(GHCR_REGISTRY)/atom-llm:latest          --name $(CLUSTER_NAME)
+	@docker build -t $(GHCR_REGISTRY)/atom-studio-api:latest   atom-studio/backend/
+	@kind load docker-image $(GHCR_REGISTRY)/atom-studio-api:latest   --name $(CLUSTER_NAME)
+	@docker build -t $(GHCR_REGISTRY)/atom-studio-ui:latest    atom-studio/frontend/
+	@kind load docker-image $(GHCR_REGISTRY)/atom-studio-ui:latest    --name $(CLUSTER_NAME)
+	@docker build -t $(GHCR_REGISTRY)/atom-log-archiver:latest infra/log-archiver/
+	@kind load docker-image $(GHCR_REGISTRY)/atom-log-archiver:latest --name $(CLUSTER_NAME)
+	@docker build -t $(GHCR_REGISTRY)/atom-runtime:latest      atom-runtime/runtime/
+	@kind load docker-image $(GHCR_REGISTRY)/atom-runtime:latest      --name $(CLUSTER_NAME)
 	@echo "→ Creating Secrets and ConfigMaps..."
 	@$(MAKE) k8s-secrets
 	@kubectl apply -f infra/manifests/cluster-config.yaml
@@ -386,12 +430,12 @@ k8s-deploy: ## Build images → push to local registry → apply manifests → m
 	@echo "→ Running LiteLLM Prisma migration (MUST run before golang-migrate)..."
 	@kubectl port-forward -n atom-infra svc/postgres-postgresql 5433:5432 & \
 	  sleep 3 && \
-	  SCHEMA=$$(docker run --rm atom-llm:local python3 -c \
+	  SCHEMA=$$(docker run --rm $(GHCR_REGISTRY)/atom-llm:latest python3 -c \
 	    "import litellm, os; print(os.path.join(os.path.dirname(litellm.__file__), 'proxy', 'schema.prisma'))") && \
 	  docker run --rm \
 	    -e DATABASE_URL="postgresql://atom:$(POSTGRES_PASSWORD)@host.docker.internal:5433/atom" \
 	    --add-host host.docker.internal:host-gateway \
-	    atom-llm:local prisma db push --schema $$SCHEMA \
+	    $(GHCR_REGISTRY)/atom-llm:latest prisma db push --schema $$SCHEMA \
 	    --skip-generate --accept-data-loss 2>/dev/null || echo "(prisma skipped)"
 	@pkill -f "port-forward.*5433" 2>/dev/null || true
 	@echo "→ Running ATOM DB migrations (after Prisma so --accept-data-loss cannot drop ATOM tables)..."
@@ -420,37 +464,44 @@ k8s-deploy: ## Build images → push to local registry → apply manifests → m
 # ── Monitoring (k8s) ─────────────────────────────────────────────────────────
 # Note: For docker-compose dev, Alloy+Loki+Tempo are included in dev-up.
 # These targets deploy the monitoring stack to the kind k8s cluster.
-monitoring-up: ## Deploy Grafana + Tempo + Alloy to atom-system namespace (k8s)
+monitoring-up: ## Deploy Grafana + Loki + Tempo + Alloy to atom-system (k8s)
 	@helm repo add grafana https://grafana.github.io/helm-charts 2>/dev/null || true
-	@helm repo update
-	@echo "→ Creating dashboard ConfigMap..."
+	@helm repo update 2>&1 | tail -1
+	@echo "→ Creating Grafana dashboard ConfigMap..."
 	@kubectl create configmap atom-grafana-dashboards \
 	  --from-file=infra/grafana/dashboards/ \
 	  --namespace atom-system --dry-run=client -o yaml | kubectl apply -f -
 	@kubectl label configmap atom-grafana-dashboards grafana_dashboard=1 \
 	  -n atom-system --overwrite
-	@echo "→ Deploying Tempo..."
+	@echo "→ Deploying Tempo (trace backend)..."
 	@helm upgrade --install tempo grafana/tempo \
-	  --namespace atom-system --create-namespace \
-	  -f infra/helm/tempo-values.yaml
-	@echo "→ Deploying Alloy (log collector + OTLP receiver)..."
-	@helm upgrade --install alloy grafana/alloy \
-	  --namespace atom-system --create-namespace \
-	  -f infra/helm/alloy-values.yaml
-	@echo "→ Deploying Loki..."
+	  --namespace atom-system \
+	  -f infra/helm/tempo-values.yaml \
+	  --wait --timeout=120s
+	@echo "→ Deploying Loki (log backend; caches disabled for dev)..."
 	@helm upgrade --install loki grafana/loki \
-	  --namespace atom-system --create-namespace \
-	  -f infra/helm/loki-values.yaml
-	@echo "→ Deploying Grafana..."
+	  --namespace atom-system \
+	  -f infra/helm/loki-values.yaml \
+	  --wait --timeout=180s
+	@echo "→ Deploying Alloy (OTLP receiver + log collector)..."
+	@helm upgrade --install alloy grafana/alloy \
+	  --namespace atom-system \
+	  -f infra/helm/alloy-values.yaml \
+	  --wait --timeout=120s
+	@echo "→ Deploying Grafana (dashboards + Loki + Tempo datasources)..."
 	@helm upgrade --install grafana grafana/grafana \
-	  --namespace atom-system --create-namespace \
-	  -f infra/helm/grafana-values.yaml
+	  --namespace atom-system \
+	  -f infra/helm/grafana-values.yaml \
+	  --wait --timeout=120s
+	@echo "→ Applying ingress rules for observability services..."
+	@kubectl apply -f infra/manifests/ingress.yaml
 	@echo ""
 	@echo "✓ Monitoring stack deployed."
 	@echo ""
-	@echo "Port-forwards (run in separate terminal):"
-	@echo "  kubectl port-forward -n atom-system svc/alloy 4318:4318   # OTLP"
-	@echo "  kubectl port-forward -n atom-system svc/grafana 3006:3000 # Grafana"
+	@echo "  http://grafana.atom.local   (admin / atom-grafana-dev)"
+	@echo "  http://alloy.atom.local     (OTLP receiver UI)"
+	@echo "  http://loki.atom.local      (log query API)"
+	@echo "  http://tempo.atom.local     (trace query API)"
 
 monitoring-down: ## Remove monitoring stack from k8s
 	@helm uninstall grafana tempo alloy loki -n atom-system 2>/dev/null || true

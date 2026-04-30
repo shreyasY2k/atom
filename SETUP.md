@@ -47,7 +47,7 @@ migrate -version && psql --version
 ### 2.1 Clone
 
 ```bash
-git clone https://github.com/your-org/atom.git && cd atom
+git clone https://github.com/shreyasY2k/atom.git && cd atom
 ```
 
 ### 2.2 Generate JWT key pair (required for both modes)

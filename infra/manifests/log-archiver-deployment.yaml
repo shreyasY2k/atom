@@ -18,7 +18,7 @@ spec:
     spec:
       containers:
         - name: log-archiver
-          image: atom-log-archiver:local
+          image: ghcr.io/shreyasy2k/atom-log-archiver:latest
           imagePullPolicy: IfNotPresent
           envFrom:
             - secretRef:

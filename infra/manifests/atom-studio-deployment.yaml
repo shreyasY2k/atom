@@ -18,7 +18,7 @@ spec:
     spec:
       containers:
         - name: atom-studio-api
-          image: atom-studio-api:local
+          image: ghcr.io/shreyasy2k/atom-studio-api:latest
           imagePullPolicy: IfNotPresent
           ports:
             - containerPort: 3001

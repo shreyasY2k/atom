@@ -674,7 +674,7 @@ Overall              ✓ PASS
 ```
 You are implementing SESSION-10 of ATOM — the atom-cli Go tool.
 
-Module: github.com/your-org/atom/atom-cli
+Module: github.com/shreyasY2k/atom/atom-cli
 Framework: github.com/spf13/cobra
 Interactive prompts: github.com/manifoldco/promptui
 Terminal styling: github.com/charmbracelet/lipgloss

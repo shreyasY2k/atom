@@ -22,7 +22,7 @@ spec:
     spec:
       containers:
         - name: atom-studio-ui
-          image: atom-studio-ui:local
+          image: ghcr.io/shreyasy2k/atom-studio-ui:latest
           imagePullPolicy: IfNotPresent
           ports:
             - containerPort: 3000

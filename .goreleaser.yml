@@ -1,0 +1,75 @@
+version: 2
+
+project_name: atom
+
+before:
+  hooks:
+    - go work sync
+    - cd atom-cli && go mod tidy
+
+builds:
+  - id: atom-cli
+    dir: atom-cli
+    main: ./cmd/atom
+    binary: atom
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - linux
+      - darwin
+      - windows
+    goarch:
+      - amd64
+      - arm64
+    ignore:
+      - goos: windows
+        goarch: arm64
+    ldflags:
+      - -s -w
+      - -X main.version={{.Version}}
+      - -X main.commit={{.Commit}}
+      - -X main.date={{.Date}}
+
+archives:
+  - id: atom-cli
+    builds: [atom-cli]
+    name_template: "atom_{{ .Os }}_{{ .Arch }}"
+    format_overrides:
+      - goos: windows
+        format: zip
+    files:
+      - README.md
+      - docs/DEVELOPER_GUIDE.md
+
+checksum:
+  name_template: "checksums.txt"
+
+release:
+  github:
+    owner: "{{ .Env.GITHUB_REPOSITORY_OWNER }}"
+    name: atom
+  name_template: "ATOM v{{.Version}}"
+  header: |
+    ## ATOM v{{.Version}}
+
+    ### Install
+
+    **macOS / Linux (one-liner):**
+    ```bash
+    curl -fsSL https://github.com/{{ .Env.GITHUB_REPOSITORY_OWNER }}/atom/releases/latest/download/atom_$(uname -s | tr '[:upper:]' '[:lower:]')_$(uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/') \
+      -o /usr/local/bin/atom && chmod +x /usr/local/bin/atom
+    ```
+
+    **Go install:**
+    ```bash
+    go install github.com/{{ .Env.GITHUB_REPOSITORY_OWNER }}/atom/atom-cli/cmd/atom@v{{.Version}}
+    ```
+
+changelog:
+  sort: asc
+  filters:
+    exclude:
+      - "^docs:"
+      - "^chore:"
+      - "Merge pull request"
+      - "Merge branch"

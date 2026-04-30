@@ -1,7 +1,7 @@
 # SESSION-03 — GATE Core
 
-**Prerequisites:** SESSION-02 complete  
-**Goal:** Implement the GATE Go service with JWT validation, request routing, rate limiting, and hash-chained audit logging.  
+**Prerequisites:** SESSION-02 complete
+**Goal:** Implement the GATE Go service with JWT validation, request routing, rate limiting, and hash-chained audit logging.
 **Estimated time:** 2 days
 
 ---
@@ -23,12 +23,12 @@ Inbound request
 
 ## Tasks
 
-1. **Initialise Go module** at `gate/`  
+1. **Initialise Go module** at `gate/`
    Dependencies: `github.com/gofiber/fiber/v3`, `github.com/golang-jwt/jwt/v5`,
    `github.com/redis/go-redis/v9`, `github.com/jackc/pgx/v5`,
    `go.opentelemetry.io/otel`, `go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracehttp`
 
-2. **Config loading** (`gate/internal/config/config.go`)  
+2. **Config loading** (`gate/internal/config/config.go`)
    Load from env vars: `DATABASE_URL`, `REDIS_URL`, `JWT_PUBLIC_KEY_PATH`, `PLATFORM_HMAC_SECRET`,
    `OPA_BUNDLE_PATH`, `OTEL_EXPORTER_OTLP_ENDPOINT`.
 
@@ -68,10 +68,10 @@ Inbound request
    - JWT: valid token, expired token, revoked token, wrong key.
    - Audit: hash chain integrity after N entries.
 
-10. **Dockerfile** (`gate/Dockerfile`)  
+10. **Dockerfile** (`gate/Dockerfile`)
     Multi-stage build: `golang:1.22-alpine` → `gcr.io/distroless/static-debian12`.
 
-11. **k8s Deployment manifest** (`infra/manifests/gate-deployment.yaml`)  
+11. **k8s Deployment manifest** (`infra/manifests/gate-deployment.yaml`)
     3 replicas, readiness/liveness probes on `/readyz` and `/healthz`, resource limits.
 
 ---
@@ -115,7 +115,7 @@ appends every request to the hash-chained audit log.
 You are implementing SESSION-03 of ATOM — the GATE Go service core.
 
 Context:
-- Module path: github.com/your-org/atom/gate
+- Module path: github.com/shreyasY2k/atom/gate
 - Framework: Fiber v3 (github.com/gofiber/fiber/v3)
 - Postgres client: pgx/v5 with pgxpool
 - Redis client: go-redis/v9

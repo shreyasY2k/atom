@@ -21,7 +21,7 @@ immutable hash-chained audit log.
 
 ```bash
 # 1. Clone + bootstrap
-git clone https://github.com/your-org/atom.git && cd atom
+git clone https://github.com/shreyasY2k/atom.git && cd atom
 make bootstrap          # installs Go, Python, kubectl, OPA, migrate, etc.
 
 # 2. Keys + env
@@ -37,7 +37,33 @@ make seed-dev           # creates admin@atom.local / admin123
 open http://localhost:3000
 ```
 
-### Option B — Kubernetes (Docker Desktop)
+### Option B — Kubernetes, operator path (pre-built images from GHCR, no build needed)
+
+```bash
+# Prerequisites: kubectl + helm + kind + make generate-keys + .env
+make infra-up                # create kind cluster + deploy Postgres/Redis/MinIO/Redpanda/OPA
+make k8s-secrets             # push credentials to cluster
+make deploy-from-ghcr        # pull ghcr.io/shreyasy2k/atom-* images, apply manifests
+make seed-k8s                # create admin user
+make monitoring-up           # Grafana + Loki + Tempo + Alloy
+sudo make ingress-hosts      # write /etc/hosts (one-time)
+make ingress-up              # expose all services at *.atom.local:80
+open http://studio.atom.local
+```
+
+> **atom CLI** — install without building:
+> ```bash
+> curl -fsSL https://github.com/shreyasY2k/atom/releases/latest/download/atom_$(uname -s | tr '[:upper:]' '[:lower:]')_$(uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/') \
+>   -o /usr/local/bin/atom && chmod +x /usr/local/bin/atom
+> # or: go install github.com/shreyasY2k/atom/atom-cli/cmd/atom@latest
+> ```
+
+> **atom-sdk (Python)** — install without cloning:
+> ```bash
+> pip install atom-platform-sdk
+> ```
+
+### Option C — Kubernetes, developer path (build from source)
 
 ```bash
 # 1. Keys + env (same as above)

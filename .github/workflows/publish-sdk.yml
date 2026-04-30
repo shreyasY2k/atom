@@ -1,0 +1,27 @@
+name: Publish atom-platform-sdk to PyPI
+
+on:
+  push:
+    tags: ["v*"]
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    environment: pypi
+    permissions:
+      id-token: write  # needed for trusted PyPI publishing
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: astral-sh/setup-uv@v3
+
+      - name: Build package
+        run: |
+          cd atom-sdk/atom_platform_sdk
+          uv build
+
+      - name: Publish to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          packages-dir: atom-sdk/atom_platform_sdk/dist/

@@ -58,7 +58,7 @@ spec:
         runAsUser: 65532
       containers:
         - name: atom-runtime
-          image: atom-runtime:local
+          image: ghcr.io/shreyasy2k/atom-runtime:latest
           imagePullPolicy: IfNotPresent
           ports:
             - containerPort: 8090

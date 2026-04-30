@@ -18,7 +18,7 @@ spec:
     spec:
       containers:
         - name: atom-llm
-          image: atom-llm:local
+          image: ghcr.io/shreyasy2k/atom-llm:latest
           imagePullPolicy: IfNotPresent
           ports:
             - containerPort: 4000
