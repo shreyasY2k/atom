@@ -41,67 +41,56 @@ metadata:
   namespace: atom-system
 data:
   config.alloy: |
-    // ── Alloy River config: atom-agents pod log collection ───────────────────
-    // Reads container logs from /var/log/containers/ for atom-agents namespace,
-    // enriches with pod labels (including atom.io/agent-id → agent_id),
-    // and exports each log line as a JSON message to the atom.agent.logs topic.
+    // ── Alloy DaemonSet River config ──────────────────────────────────────────
+    // Collects pod logs from atom-agents namespace via the Kubernetes API
+    // and ships them to Loki for storage + querying in Grafana.
+    // Also forwards atom.io/agent-id label so Grafana can filter by agent.
 
-    otelcol.receiver.filelog "atom_agent_pods" {
-      include            = ["/var/log/containers/*_atom-agents_*.log"]
-      include_file_path  = true
-      include_file_name  = false
-
-      // Container runtime writes JSON log lines; parse the "log" field as the body.
-      operators = [
-        {
-          type = "json_parser"
-          timestamp {
-            parse_from = "attributes.time"
-            layout     = "%Y-%m-%dT%H:%M:%S.%fZ"
-          }
-        },
-        {
-          type  = "move"
-          from  = "attributes.log"
-          to    = "body"
-        },
-      ]
-
-      output {
-        logs = [otelcol.processor.k8sattributes.default.input]
+    // ── Discover atom-agents pods ─────────────────────────────────────────────
+    discovery.kubernetes "atom_agent_pods" {
+      role = "pod"
+      namespaces {
+        names = ["atom-agents"]
       }
     }
 
-    otelcol.processor.k8sattributes "default" {
-      auth_type = "serviceAccount"
+    // ── Relabel: keep only useful labels, add agent_id ────────────────────────
+    discovery.relabel "atom_agent_pods" {
+      targets = discovery.kubernetes.atom_agent_pods.targets
 
-      extract {
-        metadata = ["k8s.pod.name", "k8s.namespace.name", "k8s.pod.uid"]
-        labels = [
-          {
-            from      = "pod"
-            key       = "atom.io/agent-id"
-            tag_name  = "agent_id"
-          },
-        ]
+      rule {
+        source_labels = ["__meta_kubernetes_pod_label_atom_io_agent_id"]
+        target_label  = "agent_id"
       }
-
-      pod_association {
-        sources {
-          from = "resource_attribute"
-          name = "log.file.path"
-        }
+      rule {
+        source_labels = ["__meta_kubernetes_pod_label_atom_io_domain_id"]
+        target_label  = "domain_id"
       }
-
-      output {
-        logs = [otelcol.exporter.kafka.atom.input]
+      rule {
+        source_labels = ["__meta_kubernetes_namespace"]
+        target_label  = "namespace"
+      }
+      rule {
+        source_labels = ["__meta_kubernetes_pod_name"]
+        target_label  = "pod"
+      }
+      rule {
+        source_labels = ["__meta_kubernetes_pod_container_name"]
+        target_label  = "container"
       }
     }
 
-    otelcol.exporter.kafka "atom" {
-      brokers  = [env("KAFKA_BROKERS")]
-      topic    = "atom.agent.logs"
-      encoding = "otlp_json"
+    // ── Collect logs from discovered pods ─────────────────────────────────────
+    loki.source.kubernetes "atom_agents" {
+      targets    = discovery.relabel.atom_agent_pods.output
+      forward_to = [loki.write.default.receiver]
+    }
+
+    // ── Forward to Loki ───────────────────────────────────────────────────────
+    loki.write "default" {
+      endpoint {
+        url = "http://loki.atom-system.svc.cluster.local:3100/loki/api/v1/push"
+      }
     }
 ---
 apiVersion: apps/v1

@@ -1,0 +1,84 @@
+# infra/helm/loki-values.yaml — Grafana Loki (SESSION-15)
+# Single-binary (monolithic) mode — suitable for dev/single-node.
+# Stores logs in a local PVC; all ATOM services ship logs via Alloy.
+#
+# Deploy:
+#   helm upgrade --install loki grafana/loki \
+#     --namespace atom-system --create-namespace \
+#     -f infra/helm/loki-values.yaml --wait
+
+loki:
+  commonConfig:
+    replication_factor: 1
+  storage:
+    type: filesystem
+  auth_enabled: false
+  schemaConfig:
+    configs:
+      - from: "2024-01-01"
+        store: tsdb
+        object_store: filesystem
+        schema: v13
+        index:
+          prefix: index_
+          period: 24h
+
+deploymentMode: SingleBinary
+
+singleBinary:
+  replicas: 1
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
+  persistence:
+    enabled: true
+    size: 5Gi
+
+# Disable components not needed in single-binary mode
+backend:
+  replicas: 0
+read:
+  replicas: 0
+write:
+  replicas: 0
+ingester:
+  replicas: 0
+querier:
+  replicas: 0
+queryFrontend:
+  replicas: 0
+queryScheduler:
+  replicas: 0
+distributor:
+  replicas: 0
+compactor:
+  replicas: 0
+indexGateway:
+  replicas: 0
+bloomCompactor:
+  replicas: 0
+bloomGateway:
+  replicas: 0
+
+chunksCache:
+  enabled: false
+
+resultsCache:
+  enabled: false
+
+gateway:
+  enabled: false
+
+# Prometheus metrics scraping
+serviceMonitor:
+  enabled: false
+
+test:
+  enabled: false
+
+lokiCanary:
+  enabled: false

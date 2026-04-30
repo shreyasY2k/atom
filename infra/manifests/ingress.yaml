@@ -1,0 +1,190 @@
+---
+# ATOM Ingress — all HTTP services via nginx-ingress
+#
+# Access via port-forward (Docker Desktop):
+#   kubectl port-forward -n ingress-nginx svc/ingress-nginx-controller 8088:80
+#   make ingress-up
+#
+# /etc/hosts (127.0.0.1 for port-forward, or the LB IP for direct access):
+#   127.0.0.1  gate.atom.local api.atom.local studio.atom.local
+#              runtime.atom.local grafana.atom.local alloy.atom.local
+#              loki.atom.local tempo.atom.local
+#              minio.atom.local minio-ui.atom.local opa.atom.local
+#
+# Service list:
+#   http://gate.atom.local:8088          GATE — JWT-protected agent proxy
+#   http://api.atom.local:8088/docs      atom-studio API — Swagger UI
+#   http://studio.atom.local:8088        atom-studio UI
+#   http://runtime.atom.local:8088       atom-runtime webhook
+#   http://grafana.atom.local:8088       Grafana dashboards (admin/atom-grafana-dev)
+#   http://alloy.atom.local:8088         Grafana Alloy — OTLP receiver UI
+#   http://loki.atom.local:8088          Loki log query API
+#   http://tempo.atom.local:8088         Tempo trace query API
+#   http://minio.atom.local:8088         MinIO S3 API
+#   http://minio-ui.atom.local:8088      MinIO console (minioadmin/changeme)
+#   http://opa.atom.local:8088           OPA policy engine
+
+# ── atom-system application + observability services ─────────────────────────
+
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: atom-system-ingress
+  namespace: atom-system
+  annotations:
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "300"
+    nginx.ingress.kubernetes.io/proxy-send-timeout: "300"
+spec:
+  ingressClassName: nginx
+  rules:
+    - host: gate.atom.local
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: gate
+                port:
+                  number: 8080
+
+    - host: api.atom.local
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: atom-studio-api
+                port:
+                  number: 3001
+
+    - host: studio.atom.local
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: atom-studio-ui
+                port:
+                  number: 3000
+
+    - host: runtime.atom.local
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: atom-runtime
+                port:
+                  number: 8090
+
+    - host: grafana.atom.local
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: grafana
+                port:
+                  number: 3000
+
+    - host: alloy.atom.local
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: alloy
+                port:
+                  number: 12345
+
+    - host: loki.atom.local
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: loki
+                port:
+                  number: 3100
+
+    - host: tempo.atom.local
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: tempo
+                port:
+                  number: 3200
+
+---
+# ── atom-infra storage + policy services ─────────────────────────────────────
+
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: atom-infra-ingress
+  namespace: atom-infra
+  annotations:
+    nginx.ingress.kubernetes.io/proxy-body-size: "500m"
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "300"
+spec:
+  ingressClassName: nginx
+  rules:
+    - host: minio.atom.local
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: minio
+                port:
+                  number: 9000
+
+    - host: minio-ui.atom.local
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: minio-console
+                port:
+                  number: 9001
+
+    - host: opa.atom.local
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: opa
+                port:
+                  number: 8181
+
+---
+# ── TCP passthrough: postgres / redis / kafka ─────────────────────────────────
+#
+# Enabled by patching ingress-nginx-controller with:
+#   --tcp-services-configmap=ingress-nginx/tcp-services
+# (already applied via make ingress-up / k8s-deploy)
+
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: tcp-services
+  namespace: ingress-nginx
+data:
+  "5432": "atom-infra/postgres-postgresql:5432"
+  "6379": "atom-infra/redis-master:6379"
+  "9092": "atom-infra/redpanda:9092"
