@@ -1,5 +1,7 @@
--- Development seed data — run with: make seed-dev
--- Password hash below is bcrypt of 'admin123' (for dev only — never use in production)
+-- Development seed data — run with: make seed-dev  (docker-compose)
+--                          or:   make seed-k8s   (kubernetes)
+-- Credentials: admin@atom.local / admin123  (dev only — change in production)
+-- Hash generated with: python3 -c "import bcrypt; print(bcrypt.hashpw(b'admin123',bcrypt.gensalt(12)).decode())"
 
 BEGIN;
 
@@ -7,11 +9,13 @@ INSERT INTO users (id, email, password_hash, full_name, role)
 VALUES (
     '00000000-0000-0000-0000-000000000001',
     'admin@atom.local',
-    '$2a$12$LQv3c1yqBWVHxkd0LHAkCOYz6TtxMQJqhN8/LewYpR1IOBSmCkd5e',
+    '$2b$12$pV7Vy64/2t6o9cSHEb1UkeAeJVTckMNaDPngUEeQyCTLG.8LIQQcy',
     'ATOM Admin',
     'admin'
 )
-ON CONFLICT (id) DO NOTHING;
+ON CONFLICT (id) DO UPDATE SET
+    password_hash = EXCLUDED.password_hash,
+    is_active     = true;
 
 INSERT INTO domains (id, name, description, owner_id)
 VALUES (

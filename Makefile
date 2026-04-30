@@ -3,7 +3,7 @@ SHELL := /bin/bash
         infra-up infra-down \
         dev-up dev-down dev-down-clean dev-rebuild dev-rebuild-ui dev-rebuild-api \
         dev-status dev-ps dev-logs logs-gate logs-studio logs-llm logs-archiver \
-        migrate-up migrate-down migrate-status migrate-dev seed-dev \
+        migrate-up migrate-down migrate-status migrate-dev seed-dev seed-k8s \
         gate-build gate-docker cli-install cli-build \
         agent-build agent-restart \
         policy-test policy-check policy-bundle policy-fmt \
@@ -198,9 +198,17 @@ migrate-dev: ## Apply all migrations to local docker-compose postgres
 	  -path migrations up
 	@echo "✓ Dev migrations applied."
 
-seed-dev: ## Load development seed data into docker-compose postgres
+seed-dev: ## Load development seed data into docker-compose postgres (admin@atom.local / admin123)
 	@PGPASSWORD=$(POSTGRES_PASSWORD) psql -h localhost -U atom -d atom -f migrations/seed_dev.sql
-	@echo "✓ Seed data loaded."
+	@echo "✓ Seed data loaded. Login: admin@atom.local / admin123"
+
+seed-k8s: ## Load development seed data into k8s postgres (port-forward required or auto-creates one)
+	@echo "→ Seeding k8s postgres..."
+	@kubectl port-forward -n atom-infra svc/postgres-postgresql 5432:5432 &
+	@sleep 3
+	@PGPASSWORD=changeme psql -h localhost -U atom -d atom -f migrations/seed_dev.sql
+	@pkill -f "kubectl port-forward.*postgres-postgresql.*5432:5432" 2>/dev/null || true
+	@echo "✓ Seed data loaded. Login: admin@atom.local / admin123"
 
 # ── Build targets ──────────────────────────────────────────────────────────────
 gate-build: ## Build GATE binary locally
@@ -346,6 +354,11 @@ k8s-deploy: ## Build images, load into kind, apply manifests, wait for rollouts
 	@$(MIGRATE) -database "postgresql://atom:changeme@localhost:5432/atom?sslmode=disable" \
 	  -path migrations up 2>/dev/null || echo "(migrations already up-to-date)"
 	@pkill -f "kubectl port-forward.*svc/postgres-postgresql.*5432" 2>/dev/null || true
+	@echo "→ Seeding development data (admin@atom.local / admin123)..."
+	@kubectl port-forward -n atom-infra svc/postgres-postgresql 5432:5432 &
+	@sleep 2
+	@PGPASSWORD=changeme psql -h localhost -U atom -d atom -f migrations/seed_dev.sql 2>/dev/null || echo "(seed skipped — psql not installed)"
+	@pkill -f "kubectl port-forward.*svc/postgres-postgresql.*5432:5432" 2>/dev/null || true
 	@echo "→ Running LiteLLM Prisma migrations..."
 	@kubectl port-forward -n atom-infra svc/postgres-postgresql 5433:5432 &
 	@sleep 3
