@@ -13,8 +13,8 @@
 #
 # Service list:
 #   http://gate.atom.local:8088          GATE — JWT-protected agent proxy
-#   http://api.atom.local:8088/docs      atom-studio API — Swagger UI
-#   http://studio.atom.local:8088        atom-studio UI
+#   http://studio.atom.local:8088        atom-studio (UI + API on same origin)
+#   http://api.atom.local:8088/docs      atom-studio API only (Swagger UI / curl)
 #   http://runtime.atom.local:8088       atom-runtime webhook
 #   http://grafana.atom.local:8088       Grafana dashboards (admin/atom-grafana-dev)
 #   http://alloy.atom.local:8088         Grafana Alloy — OTLP receiver UI
@@ -59,9 +59,25 @@ spec:
                 port:
                   number: 3001
 
+    # studio.atom.local — UI on /, API on /api, WebSocket on /ws
+    # Frontend uses relative URLs so all three must share this hostname.
     - host: studio.atom.local
       http:
         paths:
+          - path: /api
+            pathType: Prefix
+            backend:
+              service:
+                name: atom-studio-api
+                port:
+                  number: 3001
+          - path: /ws
+            pathType: Prefix
+            backend:
+              service:
+                name: atom-studio-api
+                port:
+                  number: 3001
           - path: /
             pathType: Prefix
             backend:
