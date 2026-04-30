@@ -321,9 +321,11 @@ test-load: ## Run k6 load test against GATE (results → tests/load/results/summ
 	  --summary-export=tests/load/results/summary.json
 
 # ── Local registry for kind ───────────────────────────────────────────────────
-registry-up: ## Start local Docker registry on :5001 (required for kind image loading)
-	@docker ps --filter "publish=5001" --format "{{.Names}}" | grep -q . || \
-	  docker run -d -p 5001:5000 --restart always --name atom-registry registry:2
+registry-up: ## Ensure local Docker registry is running on :5001
+	@docker ps --filter "publish=5001" --format "{{.Names}}" | grep -q . \
+	  || docker run -d -p 5001:5000 --restart always --name atom-registry registry:2 2>/dev/null \
+	  || docker start atom-registry 2>/dev/null \
+	  || true
 	@echo "✓ Registry running at localhost:5001"
 
 # ── Kubernetes secrets (idempotent) ──────────────────────────────────────────

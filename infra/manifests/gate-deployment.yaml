@@ -32,6 +32,9 @@ spec:
             - configMapRef:
                 name: atom-cluster-config
           env:
+            # Override Kubernetes auto-injected GATE_PORT (which is tcp://svc:port format)
+            - name: GATE_PORT
+              value: "8080"
             - name: POSTGRES_PASSWORD
               valueFrom:
                 secretKeyRef:

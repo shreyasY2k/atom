@@ -54,3 +54,9 @@ data:
 
   # ── atom-runtime backend ─────────────────────────────────────────────────────
   RUNTIME_BACKEND: "k8s"
+
+  # ── Port overrides ────────────────────────────────────────────────────────────
+  # Kubernetes auto-injects <SVC_NAME>_PORT=tcp://<ip>:<port> for each Service.
+  # These explicit values override those injected vars where the app reads
+  # the port by the same name as the Service (e.g. gate reads GATE_PORT).
+  GATE_PORT: "8080"
