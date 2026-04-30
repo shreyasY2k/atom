@@ -25,6 +25,11 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v3
+      - name: Generate JWT key pair for tests
+        run: |
+          mkdir -p .keys
+          openssl genrsa -out .keys/jwt_private.pem 2048
+          openssl rsa -in .keys/jwt_private.pem -pubout -out .keys/jwt_public.pem
       - run: |
           uv run --project atom-studio/backend \
             --with pytest-asyncio \

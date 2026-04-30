@@ -383,7 +383,7 @@ services:
       - loki
       - tempo
     environment:
-      GF_SECURITY_ADMIN_PASSWORD: admin
+      GF_SECURITY_ADMIN_PASSWORD: atom-grafana-dev
       GF_USERS_ALLOW_SIGN_UP: "false"
       GF_FEATURE_TOGGLES_ENABLE: traceqlEditor
     ports:

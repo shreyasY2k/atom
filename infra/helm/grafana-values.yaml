@@ -1,16 +1,10 @@
-# infra/helm/grafana-values.yaml — Grafana (SESSION-13)
-# Provisions Tempo + Prometheus datasources and loads ATOM dashboards
-# from a ConfigMap (infra/manifests/grafana-dashboards-configmap.yaml).
+# infra/helm/grafana-values.yaml — Grafana (SESSION-13 / SESSION-15)
 #
-# Deploy:
-#   kubectl apply -f infra/manifests/grafana-dashboards-configmap.yaml
-#   helm upgrade --install grafana grafana/grafana \
-#     --namespace atom-system --create-namespace \
-#     -f infra/helm/grafana-values.yaml --wait
+# Credentials (same in docker-compose and k8s):
+#   admin / atom-grafana-dev
 #
-# Access locally:
-#   kubectl port-forward -n atom-system svc/grafana 3001:3000
-#   open http://localhost:3001  (admin / atom-grafana-dev)
+# k8s access:  http://grafana.atom.local
+# docker-compose access: http://localhost:3005
 
 adminUser: admin
 adminPassword: "atom-grafana-dev"
@@ -20,40 +14,61 @@ grafana.ini:
     root_url: "%(protocol)s://%(domain)s:%(http_port)s/"
   auth.anonymous:
     enabled: false
+  feature_toggles:
+    enable: traceqlEditor
 
 # ── Datasources ───────────────────────────────────────────────────────────────
 datasources:
   datasources.yaml:
     apiVersion: 1
     datasources:
-      - name: Tempo
-        type: tempo
+      # ── Loki — log aggregation ───────────────────────────────────────────────
+      - name: Loki
+        type: loki
+        uid: loki
         access: proxy
-        url: http://tempo.atom-system.svc.cluster.local:3100
-        uid: tempo
+        url: http://loki.atom-system.svc.cluster.local:3100
         isDefault: false
         editable: true
         jsonData:
-          tracesToLogsV2:
-            datasourceUid: ""
-          serviceMap:
-            datasourceUid: prometheus
-          search:
-            hide: false
+          maxLines: 5000
+          derivedFields:
+            - datasourceUid: tempo
+              matcherRegex: '"trace_id":"(\w+)"'
+              name: TraceID
+              url: "$${__value.raw}"
+
+      # ── Tempo — distributed tracing ──────────────────────────────────────────
+      - name: Tempo
+        type: tempo
+        uid: tempo
+        access: proxy
+        # Tempo HTTP query API is on port 3200 (not 3100 which is Loki)
+        url: http://tempo.atom-system.svc.cluster.local:3200
+        isDefault: false
+        editable: true
+        jsonData:
+          httpMethod: GET
           nodeGraph:
             enabled: true
+          traceToLogs:
+            datasourceUid: loki
+            tags: [service, container]
+            filterByTraceID: true
+            filterBySpanID: false
+          lokiSearch:
+            datasourceUid: loki
 
-      - name: Prometheus
+      # ── Alloy — metrics (self-observability for the collector) ────────────────
+      - name: Alloy
         type: prometheus
+        uid: alloy
         access: proxy
-        url: http://prometheus-community-kube-prometheus.atom-system.svc.cluster.local:9090
-        uid: prometheus
-        isDefault: true
+        url: http://alloy.atom-system.svc.cluster.local:12345
+        isDefault: false
         editable: true
 
 # ── Dashboard provisioning ────────────────────────────────────────────────────
-# Sidecar watches for ConfigMaps labelled grafana_dashboard=1 in atom-system
-# and auto-imports them into the "ATOM" folder.
 sidecar:
   dashboards:
     enabled: true
@@ -66,16 +81,13 @@ sidecar:
   datasources:
     enabled: false
 
-# ── Service ───────────────────────────────────────────────────────────────────
 service:
   type: ClusterIP
   port: 3000
 
-# ── Storage ───────────────────────────────────────────────────────────────────
 persistence:
-  enabled: false    # emptyDir for dev; enable + storageClass for prod
+  enabled: false
 
-# ── Resources ─────────────────────────────────────────────────────────────────
 resources:
   requests:
     cpu: 100m
@@ -84,6 +96,5 @@ resources:
     cpu: 500m
     memory: 512Mi
 
-# ── Ingress ───────────────────────────────────────────────────────────────────
 ingress:
-  enabled: false    # use kubectl port-forward for local dev
+  enabled: false

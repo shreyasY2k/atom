@@ -45,8 +45,9 @@ data:
   # ── OPA ─────────────────────────────────────────────────────────────────────
   OPA_BUNDLE_PATH: "/policies"
 
-  # ── OTEL (empty = disabled; set to Alloy URL once monitoring-up is run) ──────
-  OTEL_EXPORTER_OTLP_ENDPOINT: ""
+  # ── OTEL — send traces to Alloy, which forwards to Tempo ─────────────────────
+  # Set to "" to disable (e.g. before monitoring-up is run for the first time)
+  OTEL_EXPORTER_OTLP_ENDPOINT: "http://alloy.atom-system.svc.cluster.local:4318"
 
   # ── Namespaces ────────────────────────────────────────────────────────────────
   AGENT_NAMESPACE: "atom-agents"
