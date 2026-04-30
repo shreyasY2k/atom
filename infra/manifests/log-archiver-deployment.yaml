@@ -1,3 +1,4 @@
+---
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -19,17 +20,11 @@ spec:
         - name: log-archiver
           image: atom-log-archiver:local
           imagePullPolicy: IfNotPresent
-          # MINIO_ACCESS_KEY, MINIO_SECRET_KEY injected via atom-credentials (from .env)
           envFrom:
             - secretRef:
                 name: atom-credentials
-          env:
-            - name: KAFKA_BROKERS
-              value: redpanda.atom-infra.svc.cluster.local:9092
-            - name: MINIO_ENDPOINT
-              value: http://minio.atom-infra.svc.cluster.local:9000
-            - name: MINIO_BUCKET
-              value: atom-audit
+            - configMapRef:
+                name: atom-cluster-config
           resources:
             requests:
               cpu: 50m
@@ -37,8 +32,3 @@ spec:
             limits:
               cpu: 200m
               memory: 256Mi
-          livenessProbe:
-            exec:
-              command: ["python", "-c", "import sys; sys.exit(0)"]
-            initialDelaySeconds: 10
-            periodSeconds: 30

@@ -3,6 +3,7 @@ from fastapi import APIRouter, Query, WebSocket, WebSocketDisconnect
 from ..auth.service import decode_token
 from .log_broadcaster import broadcaster
 from .manager import manager
+from .run_broadcaster import run_broadcaster
 
 ws_router = APIRouter()
 
@@ -51,3 +52,29 @@ async def agent_logs_ws(agent_id: str, websocket: WebSocket, token: str = Query(
         pass
     finally:
         await broadcaster.unsubscribe(agent_id, websocket)
+
+
+@ws_router.websocket("/agents/{agent_id}/runs/{run_id}")
+async def run_messages_ws(
+    agent_id: str, run_id: str, websocket: WebSocket, token: str = Query(...)
+):
+    """Live message stream for a single run (agentscope tRPC push model).
+    Delivers messages in real-time as pushMessage is called."""
+    try:
+        claims = decode_token(token)
+        if claims.get("type") != "human":
+            await websocket.close(code=4401)
+            return
+    except ValueError:
+        await websocket.close(code=4401)
+        return
+
+    await websocket.accept()
+    await run_broadcaster.subscribe(run_id, websocket)
+    try:
+        while True:
+            await websocket.receive_text()
+    except WebSocketDisconnect:
+        pass
+    finally:
+        await run_broadcaster.unsubscribe(run_id, websocket)

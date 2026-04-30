@@ -1,12 +1,9 @@
 ---
-# ServiceAccount + RBAC so atom-runtime can create/patch Deployments, Services,
-# Secrets, and NetworkPolicies in the atom-agents namespace.
 apiVersion: v1
 kind: ServiceAccount
 metadata:
   name: atom-runtime
   namespace: atom-system
-
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: Role
@@ -23,7 +20,6 @@ rules:
   - apiGroups: ["networking.k8s.io"]
     resources: ["networkpolicies"]
     verbs: ["get", "list", "create", "update", "patch"]
-
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding
@@ -38,7 +34,6 @@ subjects:
   - kind: ServiceAccount
     name: atom-runtime
     namespace: atom-system
-
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -71,25 +66,16 @@ spec:
           envFrom:
             - secretRef:
                 name: atom-credentials
+            - configMapRef:
+                name: atom-cluster-config
           env:
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: atom-credentials
+                  key: POSTGRES_PASSWORD
             - name: DATABASE_URL
-              value: postgresql://atom:changeme@postgres-postgresql.atom-infra.svc.cluster.local:5432/atom?sslmode=disable
-            - name: ATOM_STUDIO_API_URL
-              value: http://atom-studio-api.atom-system.svc.cluster.local:3001
-            - name: ATOM_RUNTIME_SELF_URL
-              value: http://atom-runtime.atom-system.svc.cluster.local:8090
-            - name: ATOM_GATE_CLUSTER_URL
-              value: http://gate.atom-system.svc.cluster.local:8080
-            - name: RUNTIME_BACKEND
-              value: k8s
-            - name: AGENT_NAMESPACE
-              value: atom-agents
-            - name: GATE_NAMESPACE
-              value: atom-system
-            - name: OTEL_EXPORTER_OTLP_ENDPOINT
-              value: http://alloy.atom-system.svc.cluster.local:4318
-            - name: OTEL_SERVICE_NAME
-              value: atom-runtime
+              value: "postgresql://$(POSTGRES_USER):$(POSTGRES_PASSWORD)@$(POSTGRES_HOST):$(POSTGRES_PORT)/$(POSTGRES_DB)?sslmode=$(POSTGRES_SSL)"
           resources:
             requests:
               cpu: 50m
@@ -111,7 +97,6 @@ spec:
             initialDelaySeconds: 15
             periodSeconds: 15
             failureThreshold: 3
-
 ---
 apiVersion: v1
 kind: Service

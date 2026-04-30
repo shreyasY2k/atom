@@ -16,6 +16,7 @@ from .agents.router import global_router as agents_global_router
 from .agents.router import router as agents_router
 from .audit.router import router as audit_router
 from .runs.router import router as runs_router
+from .runs.router import trpc_router
 from .auth.router import router as auth_router
 from .auth.users_router import router as users_router
 from .database import init_pool
@@ -99,6 +100,8 @@ app.include_router(deployments_router, prefix="/api/deployments", tags=["deploym
 app.include_router(runtime_router, prefix="/api/runtime", tags=["runtime"])
 app.include_router(audit_router, prefix="/api/audit", tags=["audit"])
 app.include_router(runs_router, prefix="/api/agents/{agent_id}/runs", tags=["runs"])
+# tRPC-compatible endpoints — agentscope agents connect with studio_url=<atom-studio-url>
+app.include_router(trpc_router, tags=["trpc"])
 app.include_router(ws_router, prefix="/ws")
 
 

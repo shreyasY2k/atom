@@ -10,12 +10,13 @@ SHELL := /bin/bash
         lint lint-go lint-python \
         test test-go test-python test-e2e test-load \
         generate-keys go-sync go-tidy clean \
-        k8s-secrets k8s-deploy monitoring-up monitoring-down \
+        registry-up k8s-secrets k8s-deploy monitoring-up monitoring-down \
         ingress-up ingress-hosts
 
-# ── Cluster name ─────────────────────────────────────────────────────────────
-CLUSTER_NAME ?= atom
-KUBECONFIG   ?= $(HOME)/.kube/config
+# ── Cluster + registry ───────────────────────────────────────────────────────
+CLUSTER_NAME  ?= atom
+REGISTRY      ?= localhost:5001
+KUBECONFIG    ?= $(HOME)/.kube/config
 
 # ── Database URL (from .env or env) ──────────────────────────────────────────
 include .env
@@ -63,7 +64,16 @@ bootstrap: ## Install all required tools (run once on first setup)
 	@echo "  5. make seed-dev              # load dev seed data"
 
 # ── Infrastructure (k8s) ─────────────────────────────────────────────────────
-infra-up: ## Deploy infra services to the current kubectl cluster
+infra-up: ## Create kind cluster + local registry + deploy all infra services
+	@echo "→ Starting local registry (localhost:5001)..."
+	@$(MAKE) registry-up
+	@echo "→ Creating kind cluster '$(CLUSTER_NAME)'..."
+	@kind get clusters 2>/dev/null | grep -q "^$(CLUSTER_NAME)$$" || \
+	  kind create cluster --config infra/kind/cluster.yaml --name $(CLUSTER_NAME)
+	@kubectl config use-context kind-$(CLUSTER_NAME)
+	@echo "→ Labelling control-plane for ingress..."
+	@kubectl label node $(CLUSTER_NAME)-control-plane ingress-ready=true \
+	  --overwrite 2>/dev/null || true
 	@echo "→ Applying namespaces..."
 	@kubectl apply -f infra/manifests/namespaces.yaml
 	@echo "→ Installing nginx-ingress..."
@@ -206,7 +216,7 @@ seed-k8s: ## Load development seed data into k8s postgres (port-forward required
 	@echo "→ Seeding k8s postgres..."
 	@kubectl port-forward -n atom-infra svc/postgres-postgresql 5432:5432 &
 	@sleep 3
-	@PGPASSWORD=changeme psql -h localhost -U atom -d atom -f migrations/seed_dev.sql
+	@PGPASSWORD=$(POSTGRES_PASSWORD) psql -h localhost -U atom -d atom -f migrations/seed_dev.sql
 	@pkill -f "kubectl port-forward.*postgres-postgresql.*5432:5432" 2>/dev/null || true
 	@echo "✓ Seed data loaded. Login: admin@atom.local / admin123"
 
@@ -310,32 +320,54 @@ test-load: ## Run k6 load test against GATE (results → tests/load/results/summ
 	@k6 run tests/load/gate_load_test.js \
 	  --summary-export=tests/load/results/summary.json
 
+# ── Local registry for kind ───────────────────────────────────────────────────
+registry-up: ## Start local Docker registry on :5001 (required for kind image loading)
+	@docker ps --filter "publish=5001" --format "{{.Names}}" | grep -q . || \
+	  docker run -d -p 5001:5000 --restart always --name atom-registry registry:2
+	@echo "✓ Registry running at localhost:5001"
+
 # ── Kubernetes secrets (idempotent) ──────────────────────────────────────────
-k8s-secrets: ## Create/update atom-credentials and atom-jwt-keys Secrets in atom-system
-	@echo "→ Applying k8s Secrets..."
+k8s-secrets: ## Create atom-credentials (passwords only) + atom-jwt-keys Secrets
+	@echo "→ Applying namespaces and Secrets..."
 	@kubectl apply -f infra/manifests/namespaces.yaml
 	@kubectl create secret generic atom-credentials \
-	  --from-env-file=.env \
-	  --namespace atom-system --dry-run=client -o yaml | kubectl apply -f -
+	  --namespace atom-system \
+	  --from-literal=POSTGRES_PASSWORD=$(POSTGRES_PASSWORD) \
+	  --from-literal=REDIS_PASSWORD=$(REDIS_PASSWORD) \
+	  --from-literal=MINIO_ACCESS_KEY=$(MINIO_ACCESS_KEY) \
+	  --from-literal=MINIO_SECRET_KEY=$(MINIO_SECRET_KEY) \
+	  --from-literal=PLATFORM_HMAC_SECRET=$(PLATFORM_HMAC_SECRET) \
+	  --from-literal=ATOM_ENCRYPTION_KEY=$(ATOM_ENCRYPTION_KEY) \
+	  --from-literal=LITELLM_MASTER_KEY=$(LITELLM_MASTER_KEY) \
+	  --from-literal=ATOM_LLM_KEY=$(ATOM_LLM_KEY) \
+	  --from-literal=GEMINI_API_KEY=$(GEMINI_API_KEY) \
+	  --dry-run=client -o yaml | kubectl apply -f -
 	@kubectl create secret generic atom-jwt-keys \
 	  --from-file=jwt_private.pem=.keys/jwt_private.pem \
 	  --from-file=jwt_public.pem=.keys/jwt_public.pem \
 	  --namespace atom-system --dry-run=client -o yaml | kubectl apply -f -
-	@echo "✓ Secrets applied."
+	@echo "✓ Secrets applied (no URLs — topology lives in atom-cluster-config ConfigMap)."
 
 # ── Kubernetes application deploy ─────────────────────────────────────────────
-k8s-deploy: ## Build images, load into kind, apply manifests, wait for rollouts
-	@echo "→ Building Docker images..."
-	@docker rmi atom-gate:local atom-llm:local atom-studio-api:local atom-studio-ui:local atom-log-archiver:local atom-runtime:local 2>/dev/null || true
-	@docker build -t atom-gate:local gate/ -f gate/Dockerfile
-	@docker build -t atom-llm:local atom-llm/ -f atom-llm/Dockerfile.dev
-	@docker build -t atom-studio-api:local atom-studio/backend/
-	@docker build -t atom-studio-ui:local atom-studio/frontend/
-	@docker build -t atom-log-archiver:local infra/log-archiver/
-	@docker build -t atom-runtime:local atom-runtime/runtime/
-	@echo "  (images built above are available to the cluster via local Docker daemon)"
+k8s-deploy: ## Build images → push to local registry → apply manifests → migrate → rollout
+	@echo "→ Ensuring local registry is running..."
+	@$(MAKE) registry-up
+	@echo "→ Building Docker images and loading into kind cluster '$(CLUSTER_NAME)'..."
+	@docker build -t atom-gate:local           gate/ -f gate/Dockerfile
+	@kind load docker-image atom-gate:local          --name $(CLUSTER_NAME)
+	@docker build -t atom-llm:local            atom-llm/ -f atom-llm/Dockerfile.dev
+	@kind load docker-image atom-llm:local           --name $(CLUSTER_NAME)
+	@docker build -t atom-studio-api:local     atom-studio/backend/
+	@kind load docker-image atom-studio-api:local    --name $(CLUSTER_NAME)
+	@docker build -t atom-studio-ui:local      atom-studio/frontend/
+	@kind load docker-image atom-studio-ui:local     --name $(CLUSTER_NAME)
+	@docker build -t atom-log-archiver:local   infra/log-archiver/
+	@kind load docker-image atom-log-archiver:local  --name $(CLUSTER_NAME)
+	@docker build -t atom-runtime:local        atom-runtime/runtime/
+	@kind load docker-image atom-runtime:local       --name $(CLUSTER_NAME)
 	@echo "→ Creating Secrets and ConfigMaps..."
 	@$(MAKE) k8s-secrets
+	@kubectl apply -f infra/manifests/cluster-config.yaml
 	@kubectl create configmap opa-policies \
 	  --from-file=policies/base/ --namespace atom-system \
 	  --dry-run=client -o yaml | kubectl apply -f -
@@ -349,33 +381,28 @@ k8s-deploy: ## Build images, load into kind, apply manifests, wait for rollouts
 	@kubectl apply -f infra/manifests/log-archiver-deployment.yaml
 	@kubectl apply -f infra/manifests/alloy-daemonset.yaml
 	@echo "→ Running ATOM DB migrations..."
-	@kubectl port-forward -n atom-infra svc/postgres-postgresql 5432:5432 &
-	@sleep 3
-	@$(MIGRATE) -database "postgresql://atom:changeme@localhost:5432/atom?sslmode=disable" \
-	  -path migrations up 2>/dev/null || echo "(migrations already up-to-date)"
-	@pkill -f "kubectl port-forward.*svc/postgres-postgresql.*5432" 2>/dev/null || true
+	@kubectl port-forward -n atom-infra svc/postgres-postgresql 5432:5432 & \
+	  sleep 4 && \
+	  $(MIGRATE) -database "postgresql://atom:$(POSTGRES_PASSWORD)@localhost:5432/atom?sslmode=disable" \
+	    -path migrations up 2>/dev/null || echo "(migrations up-to-date)"
+	@pkill -f "kubectl port-forward.*postgres-postgresql.*5432:5432" 2>/dev/null || true
 	@echo "→ Seeding development data (admin@atom.local / admin123)..."
-	@kubectl port-forward -n atom-infra svc/postgres-postgresql 5432:5432 &
-	@sleep 2
-	@PGPASSWORD=changeme psql -h localhost -U atom -d atom -f migrations/seed_dev.sql 2>/dev/null || echo "(seed skipped — psql not installed)"
-	@pkill -f "kubectl port-forward.*svc/postgres-postgresql.*5432:5432" 2>/dev/null || true
+	@kubectl port-forward -n atom-infra svc/postgres-postgresql 5432:5432 & \
+	  sleep 3 && \
+	  PGPASSWORD=$(POSTGRES_PASSWORD) psql -h localhost -U atom -d atom \
+	    -f migrations/seed_dev.sql 2>/dev/null || echo "(seed skipped)"
+	@pkill -f "kubectl port-forward.*postgres-postgresql.*5432:5432" 2>/dev/null || true
 	@echo "→ Running LiteLLM Prisma migrations..."
-	@kubectl port-forward -n atom-infra svc/postgres-postgresql 5433:5432 &
-	@sleep 3
-	@SCHEMA=$$(docker run --rm atom-llm:local python3 -c \
+	@kubectl port-forward -n atom-infra svc/postgres-postgresql 5433:5432 & \
+	  sleep 3 && \
+	  SCHEMA=$$(docker run --rm atom-llm:local python3 -c \
 	    "import litellm, os; print(os.path.join(os.path.dirname(litellm.__file__), 'proxy', 'schema.prisma'))") && \
 	  docker run --rm \
-	  -e DATABASE_URL="postgresql://atom:changeme@host.docker.internal:5433/atom" \
-	  --add-host host.docker.internal:host-gateway \
-	  atom-llm:local prisma db push --schema $$SCHEMA --skip-generate --accept-data-loss 2>/dev/null || true
+	    -e DATABASE_URL="postgresql://atom:$(POSTGRES_PASSWORD)@host.docker.internal:5433/atom" \
+	    --add-host host.docker.internal:host-gateway \
+	    atom-llm:local prisma db push --schema $$SCHEMA \
+	    --skip-generate --accept-data-loss 2>/dev/null || echo "(prisma skipped)"
 	@pkill -f "port-forward.*5433" 2>/dev/null || true
-	@echo "→ Forcing fresh pod rollout..."
-	@kubectl delete pods -n atom-system -l app=gate 2>/dev/null || true
-	@kubectl delete pods -n atom-system -l app=atom-llm 2>/dev/null || true
-	@kubectl delete pods -n atom-system -l app=atom-studio-api 2>/dev/null || true
-	@kubectl delete pods -n atom-system -l app=atom-studio-ui 2>/dev/null || true
-	@kubectl delete pods -n atom-system -l app=log-archiver 2>/dev/null || true
-	@kubectl delete pods -n atom-system -l app=atom-runtime 2>/dev/null || true
 	@echo "→ Waiting for rollouts..."
 	@kubectl rollout status deployment/gate            -n atom-system --timeout=120s
 	@kubectl rollout status deployment/atom-llm        -n atom-system --timeout=180s

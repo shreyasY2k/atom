@@ -1,0 +1,4 @@
+ALTER TABLE agent_runs
+  DROP COLUMN IF EXISTS messages,
+  DROP COLUMN IF EXISTS run_name,
+  DROP COLUMN IF EXISTS status;

@@ -1,0 +1,56 @@
+---
+# atom-cluster-config ConfigMap
+#
+# Contains cluster-topology values: service hostnames, ports, namespaces.
+# Nothing secret here — credentials live in atom-credentials Secret.
+#
+# Override specific values for your environment without touching Deployment YAMLs.
+# For a different cluster (e.g. prod), apply a patched version of this file.
+
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: atom-cluster-config
+  namespace: atom-system
+data:
+  # ── Postgres ──────────────────────────────────────────────────────────────────
+  POSTGRES_HOST: "postgres-postgresql.atom-infra.svc.cluster.local"
+  POSTGRES_PORT: "5432"
+  POSTGRES_USER: "atom"
+  POSTGRES_DB:   "atom"
+  POSTGRES_SSL:  "disable"
+
+  # ── Redis ────────────────────────────────────────────────────────────────────
+  REDIS_HOST: "redis-master.atom-infra.svc.cluster.local"
+  REDIS_PORT: "6379"
+
+  # ── Kafka / Redpanda ─────────────────────────────────────────────────────────
+  KAFKA_BROKERS: "redpanda.atom-infra.svc.cluster.local:9092"
+
+  # ── MinIO ────────────────────────────────────────────────────────────────────
+  MINIO_ENDPOINT:     "http://minio.atom-infra.svc.cluster.local:9000"
+  MINIO_BUCKET_AUDIT: "atom-audit"
+
+  # ── Internal service URLs ─────────────────────────────────────────────────────
+  ATOM_LLM_URL:          "http://atom-llm.atom-system.svc.cluster.local:4000"
+  ATOM_STUDIO_API_URL:   "http://atom-studio-api.atom-system.svc.cluster.local:3001"
+  ATOM_RUNTIME_URL:      "http://atom-runtime.atom-system.svc.cluster.local:8090"
+  ATOM_RUNTIME_SELF_URL: "http://atom-runtime.atom-system.svc.cluster.local:8090"
+  ATOM_GATE_CLUSTER_URL: "http://gate.atom-system.svc.cluster.local:8080"
+
+  # ── JWT key paths (mounted from atom-jwt-keys Secret) ────────────────────────
+  JWT_PUBLIC_KEY_PATH:  "/etc/atom/jwt_public.pem"
+  JWT_PRIVATE_KEY_PATH: "/etc/atom/jwt_private.pem"
+
+  # ── OPA ─────────────────────────────────────────────────────────────────────
+  OPA_BUNDLE_PATH: "/policies"
+
+  # ── OTEL (empty = disabled; set to Alloy URL once monitoring-up is run) ──────
+  OTEL_EXPORTER_OTLP_ENDPOINT: ""
+
+  # ── Namespaces ────────────────────────────────────────────────────────────────
+  AGENT_NAMESPACE: "atom-agents"
+  GATE_NAMESPACE:  "atom-system"
+
+  # ── atom-runtime backend ─────────────────────────────────────────────────────
+  RUNTIME_BACKEND: "k8s"

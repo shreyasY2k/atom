@@ -3,10 +3,10 @@ apiVersion: kind.x-k8s.io/v1alpha4
 
 name: atom
 
-# 1 control plane + 2 workers
+# 1 control-plane (also handles nginx-ingress on ports 80/443)
+# 2 workers for workload
 nodes:
   - role: control-plane
-    # ingress-ready label applied post-creation via kubectl (node-labels kubelet arg removed in k8s 1.35)
     extraPortMappings:
       - containerPort: 80
         hostPort: 80
@@ -14,21 +14,6 @@ nodes:
       - containerPort: 443
         hostPort: 443
         protocol: TCP
-      - containerPort: 3000
-        hostPort: 3000
-        protocol: TCP
-      - containerPort: 3001
-        hostPort: 3001
-        protocol: TCP
-      - containerPort: 9001
-        hostPort: 9001
-        protocol: TCP
 
   - role: worker
   - role: worker
-
-# Point to local registry for dev image pulls
-containerdConfigPatches:
-  - |-
-    [plugins."io.containerd.grpc.v1.cri".registry.mirrors."localhost:5000"]
-      endpoint = ["http://kind-registry:5000"]
