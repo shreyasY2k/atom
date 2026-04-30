@@ -16,7 +16,8 @@ add tools, and write Rego policies.
 
 ```bash
 # 1. Log in to atom-studio
-atom login --studio http://localhost:3000
+# k8s:           atom login --studio http://api.atom.local:8088
+# docker-compose: atom login --studio http://localhost:3001
 
 # 2. In atom-studio: create a domain, then create an agent
 #    Copy the one-time token shown after creation
@@ -173,30 +174,27 @@ make policy-test
 
 ## 6. Local Dev vs Prod Mode
 
-| Feature | docker-compose (`make dev-up`) | kind k8s (`make k8s-deploy`) |
+| Feature | docker-compose (`make dev-up`) | Kubernetes (`make k8s-deploy` + `make ingress-up`) |
 |---------|-------------------------------|------------------------------|
-| GATE URL | `http://localhost:8080` | port-forward `svc/gate 8080:8080` |
-| Studio URL | `http://localhost:3001` | port-forward `svc/atom-studio-api 3001:3001` |
-| Agent JWT | issued by studio at agent creation | same — RS256 RS4096 key pair |
-| Agent pods | docker containers via atom-runtime docker backend | Kubernetes pods in `atom-agents` ns |
-| ATOM_MODE env | `development` (no k8s RBAC needed) | `production` (full NetworkPolicy enforcement) |
-| LiteLLM DB | local Postgres | in-cluster Postgres (atom-infra) |
+| Studio login | http://localhost:3000 — admin@atom.local / **admin123** | http://studio.atom.local:8088 — admin@atom.local / **admin123** |
+| GATE URL | http://localhost:8080 | http://gate.atom.local:8088 |
+| Studio API | http://localhost:3001 | http://api.atom.local:8088 |
+| Grafana | http://localhost:3005 — admin/**admin** | http://grafana.atom.local:8088 — admin/**atom-grafana-dev** |
+| MinIO | http://localhost:9001 — minioadmin/**changeme** | http://minio-ui.atom.local:8088 — minioadmin/**changeme** |
+| Postgres | localhost:5432 — atom/**changeme** | localhost:5432 (TCP via ingress) — atom/**changeme** |
+| Agent pods | Docker containers (atom-runtime docker backend) | Kubernetes pods in `atom-agents` ns |
 
-**Set prod mode in your agent project:**
+**Deploy to k8s:**
 ```bash
-export ATOM_MODE=prod
-export ATOM_GATE_URL=http://localhost:8080   # via port-forward
-export ATOM_AGENT_JWT=<token-from-studio>
-atom validate    # must exit 0
-atom deploy      # submits to k8s via HITL
-```
+make ingress-up   # exposes all services at *.atom.local:8088
 
-**Useful port-forwards for k8s dev:**
-```bash
-kubectl port-forward svc/gate            8080:8080 -n atom-system &
-kubectl port-forward svc/atom-studio-api 3001:3001 -n atom-system &
-kubectl port-forward svc/atom-llm        4000:4000 -n atom-system &
-kubectl port-forward svc/postgres        5432:5432 -n atom-infra  &
+# Login, create domain + agent in Studio, then:
+bin/atom deploy \
+  --agent-id <uuid> \
+  --skip-build \
+  --image <your-image> \
+  --message "initial deploy"
+# Approve at http://studio.atom.local:8088/hitl
 ```
 
 ---

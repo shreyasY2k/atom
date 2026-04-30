@@ -305,16 +305,12 @@ Suspension revokes the agent's token and scales its deployment to 0 replicas.
 # Set these variables
 DOMAIN_ID="<domain-uuid>"
 AGENT_ID="<agent-uuid>"
-STUDIO_URL="http://localhost:3001"
-
-# Port-forward atom-studio-api
-kubectl port-forward svc/atom-studio-api 3001:3001 -n atom-system &
-sleep 2
+STUDIO_URL="http://studio.atom.local:8088"   # or http://localhost:3001 for docker-compose
 
 # 1. Login to get an access token
 TOKEN=$(curl -s -X POST $STUDIO_URL/api/auth/login \
   -H "Content-Type: application/json" \
-  -d '{"email":"admin@atom.local","password":"changeme"}' \
+  -d '{"email":"admin@atom.local","password":"admin123"}' \
   | python3 -c "import sys,json; print(json.load(sys.stdin)['access_token'])")
 
 # 2. Revoke all active tokens for this agent

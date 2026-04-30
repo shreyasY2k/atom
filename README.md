@@ -11,56 +11,59 @@ Its core guarantee: **no agent ever touches the outside world directly** — eve
 through GATE, where it is authenticated, policy-checked, rate-limited, and appended to an
 immutable hash-chained audit log.
 
-**Sessions 00–14 are complete.** This README documents the current working state.
+**Sessions 00–15 are complete.** This README documents the current working state.
 
 ---
 
-## Quick Start (docker-compose dev)
+## Quick Start
 
-> Prerequisites: Docker Desktop, Go 1.22+, Python 3.11+, `make`, `openssl`
+### Option A — Docker Compose (local dev, hot-reload)
 
 ```bash
-# 1. Clone
+# 1. Clone + bootstrap
 git clone https://github.com/your-org/atom.git && cd atom
+make bootstrap          # installs Go, Python, kubectl, OPA, migrate, etc.
 
-# 2. Install toolchain (Go, Python, kind, kubectl, OPA, golang-migrate, pre-commit)
-make bootstrap
+# 2. Keys + env
+make generate-keys      # .keys/jwt_private.pem + jwt_public.pem
+cp .env.example .env    # edit: set GEMINI_API_KEY at minimum
 
-# 3. Generate JWT key pair
-make generate-keys          # writes .keys/jwt_private.pem + jwt_public.pem
-
-# 4. Create environment file
-cp .env.example .env
-# Edit .env — set these at minimum:
-#   POSTGRES_PASSWORD=changeme
-#   REDIS_PASSWORD=changeme
-#   PLATFORM_HMAC_SECRET=$(openssl rand -hex 32)
-#   ATOM_ENCRYPTION_KEY=$(openssl rand -hex 32)
-#   LITELLM_MASTER_KEY=sk-atom-changeme
-#   ATOM_LLM_KEY=sk-atom-changeme
-#   GEMINI_API_KEY=...   (or OPENAI_API_KEY / ANTHROPIC_API_KEY)
-
-# 5. Start the full stack (~20 containers)
+# 3. Start (~20 containers)
 make dev-up
-
-# 6. Apply database migrations and load seed data
 make migrate-dev
-make seed-dev
+make seed-dev           # creates admin@atom.local / admin123
 
-# 7. Install atom CLI
-make cli-install
+# 4. Open
+open http://localhost:3000
 ```
 
-Open **http://localhost:3000** → login:
-- Email: `admin@atom.local`
-- Password: `changeme`
+### Option B — Kubernetes (Docker Desktop)
+
+```bash
+# 1. Keys + env (same as above)
+make generate-keys && cp .env.example .env
+
+# 2. Deploy infra + apps
+make infra-up           # Postgres, Redis, MinIO, Redpanda, OPA, nginx-ingress
+make k8s-deploy         # builds images, applies manifests, runs migrations + seed
+
+# 3. Deploy monitoring stack (Grafana, Loki, Tempo, Alloy)
+make monitoring-up
+
+# 4. Expose via ingress
+make ingress-up                 # port-forwards ingress → localhost:8088
+sudo make ingress-hosts         # writes /etc/hosts entries (one-time)
+
+# 5. Open
+open http://studio.atom.local:8088
+```
 
 ---
 
 ## Architecture
 
 ```
-External caller ──▶  GATE :8080  ──▶  agent container :8080
+External caller ──▶  GATE :8080  ──▶  agent pod :8080
                        │  │               │
                        │  └──▶ atom-llm :4000 ──▶ LLM provider
                        │                 │
@@ -70,34 +73,84 @@ External caller ──▶  GATE :8080  ──▶  agent container :8080
                     OPA             └─▶ Studio WebSocket (live logs)
 
 atom-studio :3001/3000 ── manages domains, agents, HITL, deployments
-atom-runtime :8090     ── deploys approved agents as Docker containers (dev)
-                           or k8s pods (prod)
+atom-runtime :8090     ── deploys approved agents as k8s pods (prod)
+                           or Docker containers (dev)
 
-Grafana Alloy ─▶ Loki (all container logs) + Tempo (OTLP traces) ─▶ Grafana :3005
+Grafana Alloy ─▶ Loki (pod logs) + Tempo (OTLP traces) ─▶ Grafana
 ```
 
-Every agent runs as an isolated container. GATE enforces JWT auth, OPA policy,
+Every agent runs as an isolated container/pod. GATE enforces JWT auth, OPA policy,
 and rate limits on every request, then logs it to the immutable `audit_log_chain`.
 
 ---
 
-## Service Map
+## Service Map — Docker Compose (`make dev-up`)
 
-| Service | URL | Credentials | Purpose |
-|---|---|---|---|
-| atom-studio UI | http://localhost:3000 | admin@atom.local / changeme | Management portal |
-| atom-studio API | http://localhost:3001/docs | — | REST API + OpenAPI docs |
-| GATE | http://localhost:8080 | — | Auth / policy / audit proxy |
-| atom-llm | http://localhost:4000 | — | LiteLLM LLM gateway |
-| atom-runtime | http://localhost:8090 | — | Agent deployment controller |
-| Grafana | http://localhost:3005 | admin / admin | Logs, traces, dashboards |
-| Alloy UI | http://localhost:12345 | — | Collector pipeline viz |
+| Service | Local URL | Credentials | Notes |
+|---------|-----------|-------------|-------|
+| atom-studio UI | http://localhost:3000 | admin@atom.local / **admin123** | Management portal |
+| atom-studio API | http://localhost:3001/docs | — | REST API + Swagger |
+| GATE | http://localhost:8080 | — (Bearer JWT) | Agent proxy |
+| atom-llm | http://localhost:4000 | Bearer **sk-atom-dev** | LiteLLM gateway |
+| atom-runtime | http://localhost:8090 | — | Deploy controller |
+| Grafana | http://localhost:3005 | **admin** / **admin** | Dashboards |
+| Alloy UI | http://localhost:12345 | — | Pipeline visualiser |
 | Loki | http://localhost:3100 | — | Log aggregation API |
-| Tempo | http://localhost:3200 | — | Distributed tracing API |
-| MinIO console | http://localhost:9001 | minioadmin / changeme | Audit archive browser |
-| Postgres | localhost:5432 | atom / changeme | Primary database |
-| Redpanda (external) | localhost:19092 | — | Kafka-compatible broker |
-| agentscope-studio | http://localhost:3002 | — | Agent run trace viewer |
+| Tempo | http://localhost:3200 | — | Tracing API |
+| MinIO console | http://localhost:9001 | **minioadmin** / **changeme** | Audit archive UI |
+| MinIO S3 API | http://localhost:9000 | **minioadmin** / **changeme** | S3-compatible |
+| OPA | http://localhost:8181 | — | Policy engine |
+| Postgres | localhost:5432 | **atom** / **changeme** | DB: `atom` |
+| Redis | localhost:6379 | password: **changeme** | Cache / revocation |
+| Kafka (Redpanda) | localhost:19092 (external) | — | Kafka-compatible |
+
+---
+
+## Service Map — Kubernetes (`make k8s-deploy` + `make ingress-up`)
+
+> Requires `sudo make ingress-hosts` to write `/etc/hosts` and `make ingress-up` running
+> in the background. All HTTP services are reachable at port **8088**.
+
+### /etc/hosts entry (one-time)
+
+```
+127.0.0.1  gate.atom.local api.atom.local studio.atom.local runtime.atom.local
+127.0.0.1  grafana.atom.local alloy.atom.local loki.atom.local tempo.atom.local
+127.0.0.1  minio.atom.local minio-ui.atom.local opa.atom.local
+```
+
+### Application services
+
+| Service | URL (k8s) | Credentials |
+|---------|-----------|-------------|
+| atom-studio (UI + API) | http://studio.atom.local:8088 | admin@atom.local / **admin123** |
+| atom-studio API only | http://api.atom.local:8088/docs | — (Swagger UI) |
+| GATE | http://gate.atom.local:8088 | Bearer JWT (issued by studio) |
+| atom-runtime | http://runtime.atom.local:8088/healthz | — |
+| atom-llm | cluster-internal only | Bearer **sk-atom-dev** |
+
+### Observability
+
+| Service | URL (k8s) | Credentials |
+|---------|-----------|-------------|
+| Grafana | http://grafana.atom.local:8088 | **admin** / **atom-grafana-dev** |
+| Alloy | http://alloy.atom.local:8088 | — |
+| Loki | http://loki.atom.local:8088 | — |
+| Tempo | http://tempo.atom.local:8088 | — |
+
+### Infrastructure
+
+| Service | URL (k8s) | Credentials |
+|---------|-----------|-------------|
+| MinIO S3 API | http://minio.atom.local:8088 | **minioadmin** / **changeme** |
+| MinIO console | http://minio-ui.atom.local:8088 | **minioadmin** / **changeme** |
+| OPA | http://opa.atom.local:8088 | — |
+| Postgres | localhost:5432 (TCP via ingress) | **atom** / **changeme** — DB: `atom` |
+| Redis | localhost:6379 (TCP via ingress) | password: **changeme** |
+| Kafka | localhost:9092 (TCP via ingress) | — (no SASL in dev) |
+
+> TCP services (Postgres, Redis, Kafka) are available at `localhost:<port>` when
+> `make ingress-up` is running. Direct connection — no port-forward needed.
 
 ---
 
@@ -105,102 +158,95 @@ and rate limits on every request, then logs it to the immutable `audit_log_chain
 
 ```
 atom/
-├── gate/                      Go: JWT auth, OPA policy, HMAC audit chain, GATE proxy
+├── gate/                      Go: JWT auth, OPA policy, HMAC audit chain, proxy
 ├── atom-llm/                  LiteLLM fork: LLM gateway + Kafka audit + ATOM extensions
 ├── atom-sdk/                  agentscope fork: Python SDK — AtomChatModel, HITL, Toolkit
 ├── atom-runtime/              Agent deployment controller (Docker dev / k8s prod)
 ├── atom-memory/               pgvector + Redis memory backends
 ├── atom-studio/
-│   ├── backend/               FastAPI: auth, domains, agents, HITL, deployments,
-│   │                          audit log, conversations view, WebSocket log stream
+│   ├── backend/               FastAPI: auth, domains, agents, HITL, deployments, WebSocket
 │   └── frontend/              React + Vite: Studio management UI
 ├── atom-cli/                  Go CLI: atom login / create / deploy / logs
 ├── infra/
-│   ├── alloy/config.alloy     Grafana Alloy River config (OTLP + Docker logs)
+│   ├── helm/                  Helm values (Postgres, Redis, MinIO, Redpanda, Loki, Tempo, Grafana, Alloy)
 │   ├── grafana/               Dashboards + datasource provisioning YAML
 │   ├── log-archiver/          Python: Kafka → MinIO JSONL batch archiver
-│   ├── manifests/             Kubernetes manifests (all services)
-│   └── tempo/tempo.yaml       Tempo storage config
+│   ├── manifests/             Kubernetes manifests (all services + ingress)
+│   └── kind/                  kind cluster config
 ├── migrations/                golang-migrate SQL files (000001 – 000011)
 ├── policies/                  OPA Rego policies (base + custom)
-├── docs/kafka-schemas.md      Kafka topic message schemas + MinIO layout
-├── decisions/                 Architecture Decision Records
-├── sessions/                  SESSION-00 through SESSION-14 implementation notes
+├── tests/
+│   ├── e2e/                   pytest E2E tests (conftest, test_full_flow, test_security)
+│   └── load/                  k6 load test (gate_load_test.js)
+├── docs/                      SECURITY.md, RUNBOOK.md, DEVELOPER_GUIDE.md
+├── sessions/                  SESSION-00 through SESSION-15 implementation notes
 ├── Makefile                   All build / dev / deploy / test targets
 ├── docker-compose.dev.yml     Full local stack definition
-└── .env.example               Environment variable template with descriptions
+└── .env.example               Environment variable template
 ```
 
 ---
 
 ## Developer Workflow
 
-### Create and deploy an agent
+### Create and deploy an agent (k8s)
 
 ```bash
-# 1. Log in to Studio
-atom login
-# Studio URL: http://localhost:3001  |  Email: admin@atom.local  |  Password: changeme
+# 1. Login via CLI
+bin/atom login   # studio URL: http://api.atom.local:8088 or http://localhost:3001
 
-# 2. Scaffold a new agent project
-atom create
-# Prompts: project name, description, LLM provider, tools, memory, HITL
-# Generates: agent.py server.py tools.py config.py Dockerfile requirements.txt
+# 2. Create domain + agent in Studio UI, copy the JWT shown once after creation
 
-# 3. Fill in the agent's .env
-cd <project-name>
-# Set: ATOM_AGENT_ID, ATOM_AGENT_JWT, ATOM_GATE_URL, ATOM_MODEL_NAME
+# 3. Deploy (submits for HITL approval)
+bin/atom deploy --agent-id <uuid> --skip-build --image <your-image>
 
-# 4. Deploy (builds Docker image, submits for HITL approval)
-atom deploy --agent-id <uuid>
+# 4. Approve in Studio
+open http://studio.atom.local:8088/hitl
 
-# 5. Approve in Studio
-open http://localhost:3000/hitl   # click the pending card → Approve
-
-# 6. Call the deployed agent
-curl -X POST http://localhost:8080/domain/<domain-id>/agent/<agent-id>/run \
+# 5. Call the deployed agent through GATE
+curl -X POST http://gate.atom.local:8088/domain/<did>/agent/<aid>/run \
   -H "Authorization: Bearer <agent-jwt>" \
   -H "Content-Type: application/json" \
   -d '{"message": "Summarise RBI DPDP compliance requirements"}'
-
-# 7. Stream live logs
-atom logs <agent-id>
 ```
 
-### Monitor in Studio
+### Monitor
 
-| Feature | Navigate to |
-|---|---|
-| Live log stream | Agents → Agent → **Live Logs** |
-| Conversation history | Agents → Agent → **Conversations** |
-| Audit chain + verify | Sidebar → **Audit Log** → Verify Chain button |
-| All service logs | Grafana → Explore → Loki: `{service="gate"}` |
-| Distributed traces | Grafana → Explore → Tempo → search by trace ID |
-| Archived audit batches | MinIO console → atom-audit bucket |
+| What | Where |
+|------|-------|
+| Live log stream | Studio → Agent → Live Logs |
+| Audit chain | Studio → Audit Log → Verify Chain |
+| All service traces | http://grafana.atom.local:8088 → Explore → Tempo |
+| Agent pod logs | http://grafana.atom.local:8088 → Explore → Loki: `{namespace="atom-agents"}` |
+| MinIO audit archive | http://minio-ui.atom.local:8088 → atom-audit bucket |
 
-### Useful make targets
+### Key make targets
 
 ```bash
-make dev-up              # Start everything
+# ── Docker Compose ────────────────────────────────────────────────────────────
+make dev-up              # Start full docker-compose stack
 make dev-down            # Stop (keep volumes)
 make dev-down-clean      # Stop + wipe all data
+make migrate-dev         # Apply DB migrations (docker-compose)
+make seed-dev            # Load seed data (docker-compose)
 
-make dev-rebuild         # Rebuild all images + restart (after code change)
-make dev-rebuild-ui      # Rebuild frontend only
-make dev-rebuild-api     # Rebuild backend only
-make dev-rebuild-gate    # Rebuild GATE only
+# ── Kubernetes ────────────────────────────────────────────────────────────────
+make k8s-deploy          # Build images + deploy all services
+make k8s-secrets         # Create/update atom-credentials + atom-jwt-keys Secrets
+make seed-k8s            # Load seed data into k8s Postgres
+make monitoring-up       # Deploy Grafana + Loki + Tempo + Alloy
+make ingress-up          # Apply ingress rules + port-forward :8088
+make ingress-hosts       # Append *.atom.local to /etc/hosts (run with sudo)
 
-make dev-status          # Container health overview
-make logs-gate           # Tail GATE
-make logs-studio         # Tail atom-studio-api
-make logs-alloy          # Tail Grafana Alloy
+# ── Test ─────────────────────────────────────────────────────────────────────
+make test                # Unit + integration tests (Go, Python, OPA)
+make test-e2e            # E2E tests (requires k8s stack running)
+make test-load           # k6 load test → tests/load/results/summary.json
 
-make migrate-dev         # Apply DB migrations to docker-compose postgres
-make seed-dev            # Load seed data (admin user, sample domain)
-
-make cli-install         # Build + install atom CLI
-make lint                # Run all linters (Go vet + ruff + OPA check)
-make test                # Run all tests
+# ── Build ────────────────────────────────────────────────────────────────────
+make cli-build           # Build bin/atom CLI
+make generate-keys       # Create JWT RSA-4096 key pair
+make lint                # Go vet + ruff + OPA check
 ```
 
 ---
@@ -209,105 +255,97 @@ make test                # Run all tests
 
 ### GATE
 All external and inter-service calls go through GATE on `:8080`.
-
-- **JWT** — agents carry RS256 tokens issued by atom-studio; rotated via `regenerate-token`
-- **OPA policies** — every request evaluated against `policies/base/` and `policies/custom/`
-  Edit Rego files → OPA hot-reloads automatically (no restart)
-- **Audit chain** — every request written to `audit_log_chain` (Postgres) with HMAC integrity
-  linking, and published to `atom.audit` Kafka topic
-- **Proxy routing** — `/v1/*` → atom-llm · `/hitl/*` → studio · `/memory/*` → atom-memory
-  · everything else → agent pod
+- **JWT** — agents carry RS256 tokens issued by atom-studio
+- **OPA** — every request evaluated against `policies/base/` (hot-reload, no restart)
+- **Audit chain** — every request written to `audit_log_chain` with HMAC integrity + published to `atom.audit` Kafka topic
+- **Proxy routing** — `/v1/*` → atom-llm · `/hitl/*` → studio · `/memory/*` → atom-memory · everything else → agent pod
 
 ### Kafka Topics
 
 | Topic | Produced by | Consumed by |
-|---|---|---|
+|-------|-------------|-------------|
 | `atom.audit` | GATE (every request) | log-archiver, Studio audit page |
 | `atom.llm` | atom-llm (every LLM call) | log-archiver |
-| `atom.agent.logs` | agent containers + test-log API | log-archiver, Studio Live Logs |
-| `atom.deployments` | atom-studio-api (lifecycle events) | log-archiver |
-
-Full schemas: `docs/kafka-schemas.md`
+| `atom.agent.logs` | agent containers | log-archiver, Studio Live Logs |
+| `atom.deployments` | atom-studio-api | log-archiver |
 
 ### Agent Token Types
-`agent_tokens.token_type` distinguishes two token types:
 
 | Type | Issued by | Revoked by |
-|---|---|---|
+|------|-----------|-----------|
 | `client` | `POST /regenerate-token` | Next `regenerate-token` call |
-| `pod` | `trigger_deployment` in atom-studio | Next approved deployment only |
+| `pod` | `trigger_deployment` | Next approved deployment only |
 
-Pod tokens are **never** revoked by client key rotation, so running containers keep working.
-
-### HITL (Human-in-the-Loop)
-Deployment approvals and custom business decisions require human sign-off. When triggered,
-atom-studio pushes a WebSocket notification to all connected Studio tabs. The approving admin
-clicks Approve/Reject in the HITL Queue dialog. Unanswered requests time out (configurable,
-default 24 h) and fall back to the agent's configured `hitl_fallback` policy.
+Pod tokens are **never** revoked by client key rotation — running containers keep working.
 
 ---
 
 ## Environment Variables
 
-| Variable | Required | Generate with |
-|---|---|---|
-| `POSTGRES_PASSWORD` | ✓ | any strong password |
-| `REDIS_PASSWORD` | ✓ | any strong password |
-| `PLATFORM_HMAC_SECRET` | ✓ | `openssl rand -hex 32` |
-| `ATOM_ENCRYPTION_KEY` | ✓ | `openssl rand -hex 32` |
-| `LITELLM_MASTER_KEY` | ✓ | `sk-atom-$(openssl rand -hex 16)` |
-| `ATOM_LLM_KEY` | ✓ | same as `LITELLM_MASTER_KEY` |
-| `MINIO_SECRET_KEY` | ✓ | any strong password |
-| `JWT_PRIVATE_KEY_PATH` | ✓ | `make generate-keys` → `.keys/jwt_private.pem` |
-| `JWT_PUBLIC_KEY_PATH` | ✓ | `make generate-keys` → `.keys/jwt_public.pem` |
-| `GEMINI_API_KEY` | for Gemini | from Google AI Studio |
-| `OPENAI_API_KEY` | for OpenAI | from platform.openai.com |
-| `ANTHROPIC_API_KEY` | for Anthropic | from console.anthropic.com |
+| Variable | Default | Generate with |
+|----------|---------|---------------|
+| `POSTGRES_PASSWORD` | `changeme` | any strong password |
+| `REDIS_PASSWORD` | `changeme` | any strong password |
+| `PLATFORM_HMAC_SECRET` | (pre-set) | `openssl rand -hex 32` |
+| `ATOM_ENCRYPTION_KEY` | (pre-set) | `openssl rand -hex 32` |
+| `LITELLM_MASTER_KEY` | `sk-atom-dev` | `sk-atom-$(openssl rand -hex 16)` |
+| `ATOM_LLM_KEY` | `sk-atom-dev` | same as `LITELLM_MASTER_KEY` |
+| `MINIO_SECRET_KEY` | `changeme` | any strong password |
+| `JWT_PRIVATE_KEY_PATH` | `./.keys/jwt_private.pem` | `make generate-keys` |
+| `GEMINI_API_KEY` | — | https://aistudio.google.com/app/apikey |
 
 ---
 
 ## Troubleshooting
 
-**502 Bad Gateway on Studio UI login**
+**Cannot log in to Studio (401)**
 ```bash
-docker compose -f docker-compose.dev.yml up -d --force-recreate atom-studio-ui
+# k8s: re-run seed
+make seed-k8s
+# docker-compose:
+make seed-dev
+# Credentials: admin@atom.local / admin123
+```
+
+**Studio UI loads but API calls fail (502 / 404)**
+```bash
+# k8s: ensure ingress routes /api on studio.atom.local
+kubectl get ingress -n atom-system
+# Should show studio.atom.local with paths /api, /ws, /
 ```
 
 **GATE returns `token_revoked`**
 ```bash
-TOKEN=$(curl -s -X POST http://localhost:3001/api/auth/login \
+TOKEN=$(curl -s -X POST http://api.atom.local:8088/api/auth/login \
   -H "Content-Type: application/json" \
-  -d '{"email":"admin@atom.local","password":"changeme"}' \
+  -d '{"email":"admin@atom.local","password":"admin123"}' \
   | python3 -c "import sys,json; print(json.load(sys.stdin)['access_token'])")
-curl -X POST http://localhost:3001/api/domains/<d>/agents/<a>/regenerate-token \
+curl -X POST http://api.atom.local:8088/api/domains/<did>/agents/<aid>/regenerate-token \
   -H "Authorization: Bearer $TOKEN"
-# Use the returned token for both the curl request AND the agent container env
 ```
 
-**GATE returns `invalid_token`**
+**atom-llm pod keeps crashing (P1001 Postgres error)**
 ```bash
-# Verify keys match
-openssl rsa -in .keys/jwt_private.pem -pubout | diff - .keys/jwt_public.pem \
-  && echo "MATCH" || echo "MISMATCH — re-run: make generate-keys"
+# LiteLLM Prisma schema not applied yet
+kubectl port-forward -n atom-infra svc/postgres-postgresql 5433:5432 &
+SCHEMA=$(docker run --rm atom-llm:local python3 -c \
+  "import litellm,os; print(os.path.join(os.path.dirname(litellm.__file__),'proxy','schema.prisma'))")
+docker run --rm -e DATABASE_URL="postgresql://atom:changeme@host.docker.internal:5433/atom" \
+  --add-host host.docker.internal:host-gateway \
+  atom-llm:local prisma db push --schema $SCHEMA --skip-generate --accept-data-loss
 ```
 
-**Kafka consumers not connecting**
-Redpanda uses dual listeners: containers use `redpanda:9092` (INTERNAL),
-host tools use `localhost:19092` (EXTERNAL).
+**Alloy OTEL export errors in logs**
 ```bash
-docker exec atom-redpanda rpk topic list --brokers localhost:19092
+# Ensure Alloy + monitoring stack is deployed
+make monitoring-up
+# Alloy service must exist in atom-system for OTLP to resolve
+kubectl get svc alloy -n atom-system
 ```
 
-**New Studio pages not visible**
-The Vite bundle is compiled at Docker build time. After code changes:
+**ingress-hosts needs sudo**
 ```bash
-make dev-rebuild-ui
-```
-
-**Conversations page crashes**
-asyncpg returns JSONB as raw strings in some configurations.
-```bash
-make dev-rebuild-api   # picks up the _parse_jsonb_list fix
+sudo bash -c 'echo "127.0.0.1  gate.atom.local api.atom.local studio.atom.local runtime.atom.local grafana.atom.local alloy.atom.local loki.atom.local tempo.atom.local minio.atom.local minio-ui.atom.local opa.atom.local" >> /etc/hosts'
 ```
 
 ---
@@ -315,7 +353,7 @@ make dev-rebuild-api   # picks up the _parse_jsonb_list fix
 ## Tech Stack
 
 | Layer | Technology |
-|---|---|
+|-------|-----------|
 | API Gateway | Go + Fiber v3 |
 | Policy engine | OPA + Rego (hot-reload) |
 | LLM gateway | LiteLLM OSS (forked → atom-llm) |
@@ -327,20 +365,21 @@ make dev-rebuild-api   # picks up the _parse_jsonb_list fix
 | Primary DB | PostgreSQL 16 + pgvector extension |
 | Object storage | MinIO (S3-compatible, on-prem) |
 | Message broker | Redpanda (Kafka-compatible) |
-| Log aggregation | Grafana Loki (via Alloy Docker log collection) |
-| Distributed tracing | Grafana Tempo (via Alloy OTLP receiver) |
-| Observability collector | Grafana Alloy |
-| Visualisation | Grafana (Loki + Tempo datasources auto-provisioned) |
-| Local k8s | kind (Kubernetes in Docker) |
+| Log collection | Grafana Alloy (loki.source.kubernetes) |
+| Log storage | Grafana Loki |
+| Distributed tracing | Grafana Tempo |
+| Observability collector | Grafana Alloy (OTLP receiver) |
+| Visualisation | Grafana |
+| Kubernetes | Docker Desktop (3-node kind-backed cluster) |
 
 ---
 
 ## Completed Sessions
 
 | # | Topic |
-|---|---|
+|---|-------|
 | 00 | Monorepo setup + upstream clones |
-| 01 | k8s infrastructure (kind, Postgres, Redis, MinIO, Redpanda, OPA) |
+| 01 | k8s infrastructure (Postgres, Redis, MinIO, Redpanda, OPA, nginx-ingress) |
 | 02 | Database schema (migrations 000001–000011) |
 | 03 | GATE: JWT auth, OPA integration, routing, HMAC audit chain |
 | 04 | GATE: rate limiting, Kafka publish, policy enforcement |
@@ -350,10 +389,10 @@ make dev-rebuild-api   # picks up the _parse_jsonb_list fix
 | 08 | atom-studio: agent provisioning, LiteLLM virtual key management |
 | 09 | atom-studio: HITL queue, deployment approval flow, WebSocket |
 | 10 | atom-cli: `login` `create` `deploy` `logs` commands |
-| 11 | atom-runtime: k8s controller + Docker backend for docker-compose dev |
+| 11 | atom-runtime: k8s controller + Docker backend |
 | 12 | atom-memory: pgvector + Redis backends, MemoryManager |
 | 13 | Monitoring: Grafana Alloy, Loki, Tempo, OTEL instrumentation |
-| 14 | Kafka pipeline: log-archiver → MinIO, live logs, audit page, conversations view |
+| 14 | Kafka pipeline: log-archiver → MinIO, live logs, audit page |
+| 15 | k8s deploy + E2E tests + security hardening + ingress |
 
-See `sessions/SESSION-XX.md` for detailed implementation notes and decisions.
-All major decisions are in `decisions/` — start with ADR-001 for monorepo rationale.
+See `sessions/SESSION-XX.md` for detailed implementation notes.
