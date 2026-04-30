@@ -383,7 +383,18 @@ k8s-deploy: ## Build images → push to local registry → apply manifests → m
 	@kubectl apply -f infra/manifests/atom-runtime-deployment.yaml
 	@kubectl apply -f infra/manifests/log-archiver-deployment.yaml
 	@kubectl apply -f infra/manifests/alloy-daemonset.yaml
-	@echo "→ Running ATOM DB migrations..."
+	@echo "→ Running LiteLLM Prisma migration (MUST run before golang-migrate)..."
+	@kubectl port-forward -n atom-infra svc/postgres-postgresql 5433:5432 & \
+	  sleep 3 && \
+	  SCHEMA=$$(docker run --rm atom-llm:local python3 -c \
+	    "import litellm, os; print(os.path.join(os.path.dirname(litellm.__file__), 'proxy', 'schema.prisma'))") && \
+	  docker run --rm \
+	    -e DATABASE_URL="postgresql://atom:$(POSTGRES_PASSWORD)@host.docker.internal:5433/atom" \
+	    --add-host host.docker.internal:host-gateway \
+	    atom-llm:local prisma db push --schema $$SCHEMA \
+	    --skip-generate --accept-data-loss 2>/dev/null || echo "(prisma skipped)"
+	@pkill -f "port-forward.*5433" 2>/dev/null || true
+	@echo "→ Running ATOM DB migrations (after Prisma so --accept-data-loss cannot drop ATOM tables)..."
 	@kubectl port-forward -n atom-infra svc/postgres-postgresql 5432:5432 & \
 	  sleep 4 && \
 	  $(MIGRATE) -database "postgresql://atom:$(POSTGRES_PASSWORD)@localhost:5432/atom?sslmode=disable" \
@@ -395,17 +406,6 @@ k8s-deploy: ## Build images → push to local registry → apply manifests → m
 	  PGPASSWORD=$(POSTGRES_PASSWORD) psql -h localhost -U atom -d atom \
 	    -f migrations/seed_dev.sql 2>/dev/null || echo "(seed skipped)"
 	@pkill -f "kubectl port-forward.*postgres-postgresql.*5432:5432" 2>/dev/null || true
-	@echo "→ Running LiteLLM Prisma migrations..."
-	@kubectl port-forward -n atom-infra svc/postgres-postgresql 5433:5432 & \
-	  sleep 3 && \
-	  SCHEMA=$$(docker run --rm atom-llm:local python3 -c \
-	    "import litellm, os; print(os.path.join(os.path.dirname(litellm.__file__), 'proxy', 'schema.prisma'))") && \
-	  docker run --rm \
-	    -e DATABASE_URL="postgresql://atom:$(POSTGRES_PASSWORD)@host.docker.internal:5433/atom" \
-	    --add-host host.docker.internal:host-gateway \
-	    atom-llm:local prisma db push --schema $$SCHEMA \
-	    --skip-generate --accept-data-loss 2>/dev/null || echo "(prisma skipped)"
-	@pkill -f "port-forward.*5433" 2>/dev/null || true
 	@echo "→ Waiting for rollouts..."
 	@kubectl rollout status deployment/gate            -n atom-system --timeout=120s
 	@kubectl rollout status deployment/atom-llm        -n atom-system --timeout=180s
