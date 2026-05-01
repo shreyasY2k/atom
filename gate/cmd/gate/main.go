@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/gofiber/fiber/v3"
+	"github.com/gofiber/fiber/v3/middleware/cors"
 	"github.com/gofiber/fiber/v3/middleware/requestid"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/redis/go-redis/v9"
@@ -106,6 +107,17 @@ func main() {
 	// Health endpoints bypass the auth + OPA middleware chain.
 	app.Get("/healthz", health.Healthz)
 	app.Get("/readyz", health.Readyz(pool, rdb))
+
+	// CORS — allow Studio UI and local dev frontends to call GATE directly.
+	app.Use(cors.New(cors.Config{
+		AllowOriginsFunc: func(origin string) bool {
+			return strings.HasSuffix(origin, ".atom.local") ||
+				origin == "http://localhost:3000" ||
+				origin == "http://localhost:5173"
+		},
+		AllowHeaders: []string{"Origin", "Content-Type", "Accept", "Authorization"},
+		AllowMethods: []string{"GET", "POST", "PUT", "DELETE", "OPTIONS"},
+	}))
 
 	// Middleware chain applied to all other routes.
 	app.Use(requestid.New())

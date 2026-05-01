@@ -1,7 +1,7 @@
 SHELL := /bin/bash
 .PHONY: help bootstrap \
         infra-up infra-down \
-        dev-up dev-down dev-down-clean dev-rebuild dev-rebuild-ui dev-rebuild-api \
+        dev-up dev-down dev-down-clean dev-rebuild dev-rebuild-ui dev-rebuild-api dev-rebuild-llm dev-rebuild-runtime dev-rebuild-archiver \
         dev-status dev-ps dev-logs logs-gate logs-studio logs-llm logs-archiver \
         migrate-up migrate-down migrate-status migrate-dev seed-dev seed-k8s \
         gate-build gate-docker cli-install cli-build \
@@ -167,6 +167,21 @@ dev-rebuild-gate: ## Rebuild and restart GATE only
 	@docker compose -f docker-compose.dev.yml build gate
 	@docker compose -f docker-compose.dev.yml up -d --force-recreate gate
 	@echo "✓ gate rebuilt."
+
+dev-rebuild-llm: ## Rebuild and restart atom-llm only
+	@docker compose -f docker-compose.dev.yml build atom-llm
+	@docker compose -f docker-compose.dev.yml up -d --force-recreate atom-llm
+	@echo "✓ atom-llm rebuilt."
+
+dev-rebuild-runtime: ## Rebuild and restart atom-runtime only
+	@docker compose -f docker-compose.dev.yml build atom-runtime
+	@docker compose -f docker-compose.dev.yml up -d --force-recreate atom-runtime
+	@echo "✓ atom-runtime rebuilt."
+
+dev-rebuild-archiver: ## Rebuild and restart log-archiver only
+	@docker compose -f docker-compose.dev.yml build log-archiver
+	@docker compose -f docker-compose.dev.yml up -d --force-recreate log-archiver
+	@echo "✓ log-archiver rebuilt."
 
 dev-status: ## Show health of all dev containers
 	@docker compose -f docker-compose.dev.yml ps

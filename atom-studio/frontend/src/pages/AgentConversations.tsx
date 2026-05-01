@@ -110,11 +110,12 @@ function useLiveRun(agentId: string, runId: string | null, enabled: boolean) {
 // ── Main component ─────────────────────────────────────────────────────────────
 
 interface AgentConversationsProps {
+  domainId: string
   agentId: string
   gateUrl?: string
 }
 
-export function AgentConversations({ agentId, gateUrl }: AgentConversationsProps) {
+export function AgentConversations({ domainId, agentId, gateUrl }: AgentConversationsProps) {
   const [page, setPage] = useState(1)
   const [expanded, setExpanded] = useState<string | null>(null)
   const pageSize = 20
@@ -135,8 +136,8 @@ export function AgentConversations({ agentId, gateUrl }: AgentConversationsProps
   return (
     <div className="space-y-4">
       <div className="flex items-center gap-3">
-        <Link to="/agents" className="flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground">
-          <ChevronLeft className="h-4 w-4" /> Agents
+        <Link to="/domains/$domainId/agents/$agentId" params={{ domainId, agentId }} className="flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground">
+          <ChevronLeft className="h-4 w-4" /> Agent
         </Link>
         <h2 className="text-xl font-bold">Conversations</h2>
         <span className="text-sm text-muted-foreground">{data?.total ?? '…'} total</span>

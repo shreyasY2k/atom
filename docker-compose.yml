@@ -234,6 +234,10 @@ services:
       ATOM_RUNTIME_SELF_URL: http://atom-runtime:8090
       RUNTIME_BACKEND: docker
       DOCKER_NETWORK: atom_default
+      DOCKER_AGENT_GATE_URL: http://gate:8080
+      # Override .env so Python OTEL exporter reaches alloy inside Docker (not localhost)
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://alloy:4318
+      OTEL_SERVICE_NAME: atom-runtime
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
     ports:

@@ -108,13 +108,13 @@ const hitlRoute = createRoute({
 
 const agentLogsRoute = createRoute({
   getParentRoute: () => rootRoute,
-  path: '/agents/$agentId/logs',
+  path: '/domains/$domainId/agents/$agentId/logs',
   component: function AgentLogsPage() {
-    const { agentId } = agentLogsRoute.useParams()
+    const { domainId, agentId } = agentLogsRoute.useParams()
     return (
       <RequireAuth>
         <Layout>
-          <AgentLogs agentId={agentId} />
+          <AgentLogs domainId={domainId} agentId={agentId} />
         </Layout>
       </RequireAuth>
     )
@@ -123,13 +123,13 @@ const agentLogsRoute = createRoute({
 
 const agentConversationsRoute = createRoute({
   getParentRoute: () => rootRoute,
-  path: '/agents/$agentId/conversations',
+  path: '/domains/$domainId/agents/$agentId/conversations',
   component: function AgentConversationsPage() {
-    const { agentId } = agentConversationsRoute.useParams()
+    const { domainId, agentId } = agentConversationsRoute.useParams()
     return (
       <RequireAuth>
         <Layout>
-          <AgentConversations agentId={agentId} />
+          <AgentConversations domainId={domainId} agentId={agentId} />
         </Layout>
       </RequireAuth>
     )

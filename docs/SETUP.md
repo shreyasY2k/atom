@@ -312,7 +312,7 @@ DOMAIN=$(curl -s -X POST http://studio.atom.local/api/domains/ \
 RESP=$(curl -s -X POST "http://studio.atom.local/api/domains/$DOMAIN/agents/" \
   -H "Authorization: Bearer $TOKEN" \
   -H "Content-Type: application/json" \
-  -d '{"name":"my-agent","allowed_models":["gemini-2.5-flash"],"rpm_limit":60}')
+  -d '{"name":"my-agent","allowed_models":["gemini/gemini-2.5-flash"],"rpm_limit":60}')
 AGENT_JWT=$(echo $RESP | python3 -c "import sys,json; print(json.load(sys.stdin)['token'])")
 AGENT_ID=$(echo $RESP | python3 -c "import sys,json; print(json.load(sys.stdin)['agent']['id'])")
 ```
@@ -322,7 +322,7 @@ AGENT_ID=$(echo $RESP | python3 -c "import sys,json; print(json.load(sys.stdin)[
 ```bash
 make cli-build   # builds bin/atom
 
-bin/atom deploy \
+../bin/atom deploy \
   --agent-id $AGENT_ID \
   --skip-build \
   --image hashicorp/http-echo:latest \

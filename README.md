@@ -95,7 +95,7 @@ source .venv/bin/activate
 # ATOM_DOMAIN_ID=<domain-uuid>
 # ATOM_AGENT_ID=<agent-uuid>
 # ATOM_AGENT_JWT=<token-from-studio>
-# ATOM_MODEL_NAME=gemini-2.5-flash
+# ATOM_MODEL_NAME=gemini/gemini-2.5-flash
 
 python agent.py
 # Conversations appear in Studio → Agents → Conversations tab
@@ -104,7 +104,7 @@ python agent.py
 ### Step 5 — Deploy and chat via GATE
 
 ```bash
-bin/atom deploy             # builds Docker image, submits for HITL approval
+../bin/atom deploy          # run from inside the agent directory (bin/ is in the repo root)
 
 # Studio → HITL queue → Approve
 
@@ -114,7 +114,7 @@ curl -X POST http://localhost:8080/domain/<domain-id>/agent/<agent-id>/run \
   -H "Content-Type: application/json" \
   -d '{"message": "Hello!"}'
 
-bin/atom logs <agent-id>    # stream live logs
+../bin/atom logs <agent-id> # stream live logs
 ```
 
 ---
@@ -139,7 +139,7 @@ Creates: **Financial Assistant**, **Document Summarizer**, **Risk Checker**, **C
 |---------|-----|-------|
 | atom-studio | http://localhost:3000 | admin@atom.local / **admin123** |
 | GATE | http://localhost:8080 | Bearer JWT |
-| atom-llm | http://localhost:4000 | Bearer **sk-atom-dev** |
+| atom-llm | http://localhost:4000 | Bearer **sk-atom-master-changeme** (LITELLM_MASTER_KEY) |
 | Grafana | http://localhost:3005 | admin / **atom-grafana-dev** |
 | MinIO console | http://localhost:9001 | minioadmin / **changeme** |
 | Postgres | localhost:5432 | atom / **changeme** |

@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { useNavigate, Link } from '@tanstack/react-router'
 import { format } from 'date-fns'
-import { RefreshCw, Trash2, ChevronLeft, Terminal, MessageSquare } from 'lucide-react'
+import { RefreshCw, Trash2, ChevronLeft, Terminal, MessageSquare, Copy, Check } from 'lucide-react'
 import api from '@/lib/api'
 import { toast } from '@/hooks/use-toast'
 import { Badge } from '@/components/ui/badge'
@@ -82,6 +82,14 @@ export function AgentDetail({ domainId, agentId }: AgentDetailProps) {
   const [confirmDelete, setConfirmDelete] = useState(false)
   const [confirmRegen, setConfirmRegen] = useState(false)
   const [newToken, setNewToken] = useState<string | null>(null)
+  const [copiedId, setCopiedId] = useState<string | null>(null)
+
+  function copyToClipboard(value: string, label: string) {
+    navigator.clipboard.writeText(value).then(() => {
+      setCopiedId(label)
+      setTimeout(() => setCopiedId(null), 1500)
+    })
+  }
 
   const { data: agent, isLoading } = useQuery<Agent>({
     queryKey: ['agent', domainId, agentId],
@@ -213,8 +221,30 @@ export function AgentDetail({ domainId, agentId }: AgentDetailProps) {
           <CardHeader className="pb-2">
             <CardTitle className="text-sm font-medium text-muted-foreground">Metadata</CardTitle>
           </CardHeader>
-          <CardContent className="text-sm space-y-1">
-            <p>LiteLLM ID: <code className="font-mono text-xs">{agent.litellm_agent_id ?? '—'}</code></p>
+          <CardContent className="text-sm space-y-2">
+            <div className="flex items-center gap-2">
+              <span className="text-muted-foreground w-24 shrink-0">Domain ID:</span>
+              <code className="font-mono text-xs truncate">{domainId}</code>
+              <button
+                onClick={() => copyToClipboard(domainId, 'domain')}
+                className="ml-auto text-muted-foreground hover:text-foreground shrink-0"
+                title="Copy Domain ID"
+              >
+                {copiedId === 'domain' ? <Check className="h-3.5 w-3.5 text-green-500" /> : <Copy className="h-3.5 w-3.5" />}
+              </button>
+            </div>
+            <div className="flex items-center gap-2">
+              <span className="text-muted-foreground w-24 shrink-0">Agent ID:</span>
+              <code className="font-mono text-xs truncate">{agentId}</code>
+              <button
+                onClick={() => copyToClipboard(agentId, 'agent')}
+                className="ml-auto text-muted-foreground hover:text-foreground shrink-0"
+                title="Copy Agent ID"
+              >
+                {copiedId === 'agent' ? <Check className="h-3.5 w-3.5 text-green-500" /> : <Copy className="h-3.5 w-3.5" />}
+              </button>
+            </div>
+            <p className="text-muted-foreground">LiteLLM ID: <code className="font-mono text-xs">{agent.litellm_agent_id ?? '—'}</code></p>
             <p>Created: {format(new Date(agent.created_at), 'MMM d, yyyy HH:mm')}</p>
             <p>Updated: {format(new Date(agent.updated_at), 'MMM d, yyyy HH:mm')}</p>
           </CardContent>
@@ -266,13 +296,13 @@ export function AgentDetail({ domainId, agentId }: AgentDetailProps) {
       {/* Actions */}
       <div className="flex gap-2 pt-2">
         <Button variant="outline" asChild>
-          <Link to="/agents/$agentId/conversations" params={{ agentId }}>
+          <Link to="/domains/$domainId/agents/$agentId/conversations" params={{ domainId, agentId }}>
             <MessageSquare className="mr-2 h-4 w-4" />
             Conversations
           </Link>
         </Button>
         <Button variant="outline" asChild>
-          <Link to="/agents/$agentId/logs" params={{ agentId }}>
+          <Link to="/domains/$domainId/agents/$agentId/logs" params={{ domainId, agentId }}>
             <Terminal className="mr-2 h-4 w-4" />
             Live Logs
           </Link>

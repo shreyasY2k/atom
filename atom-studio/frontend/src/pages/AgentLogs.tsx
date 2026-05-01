@@ -15,6 +15,7 @@ interface LogLine {
 }
 
 interface AgentLogsProps {
+  domainId: string
   agentId: string
 }
 
@@ -22,7 +23,7 @@ const WS_BASE =
   import.meta.env.VITE_WS_URL ??
   `${window.location.protocol === 'https:' ? 'wss' : 'ws'}://${window.location.host}`
 
-export function AgentLogs({ agentId }: AgentLogsProps) {
+export function AgentLogs({ domainId, agentId }: AgentLogsProps) {
   const { accessToken } = useAuthStore()
   const [lines, setLines] = useState<LogLine[]>([])
   const [connected, setConnected] = useState(false)
@@ -100,11 +101,12 @@ export function AgentLogs({ agentId }: AgentLogsProps) {
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-3">
           <Link
-            to="/agents"
+            to="/domains/$domainId/agents/$agentId"
+            params={{ domainId, agentId }}
             className="flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground"
           >
             <ChevronLeft className="h-4 w-4" />
-            Agents
+            Agent
           </Link>
           <h2 className="text-lg font-semibold">Live Logs</h2>
           <Badge variant={connected ? 'default' : 'secondary'} className="gap-1 text-xs">
