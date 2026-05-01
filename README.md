@@ -92,54 +92,96 @@ open http://studio.atom.local
 
 ## The Core User Journey
 
-Create an agent in the UI, deploy it via CLI, chat with it via GATE.
+Build an agent locally, test it without any infrastructure, then deploy it to ATOM with full governance.
 
-```
-Studio UI ──▶ create domain + agent ──▶ copy JWT token
-                                               │
-                                               ▼
-                                       bin/atom login
-                                       bin/atom create   ← scaffold project
-                                       # paste JWT into .env
-                                       bin/atom deploy   ← build + submit
-                                               │
-                                     Studio HITL queue (approve)
-                                               │
-                                               ▼
-                                    curl GATE /domain/.../agent/.../run
-```
-
-**Step by step:**
+### Phase 1 — Build and test locally (no ATOM stack needed)
 
 ```bash
-# 1. Install CLI
+# 1. Build the CLI
 make cli-build            # → bin/atom
 
-# 2. Login
-bin/atom login            # prompts: studio URL, email, password
-                          # URL: http://localhost:3001 (docker) or http://api.atom.local (k8s)
+# 2. Login to atom-studio
+bin/atom login
+#  Prompts for:
+#    Studio URL → http://localhost:3001  (docker)  or  http://api.atom.local  (k8s)
+#    Email      → admin@atom.local
+#    Password   → admin123
 
-# 3. Create agent in Studio UI, copy the JWT token shown once, then scaffold
-bin/atom create           # interactive: name, model, tools, HITL config
+# 3. Scaffold a new agent project (interactive wizard)
+bin/atom create
+#  Asks: project name, description, LLM provider (Gemini/OpenAI/Anthropic/local),
+#        model, tools (web_search, calculator, etc.), HITL (y/n)
+#  Creates: <project-name>/ with agent.py, config.py, tools.py, server.py, Dockerfile
+
 cd <project-name>/
-echo "ATOM_AGENT_JWT=<token>"     >> .env
-echo "ATOM_AGENT_ID=<agent-uuid>" >> .env
-echo "ATOM_DOMAIN_ID=<domain-uuid>" >> .env
 
-# 4. Deploy (builds Docker image + submits for HITL approval)
+# 4. Install dependencies and test in dev mode
+cp .env.example .env
+# Edit .env — set LLM_API_KEY  (ATOM_MODE=dev is already set)
+# Dev mode calls the LLM provider directly — no GATE, no domain, no token needed
+
+pip install -r requirements.txt
+python agent.py               # fully functional — test your agent logic here
+```
+
+### Phase 2 — Deploy to ATOM (governed, audited, HITL)
+
+```bash
+# 5. Create domain and agent in Studio
+#    Open: http://localhost:3000 (docker) or http://studio.atom.local (k8s)
+#    → Domains → New Domain → give it a name
+#    → Agents  → New Agent  → fill the wizard (model, tools, HITL settings, RPM limit)
+#
+#    Studio shows a one-time JWT token after creation — copy it immediately.
+#    Note the domain UUID and agent UUID from the URL:
+#      http://studio.atom.local/domains/<DOMAIN-ID>/agents/<AGENT-ID>
+
+# 6. Update .env with prod credentials
+# Add these lines to .env:
+#   ATOM_MODE=prod
+#   ATOM_GATE_URL=http://localhost:8080          # or http://gate.atom.local (k8s)
+#   ATOM_DOMAIN_ID=<domain-uuid-from-studio-url>
+#   ATOM_AGENT_ID=<agent-uuid-from-studio-url>
+#   ATOM_AGENT_JWT=<one-time-token-shown-at-creation>
+#   ATOM_MODEL_NAME=gemini-2.5-flash             # must be in agent allowed_models list
+
+# 7. (Optional) Verify prod mode locally before deploying
+python agent.py               # now routes all LLM calls through GATE (JWT-authenticated)
+
+# 8. Deploy — builds Docker image + submits deployment for HITL approval
 bin/atom deploy
+# Flags: --agent-id <uuid>   (auto-reads ATOM_AGENT_ID from .env)
+#        --image <name:tag>  (defaults to project directory name)
+#        --message "text"    (deployment changelog)
+#        --skip-build        (skip docker build, use existing image)
 
-# 5. Approve in Studio → HITL queue → Approve
+# 9. Approve in Studio → HITL queue → click Approve
+# atom-runtime builds the k8s pod (or Docker container) automatically
 
-# 6. Chat
-curl -X POST http://localhost:8080/domain/<did>/agent/<aid>/run \
+# 10. Chat with the deployed agent through GATE
+curl -X POST http://localhost:8080/domain/<domain-id>/agent/<agent-id>/run \
+  -H "Authorization: Bearer <agent-jwt>" \
+  -H "Content-Type: application/json" \
+  -d '{"message": "Hello! What can you help me with?"}'
+
+# Kubernetes:
+curl -X POST http://gate.atom.local/domain/<domain-id>/agent/<agent-id>/run \
   -H "Authorization: Bearer <agent-jwt>" \
   -H "Content-Type: application/json" \
   -d '{"message": "Hello!"}'
 
-# 7. Stream live logs
+# 11. Stream live logs
 bin/atom logs <agent-id>
 ```
+
+> **Finding domain_id and agent_id:** In Studio, navigate to an agent's detail page.
+> The URL contains both: `.../domains/<DOMAIN-ID>/agents/<AGENT-ID>`
+> They also appear in the agent detail sidebar on the right.
+
+> **Token lifetime:** The JWT shown at creation is the agent's identity token.
+> It has no expiry — revoke it explicitly via Studio → Agent → Regenerate Token.
+> The *same* token is used for both `ATOM_AGENT_JWT` (in .env) and the `Authorization: Bearer`
+> header when calling the deployed agent through GATE.
 
 ---
 

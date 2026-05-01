@@ -1,216 +1,347 @@
 # ATOM Developer Guide
 
-How to build an agent, test locally (docker-compose) and in production (kind k8s),
-add tools, and write Rego policies.
+How to build, test, and deploy agents using the ATOM platform.
 
 ---
 
 ## 1. Build Your First Agent
 
-### Prerequisites
-- All sessions SESSION-00 through SESSION-10 complete.
-- `atom` CLI installed (`make cli-install`).
-- Stack running (`make dev-up` or kind cluster up).
-
-### Steps
+### Step 1 — Install the CLI and login
 
 ```bash
-# 1. Log in to atom-studio
-# atom login prompts for: studio URL, email, password
-# k8s default URL:           http://api.atom.local
-# docker-compose default URL: http://localhost:3001
+# Build the CLI from source
+make cli-build          # → bin/atom
 
-# 2. In atom-studio: create a domain, then create an agent
-#    Copy the one-time token shown after creation
+# Login to atom-studio
+bin/atom login
+# Prompts for studio URL, email, password
+# docker-compose: http://localhost:3001
+# k8s:            http://api.atom.local
+```
 
-# 3. Scaffold the project
-atom create   # interactive wizard: enter agent name, model, tools, etc.
-cd my-agent/
+### Step 2 — Scaffold a project
 
-# 4. Validate
-# atom validate does not exist — deploy directly:
+```bash
+bin/atom create
+# Interactive wizard asks for:
+#   - Project name (kebab-case)
+#   - Description
+#   - LLM provider: Gemini / OpenAI / Anthropic / local atom-llm
+#   - Model name
+#   - Tools: web_search, calculator, file_reader, http_get, memory_recall
+#   - Memory: yes/no
+#   - HITL: yes/no
 
-# 5. Edit agent.py to add your logic
-# 6. Build and deploy
-atom deploy
-# Approve in atom-studio HITL queue
-# Agent goes live at /domain/{did}/agent/{aid}
+cd <project-name>/
+```
+
+Generated files:
+
+| File | Purpose |
+|------|---------|
+| `agent.py` | ReAct agent entry point — dev + prod mode |
+| `server.py` | FastAPI HTTP server for production deployment behind GATE |
+| `tools.py` | Tool implementations using `Toolkit / ToolResponse / TextBlock` |
+| `config.py` | Dev/prod mode switching — returns the right `model_config` |
+| `requirements.txt` | Python dependencies |
+| `.env.example` | Environment variable template |
+| `Dockerfile` | Production container |
+
+### Step 3 — Test in dev mode (no ATOM infrastructure needed)
+
+```bash
+cp .env.example .env
+# Edit .env — set LLM_API_KEY
+# ATOM_MODE=dev is already set — the agent calls your LLM directly
+
+pip install -r requirements.txt
+python agent.py           # fully functional interactive loop
+```
+
+In dev mode the agent calls the LLM provider directly. No GATE, no domain, no token.
+
+### Step 4 — Create a domain + agent in Studio
+
+```
+Open http://localhost:3000 (docker) or http://studio.atom.local (k8s)
+
+1. Domains → New Domain → enter a name (e.g. "my-team")
+2. Agents  → New Agent  → wizard:
+     - Name + description
+     - Allowed models (must include your chosen model)
+     - Tools (optional)
+     - RPM limit, HITL timeout
+
+At the end, Studio shows a one-time JWT token — copy it now.
+Note the domain UUID and agent UUID from the Studio URL:
+  http://studio.atom.local/domains/<DOMAIN-ID>/agents/<AGENT-ID>
+```
+
+### Step 5 — Switch to prod mode
+
+Add to `.env`:
+
+```bash
+ATOM_MODE=prod
+ATOM_GATE_URL=http://localhost:8080          # docker; or http://gate.atom.local (k8s)
+ATOM_DOMAIN_ID=<domain-uuid-from-studio-url>
+ATOM_AGENT_ID=<agent-uuid-from-studio-url>
+ATOM_AGENT_JWT=<one-time-token-shown-at-creation>
+ATOM_MODEL_NAME=gemini-2.5-flash             # must be in allowed_models list
+```
+
+Test locally in prod mode:
+```bash
+python agent.py           # now routes all LLM calls through GATE
+```
+
+### Step 6 — Deploy
+
+```bash
+bin/atom deploy           # builds Docker image + submits for HITL approval
+# Options:
+#   --agent-id <uuid>     reads ATOM_AGENT_ID from .env if not provided
+#   --image <name:tag>    defaults to project directory name
+#   --message "text"      deployment changelog note
+#   --skip-build          use an existing Docker image without rebuilding
+```
+
+Then approve in Studio → HITL queue → click Approve.
+`atom-runtime` creates the k8s pod (or Docker container) automatically.
+
+### Step 7 — Chat and observe
+
+```bash
+# Chat through GATE (docker-compose)
+curl -X POST http://localhost:8080/domain/<domain-id>/agent/<agent-id>/run \
+  -H "Authorization: Bearer <agent-jwt>" \
+  -H "Content-Type: application/json" \
+  -d '{"message": "Hello!"}'
+
+# Chat through GATE (k8s)
+curl -X POST http://gate.atom.local/domain/<domain-id>/agent/<agent-id>/run \
+  -H "Authorization: Bearer <agent-jwt>" \
+  -H "Content-Type: application/json" \
+  -d '{"message": "Hello!"}'
+
+# Stream live logs
+bin/atom logs <agent-id>
+
+# View conversations in Studio
+# → Agents → <agent-name> → Conversations tab
 ```
 
 ---
 
 ## 2. Agent Code Patterns
 
-### Minimal agent with LLM call
+The scaffold generates a `config.py` that switches between dev and prod:
 
 ```python
-# agent.py
+# config.py (generated by atom create)
 import os
-from agentscope.agents import DialogAgent
-from agentscope.models import AtomModelWrapper
+MODE = os.getenv("ATOM_MODE", "dev")
+
+def get_model_config() -> dict:
+    if MODE == "prod":
+        # Prod: routes through GATE using AtomChatWrapper
+        return {
+            "model_type":  "atom",
+            "config_name": "atom-default",
+            "model_name":  os.environ["ATOM_MODEL_NAME"],
+        }
+    else:
+        # Dev: calls LLM provider directly (OpenAI-compatible)
+        return {
+            "model_type":  "openai_chat",
+            "config_name": "dev-model",
+            "model_name":  os.environ["MODEL_NAME"],
+            "api_key":     os.environ["LLM_API_KEY"],
+            "client_args": {"base_url": os.environ.get("LLM_BASE_URL", "https://api.openai.com/v1")},
+        }
+```
+
+And `agent.py` uses it:
+
+```python
+# agent.py (generated by atom create)
+import agentscope
+from agentscope.agents import ReActAgent
+from agentscope.message import Msg
+from config import get_model_config
+from tools import build_toolkit
 
 def main():
-    atom_agent = DialogAgent(
+    agentscope.init(model_configs=[get_model_config()])
+    agent = ReActAgent(
         name="my-agent",
-        model_config_name="atom-default",
+        model_config_name="atom-default",   # prod
+        # model_config_name="dev-model",    # dev
+        service_toolkit=build_toolkit(),
         sys_prompt="You are a helpful BFSI assistant.",
+        max_iters=10,
+    )
+    response = agent(Msg(name="user", content="Hello!", role="user"))
+    print(response.content)
+```
+
+### Tools — using Toolkit / ToolResponse / TextBlock
+
+```python
+# tools.py (generated by atom create)
+from agentscope.message import TextBlock
+from agentscope.tool import Toolkit, ToolResponse
+
+def web_search(query: str) -> ToolResponse:
+    """Search the web for information about the query."""
+    # Replace stub with Brave / Serper / Tavily API call
+    return ToolResponse(
+        content=[TextBlock(type="text", text=f"Result for: {query}")]
     )
 
-    response = atom_agent({"role": "user", "content": "Summarise my account."})
-    print(response.content)
-
-if __name__ == "__main__":
-    main()
+def build_toolkit() -> Toolkit:
+    toolkit = Toolkit()
+    toolkit.register_tool_function(web_search)
+    return toolkit
 ```
 
-### Agent with memory
+### HITL pause (business decision)
 
 ```python
-from agentscope.hitl import MemoryManager
-
-memory = MemoryManager()  # reads config from ATOM env vars
-
-# Store a fact
-memory.remember("Customer 4821 credit limit is 75000")
-
-# Recall relevant memories before LLM call
-memories = memory.recall("credit limit", top_k=3)
-context = "\n".join(m["content"] for m in memories)
-```
-
-### Agent with HITL pause
-
-```python
+# In agent.py — only in prod mode
 from agentscope.hitl import request_human_decision
 
-def approve_large_transaction(amount: float) -> bool:
-    if amount > 50_000:
-        decision = request_human_decision(
-            payload={"action": "approve_transfer", "amount": amount},
-            timeout_s=300,
-        )
-        return decision["approved"]
-    return True
+if os.getenv("ATOM_MODE") == "prod" and amount > 50_000:
+    decision = request_human_decision(
+        agent_id=os.environ["ATOM_AGENT_ID"],
+        prompt=f"Approve transfer of Rs {amount:,.0f}?",
+        options=["approve", "reject"],
+    )
+    if decision["choice"] != "approve":
+        return "Transfer rejected by human reviewer."
 ```
+
+### Production HTTP server (server.py)
+
+The scaffold also generates `server.py` — a FastAPI wrapper that:
+- Exposes `GET /healthz` and `POST /run`
+- Emits logs to `atom.agent.logs` Kafka topic (Studio Live Logs)
+- Records each run to Studio Conversations view
+- Captures OTEL trace IDs linking to Grafana Tempo
+
+You don't need to edit `server.py` — just customize `agent.py` and `tools.py`.
 
 ---
 
-## 3. Testing Locally Against docker-compose
+## 3. Local Dev vs Prod Mode
 
-```bash
-# Start the stack
-make dev-up
+| Feature | `ATOM_MODE=dev` | `ATOM_MODE=prod` |
+|---------|----------------|-----------------|
+| LLM routing | Direct to provider (uses `LLM_API_KEY`) | Through GATE → atom-llm (uses `ATOM_AGENT_JWT`) |
+| Domain/agent | Not needed | Required (create in Studio) |
+| HITL pauses | Skipped silently | Go to Studio HITL queue |
+| Audit logging | None | Immutable chain in Postgres |
+| Rate limiting | None | Enforced by GATE per agent |
+| Infrastructure | None needed | Full stack running |
 
-# Run migrations
-make migrate-up
+**Studio URLs by mode:**
 
-# Run your agent locally (not in k8s) — uses .env for credentials
-source .env
-python agent.py
-
-# Or point atom-sdk at the local GATE
-ATOM_GATE_URL=http://localhost:8080 \
-ATOM_AGENT_JWT=<token> \
-python agent.py
-```
-
----
-
-## 4. Add a New Tool
-
-A tool is an HTTP endpoint that an agent can call via GATE.
-
-```bash
-# 1. Implement the tool as a service (any language, any framework)
-#    Expose POST /invoke with JSON body and response
-
-# 2. Register it in atom-studio: Tools → New Tool
-#    Name: lookup-customer
-#    Endpoint: http://my-tool-service.atom-system.svc:8080/invoke
-#    Schema: (paste JSON Schema for the input body)
-
-# 3. Provision it to agents: Agent detail → Edit → add tool
-
-# 4. In your agent code, call it via GATE (atom-sdk handles routing):
-result = atom_agent.use_tool("lookup-customer", {"customer_id": "4821"})
-```
+| | docker-compose | Kubernetes |
+|-|----------------|------------|
+| Studio UI | http://localhost:3000 | http://studio.atom.local |
+| GATE | http://localhost:8080 | http://gate.atom.local |
+| Studio API | http://localhost:3001 | http://api.atom.local |
+| Grafana | http://localhost:3005 — admin/**atom-grafana-dev** | http://grafana.atom.local — admin/**atom-grafana-dev** |
+| Credentials | admin@atom.local / **admin123** | admin@atom.local / **admin123** |
 
 ---
 
-## 5. Write a Rego Policy
+## 4. Add a Tool
+
+Tools are Python functions registered with `Toolkit`. GATE proxies tool calls
+from agents to your tool service.
+
+```python
+# In tools.py — add a new function
+from agentscope.message import TextBlock
+from agentscope.tool import Toolkit, ToolResponse
+
+def lookup_customer(customer_id: str) -> ToolResponse:
+    """Look up a customer record by ID."""
+    # Call your internal API
+    import httpx
+    data = httpx.get(f"http://crm-service/customers/{customer_id}").json()
+    return ToolResponse(
+        content=[TextBlock(type="text", text=str(data))]
+    )
+
+def build_toolkit() -> Toolkit:
+    toolkit = Toolkit()
+    toolkit.register_tool_function(lookup_customer)
+    return toolkit
+```
+
+For external/shared tools, register them in Studio:
+```
+Studio → Tools → New Tool
+  Name:     lookup-customer
+  Endpoint: http://my-tool-service.atom-system.svc:8080/invoke
+  Schema:   (paste JSON Schema for the input)
+```
+Then provision the tool to an agent: Studio → Agent → Edit → add tool.
+
+---
+
+## 5. Write an OPA Policy
+
+OPA policies control what each agent is allowed to do. GATE hot-reloads them within 5 seconds.
 
 ```bash
-# 1. Create the file
-cat > policies/base/my_rule.rego << 'EOF'
+# 1. Create the policy file
+cat > policies/base/my_rule.rego << 'REGO'
 package atom.authz
 import future.keywords.if
 
-deny[{"reason": "example deny"}] if {
-    input.request.method == "DELETE"
-    input.token.role != "admin"
+deny[{"reason": "high-value transfers need HITL"}] if {
+    input.request.path == "/tools/transfer"
+    input.token.type == "agent"
 }
-EOF
+REGO
 
-# 2. Write a test
-cat > policies/tests/my_rule_test.rego << 'EOF'
+# 2. Write a unit test
+cat > policies/tests/my_rule_test.rego << 'REGO'
 package atom.authz_test
 import future.keywords.if
 
-test_deny_delete_non_admin if {
-    deny[{"reason": "example deny"}] with input as {
-        "request": {"method": "DELETE"},
-        "token": {"role": "developer"},
+test_deny_transfer if {
+    deny[_] with input as {
+        "request": {"path": "/tools/transfer"},
+        "token": {"type": "agent"},
     }
 }
-EOF
+REGO
 
-# 3. Test it
+# 3. Run tests
 make policy-test
 
-# 4. Hot-reload: GATE watches policies/ and reloads within 5s
-#    No restart needed in dev.
+# 4. Apply to running cluster (hot-reload in 5s, no restart)
+kubectl create configmap opa-policies \
+  --from-file=policies/base/ -n atom-system \
+  --dry-run=client -o yaml | kubectl apply -f -
 ```
 
 ---
 
-## 6. Local Dev vs Prod Mode
-
-| Feature | docker-compose (`make dev-up`) | Kubernetes (`make k8s-deploy` + `make ingress-up`) |
-|---------|-------------------------------|------------------------------|
-| Studio login | http://localhost:3000 — admin@atom.local / **admin123** | http://studio.atom.local — admin@atom.local / **admin123** |
-| GATE URL | http://localhost:8080 | http://gate.atom.local |
-| Studio API | http://localhost:3001 | http://api.atom.local |
-| Grafana | http://localhost:3005 — admin/**atom-grafana-dev** | http://grafana.atom.local — admin/**atom-grafana-dev** |
-| MinIO | http://localhost:9001 — minioadmin/**changeme** | http://minio-ui.atom.local — minioadmin/**changeme** |
-| Postgres | localhost:5432 — atom/**changeme** | localhost:5432 (TCP via ingress) — atom/**changeme** |
-| Agent pods | Docker containers (atom-runtime docker backend) | Kubernetes pods in `atom-agents` ns |
-
-**Deploy to k8s:**
-```bash
-make ingress-up   # exposes all services at *.atom.local
-
-# Login, create domain + agent in Studio, then:
-bin/atom deploy \
-  --agent-id <uuid> \
-  --skip-build \
-  --image <your-image> \
-  --message "initial deploy"
-# Approve at http://studio.atom.local/hitl
-```
-
----
-
-## 7. Commit Convention
-
-All commits must follow [Conventional Commits](https://www.conventionalcommits.org/):
+## 6. Commit Convention
 
 ```
-feat(gate):    add rate-limit headers to 429 responses
-fix(atom-sdk): correct JWT header name in AtomModelWrapper
-chore(infra):  bump postgres helm chart to 14.0.1
-test(policies): add cross-domain denial test case
-docs(sessions): clarify SESSION-05 acceptance criteria
+feat(gate):      add rate-limit headers to 429 responses
+fix(atom-sdk):   correct JWT header name in AtomChatWrapper
+chore(infra):    bump postgres helm chart
+test(policies):  add cross-domain denial test
+docs(guide):     clarify prod mode setup
 ```
 
-Allowed types: `feat`, `fix`, `chore`, `docs`, `test`, `refactor`, `perf`, `ci`, `build`, `revert`
-Allowed scopes: `gate`, `atom-llm`, `atom-sdk`, `atom-runtime`, `atom-memory`, `atom-studio`, `atom-cli`, `policies`, `infra`, `migrations`, `docs`, `sessions`, `deps`, `all`
+Types: `feat` `fix` `chore` `docs` `test` `refactor` `perf` `ci` `build` `revert`
+
+Scopes: `gate` `atom-llm` `atom-sdk` `atom-runtime` `atom-memory` `atom-studio` `atom-cli` `policies` `infra` `migrations` `docs` `deps`
