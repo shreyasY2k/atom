@@ -60,13 +60,13 @@ def _prisma_push() -> None:
     import litellm as _lt
     schema = os.path.join(os.path.dirname(_lt.__file__), "proxy", "schema.prisma")
     if not os.path.exists(schema):
-        print(f"[atom-llm] WARNING: schema.prisma not found at {schema}, skipping prisma push", flush=True)
+        print(f"[atom-llm] WARNING: schema.prisma not found at {schema}, skipping", flush=True)
         return
 
     print(f"[atom-llm] running prisma db push on {schema}", flush=True)
     result = subprocess.run(
         ["prisma", "db", "push", "--schema", schema, "--accept-data-loss", "--skip-generate"],
-        capture_output=False,
+        check=False,
     )
     if result.returncode != 0:
         print("[atom-llm] prisma db push failed — aborting startup", flush=True)
