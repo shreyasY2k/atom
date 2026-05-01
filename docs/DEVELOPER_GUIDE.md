@@ -16,18 +16,19 @@ add tools, and write Rego policies.
 
 ```bash
 # 1. Log in to atom-studio
-# k8s:           atom login --studio http://api.atom.local:8088
-# docker-compose: atom login --studio http://localhost:3001
+# atom login prompts for: studio URL, email, password
+# k8s default URL:           http://api.atom.local
+# docker-compose default URL: http://localhost:3001
 
 # 2. In atom-studio: create a domain, then create an agent
 #    Copy the one-time token shown after creation
 
 # 3. Scaffold the project
-atom create agent eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCJ9...
+atom create   # interactive wizard: enter agent name, model, tools, etc.
 cd my-agent/
 
 # 4. Validate
-atom validate   # should exit 0
+# atom validate does not exist — deploy directly:
 
 # 5. Edit agent.py to add your logic
 # 6. Build and deploy
@@ -176,17 +177,17 @@ make policy-test
 
 | Feature | docker-compose (`make dev-up`) | Kubernetes (`make k8s-deploy` + `make ingress-up`) |
 |---------|-------------------------------|------------------------------|
-| Studio login | http://localhost:3000 — admin@atom.local / **admin123** | http://studio.atom.local:8088 — admin@atom.local / **admin123** |
-| GATE URL | http://localhost:8080 | http://gate.atom.local:8088 |
-| Studio API | http://localhost:3001 | http://api.atom.local:8088 |
-| Grafana | http://localhost:3005 — admin/**admin** | http://grafana.atom.local:8088 — admin/**atom-grafana-dev** |
-| MinIO | http://localhost:9001 — minioadmin/**changeme** | http://minio-ui.atom.local:8088 — minioadmin/**changeme** |
+| Studio login | http://localhost:3000 — admin@atom.local / **admin123** | http://studio.atom.local — admin@atom.local / **admin123** |
+| GATE URL | http://localhost:8080 | http://gate.atom.local |
+| Studio API | http://localhost:3001 | http://api.atom.local |
+| Grafana | http://localhost:3005 — admin/**atom-grafana-dev** | http://grafana.atom.local — admin/**atom-grafana-dev** |
+| MinIO | http://localhost:9001 — minioadmin/**changeme** | http://minio-ui.atom.local — minioadmin/**changeme** |
 | Postgres | localhost:5432 — atom/**changeme** | localhost:5432 (TCP via ingress) — atom/**changeme** |
 | Agent pods | Docker containers (atom-runtime docker backend) | Kubernetes pods in `atom-agents` ns |
 
 **Deploy to k8s:**
 ```bash
-make ingress-up   # exposes all services at *.atom.local:8088
+make ingress-up   # exposes all services at *.atom.local
 
 # Login, create domain + agent in Studio, then:
 bin/atom deploy \
@@ -194,7 +195,7 @@ bin/atom deploy \
   --skip-build \
   --image <your-image> \
   --message "initial deploy"
-# Approve at http://studio.atom.local:8088/hitl
+# Approve at http://studio.atom.local/hitl
 ```
 
 ---

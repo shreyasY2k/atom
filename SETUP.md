@@ -118,9 +118,9 @@ cd atom && uv run --project atom-studio/backend \
 
 ---
 
-## 4. Mode B — Kubernetes (Docker Desktop)
+## 4. Mode B — Kubernetes (kind cluster)
 
-Docker Desktop's built-in Kubernetes cluster is used (3-node kind-backed).
+Uses a kind (Kubernetes in Docker) cluster — 1 control-plane + 2 workers.
 
 ### 4.1 Deploy infrastructure (once per cluster)
 
@@ -158,7 +158,7 @@ sudo make ingress-hosts
 
 ### 4.5 Access
 
-Open **http://studio.atom.local:8088** — login: `admin@atom.local` / `admin123`
+Open **http://studio.atom.local** — login: `admin@atom.local` / `admin123`
 
 ### Re-running seed only
 
@@ -201,22 +201,22 @@ kubectl get ingress -A             # ingress routes
 
 ### Kubernetes (via `make ingress-up` on port 8088)
 
-> All HTTP services are reachable at `http://<name>.atom.local:8088` after
+> All HTTP services are reachable at `http://<name>.atom.local` after
 > `make ingress-up` and `sudo make ingress-hosts`.
 
 | Service | URL | Username | Password |
 |---------|-----|----------|----------|
-| atom-studio (UI + API) | http://studio.atom.local:8088 | admin@atom.local | **admin123** |
-| atom-studio API / Swagger | http://api.atom.local:8088/docs | — | — |
-| GATE | http://gate.atom.local:8088 | — | Bearer JWT |
-| atom-runtime | http://runtime.atom.local:8088/healthz | — | — |
-| Grafana | http://grafana.atom.local:8088 | **admin** | **atom-grafana-dev** |
-| Alloy UI | http://alloy.atom.local:8088 | — | — |
-| Loki API | http://loki.atom.local:8088 | — | — |
-| Tempo API | http://tempo.atom.local:8088 | — | — |
-| MinIO console | http://minio-ui.atom.local:8088 | **minioadmin** | **changeme** |
-| MinIO S3 API | http://minio.atom.local:8088 | **minioadmin** | **changeme** |
-| OPA | http://opa.atom.local:8088 | — | — |
+| atom-studio (UI + API) | http://studio.atom.local | admin@atom.local | **admin123** |
+| atom-studio API / Swagger | http://api.atom.local/docs | — | — |
+| GATE | http://gate.atom.local | — | Bearer JWT |
+| atom-runtime | http://runtime.atom.local/healthz | — | — |
+| Grafana | http://grafana.atom.local | **admin** | **atom-grafana-dev** |
+| Alloy UI | http://alloy.atom.local | — | — |
+| Loki API | http://loki.atom.local | — | — |
+| Tempo API | http://tempo.atom.local | — | — |
+| MinIO console | http://minio-ui.atom.local | **minioadmin** | **changeme** |
+| MinIO S3 API | http://minio.atom.local | **minioadmin** | **changeme** |
+| OPA | http://opa.atom.local | — | — |
 | Postgres | localhost:**5432** (TCP) | **atom** | **changeme** (DB: `atom`) |
 | Redis | localhost:**6379** (TCP) | — | **changeme** |
 | Kafka | localhost:**9092** (TCP) | — | — |
@@ -279,7 +279,7 @@ curl -s -X POST -H "Host: studio.atom.local" http://localhost:8088/api/auth/logi
   -d '{"email":"admin@atom.local","password":"admin123"}' | python3 -m json.tool
 
 # Or with /etc/hosts set up:
-curl -s -X POST http://studio.atom.local:8088/api/auth/login \
+curl -s -X POST http://studio.atom.local/api/auth/login \
   -H "Content-Type: application/json" \
   -d '{"email":"admin@atom.local","password":"admin123"}' | python3 -m json.tool
 ```
@@ -292,7 +292,7 @@ curl -s -X POST http://studio.atom.local:8088/api/auth/login \
 
 ```bash
 # 1. Login (k8s)
-TOKEN=$(curl -s -X POST http://studio.atom.local:8088/api/auth/login \
+TOKEN=$(curl -s -X POST http://studio.atom.local/api/auth/login \
   -H "Content-Type: application/json" \
   -d '{"email":"admin@atom.local","password":"admin123"}' \
   | python3 -c "import sys,json; print(json.load(sys.stdin)['access_token'])")
@@ -301,14 +301,14 @@ TOKEN=$(curl -s -X POST http://studio.atom.local:8088/api/auth/login \
 # TOKEN=$(curl -s -X POST http://localhost:3001/api/auth/login ...)
 
 # 2. Create domain
-DOMAIN=$(curl -s -X POST http://studio.atom.local:8088/api/domains/ \
+DOMAIN=$(curl -s -X POST http://studio.atom.local/api/domains/ \
   -H "Authorization: Bearer $TOKEN" \
   -H "Content-Type: application/json" \
   -d '{"name":"my-domain","description":"Test"}' | python3 -c \
   "import sys,json; print(json.load(sys.stdin)['id'])")
 
 # 3. Create agent
-RESP=$(curl -s -X POST "http://studio.atom.local:8088/api/domains/$DOMAIN/agents/" \
+RESP=$(curl -s -X POST "http://studio.atom.local/api/domains/$DOMAIN/agents/" \
   -H "Authorization: Bearer $TOKEN" \
   -H "Content-Type: application/json" \
   -d '{"name":"my-agent","allowed_models":["gemini-2.5-flash"],"rpm_limit":60}')
@@ -328,7 +328,7 @@ bin/atom deploy \
   --message "test deploy"
 
 # Approve in Studio HITL queue
-open http://studio.atom.local:8088/hitl
+open http://studio.atom.local/hitl
 
 # Wait for pod
 kubectl wait --for=condition=available \
@@ -338,7 +338,7 @@ kubectl wait --for=condition=available \
 ### Call a deployed agent through GATE
 
 ```bash
-curl -X POST "http://gate.atom.local:8088/domain/$DOMAIN/agent/$AGENT_ID/echo" \
+curl -X POST "http://gate.atom.local/domain/$DOMAIN/agent/$AGENT_ID/echo" \
   -H "Authorization: Bearer $AGENT_JWT" \
   -H "Content-Type: application/json" \
   -d '{"message":"hello"}'
@@ -400,11 +400,11 @@ make seed-k8s
 
 **GATE returns `token_revoked`**
 ```bash
-TOKEN=$(curl -s -X POST http://studio.atom.local:8088/api/auth/login \
+TOKEN=$(curl -s -X POST http://studio.atom.local/api/auth/login \
   -H "Content-Type: application/json" \
   -d '{"email":"admin@atom.local","password":"admin123"}' \
   | python3 -c "import sys,json; print(json.load(sys.stdin)['access_token'])")
-curl -X POST "http://studio.atom.local:8088/api/domains/<did>/agents/<aid>/regenerate-token" \
+curl -X POST "http://studio.atom.local/api/domains/<did>/agents/<aid>/regenerate-token" \
   -H "Authorization: Bearer $TOKEN"
 ```
 

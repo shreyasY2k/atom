@@ -7,79 +7,79 @@
 ```mermaid
 flowchart TB
     subgraph external["External World"]
-        EC["External Callers\n(banks · fintechs)"]
+        EC["External Callers<br/>(banks · fintechs)"]
         DEV["Developer"]
     end
 
     subgraph tooling["Developer Tooling"]
-        ST["atom-studio\n(UI + FastAPI)"]
-        CL["atom-cli\n(Go + Cobra)"]
-        REG["Container Registry\n(GHCR / kind load\nor any OCI registry)"]
+        ST["atom-studio<br/>(UI + FastAPI)"]
+        CL["atom-cli<br/>(Go + Cobra)"]
+        REG["Container Registry<br/>(GHCR / kind load<br/>or any OCI registry)"]
     end
 
     subgraph gateway["Gateway Layer — atom-system namespace"]
-        GATE["GATE\nGo · Fiber v3\nJWT · OPA · rate-limit · audit · proxy"]
-        OPA["OPA\nRego policies\n(in-process)"]
+        GATE["GATE<br/>Go · Fiber v3<br/>JWT · OPA · rate-limit · audit · proxy"]
+        OPA["OPA<br/>Rego policies<br/>(in-process)"]
     end
 
     subgraph services["Core Services — atom-system namespace"]
-        LLM["atom-llm\nLiteLLM fork\nvirtual keys · tools · skills"]
-        MEM["atom-memory\npgvector + Redis\n(library, not a pod)"]
-        HITL["HITL queue\nin atom-studio API"]
-        RUNTIME["atom-runtime\nk8s deployment controller"]
+        LLM["atom-llm<br/>LiteLLM fork<br/>virtual keys · tools · skills"]
+        MEM["atom-memory<br/>pgvector + Redis<br/>(library, not a pod)"]
+        HITL["HITL queue<br/>in atom-studio API"]
+        RUNTIME["atom-runtime<br/>k8s deployment controller"]
     end
 
     subgraph agents["Agent Runtime — atom-agents namespace"]
-        PODS["Agent Pods\natom-sdk\n/domain/id/agent/id"]
+        PODS["Agent Pods<br/>atom-sdk<br/>/domain/id/agent/id"]
     end
 
     subgraph data["Data Layer — atom-infra namespace"]
-        PG[("Postgres 16\n+ pgvector")]
+        PG[("Postgres 16<br/>+ pgvector")]
         RD[("Redis 7")]
-        KF[("Kafka\nRedpanda")]
-        MN[("MinIO\natom-audit bucket")]
+        KF[("Kafka<br/>Redpanda")]
+        MN[("MinIO<br/>atom-audit bucket")]
     end
 
     subgraph obs["Observability — atom-system namespace"]
-        AL["Grafana Alloy\nOTEL collector\n+ log shipper"]
-        LK["Grafana Loki\nlog store"]
-        TP["Grafana Tempo\ntrace store"]
-        GR["Grafana\ndashboards"]
+        AL["Grafana Alloy<br/>OTEL collector<br/>+ log shipper"]
+        LK["Grafana Loki<br/>log store"]
+        TP["Grafana Tempo<br/>trace store"]
+        GR["Grafana<br/>dashboards"]
     end
 
-    DEV -- "manage agents\napprove deploys\nview audit" --> ST
-    DEV -- "atom create\natom validate\natom deploy" --> CL
+    DEV -- "manage agents<br/>approve deploys<br/>view audit" --> ST
+    DEV -- "atom create<br/>atom deploy<br/>atom logs" --> CL
     EC -- "HTTPS" --> GATE
     ST -- "HTTPS" --> GATE
     CL -- "HTTPS" --> GATE
 
-    GATE <-- "in-process\npolicy eval" --> OPA
-    GATE -- "proxy request\nto agent pod" --> PODS
-    GATE -- "LLM calls\n(NetworkPolicy enforced)" --> LLM
+    GATE <-- "in-process<br/>policy eval" --> OPA
+    GATE -- "proxy request<br/>to agent pod" --> PODS
+    GATE -- "LLM calls<br/>(NetworkPolicy enforced)" --> LLM
     GATE -- "memory ops" --> MEM
     GATE -- "HITL requests" --> HITL
 
-    PODS -- "LLM calls via GATE\n(agent JWT)" --> GATE
+    PODS -- "LLM calls via GATE<br/>(agent JWT)" --> GATE
 
-    ST -- "deploy webhook\non approval" --> RUNTIME
-    RUNTIME -- "k8s Deployment\nService\nNetworkPolicy" --> PODS
+    ST -- "deploy webhook<br/>on approval" --> RUNTIME
+    RUNTIME -- "k8s Deployment<br/>Service<br/>NetworkPolicy" --> PODS
     CL -- "docker push" --> REG
     REG -- "image pull" --> PODS
 
-    GATE -- "read routing\nwrite audit chain" --> PG
-    GATE -- "rate-limit\ntoken cache\nrouting cache" --> RD
-    GATE -- "atom.audit events\nasync" --> KF
+    GATE -- "read routing<br/>write audit chain" --> PG
+    GATE -- "rate-limit<br/>token cache<br/>routing cache" --> RD
+    GATE -- "atom.audit events<br/>async" --> KF
     LLM -- "atom.llm events" --> KF
-    LLM -- "config\nvirtual keys" --> PG
-    MEM -- "vector storage\nHNSW search" --> PG
+    LLM -- "config<br/>virtual keys" --> PG
+    MEM -- "vector storage<br/>HNSW search" --> PG
     MEM -- "short-term TTL" --> RD
-    KF -- "archive\nbatch files" --> MN
-    ST -- "read/write\nall schema" --> PG
+    KF -- "archive<br/>batch files" --> MN
+    ST -- "read/write<br/>all schema" --> PG
 
-    GATE -- "OTLP traces\n(HTTP :4318)" --> AL
+    GATE -- "OTLP traces<br/>(HTTP :4318)" --> AL
     LLM -- "OTLP traces" --> AL
     ST -- "OTLP traces" --> AL
-    PODS -- "k8s pod logs\n(loki.source.kubernetes)" --> AL
+    PODS -- "k8s pod logs<br/>(loki.source.kubernetes)" --> AL
     AL -- "traces" --> TP
     AL -- "logs" --> LK
     TP --- GR
@@ -300,9 +300,9 @@ sequenceDiagram
 
     API-->>UI: { agent, raw_token: "eyJ..." }
     Note over UI: raw_token shown ONCE only<br/>never stored or retrievable again
-    UI-->>Dev: Token modal: "Copy and run atom create agent <token>"
+    UI-->>Dev: Token modal: one-time JWT shown — copy it
 
-    Dev->>CLI: atom create agent eyJ...
+    Dev->>CLI: atom create
     CLI->>CLI: Decode JWT, extract agent_id, domain_id
     CLI->>API: GET /api/domains/{did}/agents/{aid}<br/>Authorization: Bearer {agent-jwt}
     API->>PG: SELECT agents + tools + skills + memory_config
@@ -311,7 +311,7 @@ sequenceDiagram
 
     CLI->>FS: Scaffold project directory:<br/>atom_agent.yaml (agent_id, domain_id, model, tools)<br/>agent.py (entry point using atom-sdk)<br/>requirements.txt (atom-sdk + deps)<br/>.env (ATOM_AGENT_JWT=... ATOM_GATE_URL=...)<br/>Dockerfile (python:3.11-slim base)<br/>README.md
 
-    CLI-->>Dev: Project ready at ./my-agent/<br/>Run: cd my-agent && atom validate
+    CLI-->>Dev: Project ready at ./my-agent/<br/>Run: cd my-agent && atom deploy
 ```
 
 ---
@@ -380,10 +380,10 @@ sequenceDiagram
 
 ```mermaid
 flowchart LR
-    EXP["expires_at reached\n(background task)"] --> CHK{"hitl_fallback\nconfigured on agent"}
-    CHK -->|ABORT| ERR["raise TimeoutError\nagent stops"]
-    CHK -->|CONTINUE| CONT["resume with\napproved=false payload"]
-    CHK -->|ESCALATE| ESC["create new HITL\nassigned to admin\n+ alert"]
+    EXP["expires_at reached<br/>(background task)"] --> CHK{"hitl_fallback<br/>configured on agent"}
+    CHK -->|ABORT| ERR["raise TimeoutError<br/>agent stops"]
+    CHK -->|CONTINUE| CONT["resume with<br/>approved=false payload"]
+    CHK -->|ESCALATE| ESC["create new HITL<br/>assigned to admin<br/>+ alert"]
 ```
 
 ---
@@ -394,30 +394,30 @@ flowchart LR
 
 ```mermaid
 flowchart TD
-    REQ["Inbound request\nto GATE"] --> PROCESS["GATE processes request\n(JWT + OPA + proxy)"]
-    PROCESS --> RESPONSE["Return response\nto caller"]
-    PROCESS --> ASYNC["Async goroutine pool\n(size 8, non-blocking)"]
+    REQ["Inbound request<br/>to GATE"] --> PROCESS["GATE processes request<br/>(JWT + OPA + proxy)"]
+    PROCESS --> RESPONSE["Return response<br/>to caller"]
+    PROCESS --> ASYNC["Async goroutine pool<br/>(size 8, non-blocking)"]
 
-    ASYNC --> BUILD["Build event JSON:\n{ timestamp, domain_id, agent_id,\n  caller_token_hash, method, path,\n  policy_decision, status_code, latency_ms }"]
+    ASYNC --> BUILD["Build event JSON:<br/>{ timestamp, domain_id, agent_id,<br/>  caller_token_hash, method, path,<br/>  policy_decision, status_code, latency_ms }"]
 
-    BUILD --> PREV["SELECT event FROM audit_log_chain\nWHERE seq = MAX(seq)\n(read last entry)"]
+    BUILD --> PREV["SELECT event FROM audit_log_chain<br/>WHERE seq = MAX(seq)<br/>(read last entry)"]
 
     PREV --> HASH["prev_hash = sha256(last_entry.event)"]
-    HASH --> HMAC_CALC["hmac = hmac-sha256(\n  PLATFORM_HMAC_SECRET,\n  prev_hash || event_json\n)"]
+    HASH --> HMAC_CALC["hmac = hmac-sha256(<br/>  PLATFORM_HMAC_SECRET,<br/>  prev_hash || event_json<br/>)"]
 
-    HMAC_CALC --> INSERT["INSERT audit_log_chain\n{ seq (bigserial), prev_hash,\n  event, hmac, created_at }"]
-    HMAC_CALC --> KAFKA["Produce atom.audit\n(Kafka, key=agent_id)"]
+    HMAC_CALC --> INSERT["INSERT audit_log_chain<br/>{ seq (bigserial), prev_hash,<br/>  event, hmac, created_at }"]
+    HMAC_CALC --> KAFKA["Produce atom.audit<br/>(Kafka, key=agent_id)"]
 
-    INSERT --> PG[(Postgres\naudit_log_chain)]
-    KAFKA --> REDPANDA[(Redpanda\natom.audit topic)]
-    REDPANDA --> ARCHIVER["log-archiver service\n(batches 100 msgs or 30s)"]
-    ARCHIVER --> MINIO[(MinIO\natom-audit/atom.audit/\nyyyy/mm/dd/batch.jsonl)]
+    INSERT --> PG[(Postgres<br/>audit_log_chain)]
+    KAFKA --> REDPANDA[(Redpanda<br/>atom.audit topic)]
+    REDPANDA --> ARCHIVER["log-archiver service<br/>(batches 100 msgs or 30s)"]
+    ARCHIVER --> MINIO[(MinIO<br/>atom-audit/atom.audit/<br/>yyyy/mm/dd/batch.jsonl)]
 
-    PG --> VALIDATOR["Audit Validator\n(Studio background job + on-demand)"]
-    VALIDATOR --> WALK["Walk entries by seq\nrecompute prev_hash + hmac\nfor each entry"]
+    PG --> VALIDATOR["Audit Validator<br/>(Studio background job + on-demand)"]
+    VALIDATOR --> WALK["Walk entries by seq<br/>recompute prev_hash + hmac<br/>for each entry"]
     WALK --> VALID{"All match?"}
-    VALID -->|yes| OK["Chain valid ✓\n(shown in Studio audit page)"]
-    VALID -->|no| BREACH["Chain broken at seq=N\nAlert platform admin"]
+    VALID -->|yes| OK["Chain valid ✓<br/>(shown in Studio audit page)"]
+    VALID -->|no| BREACH["Chain broken at seq=N<br/>Alert platform admin"]
 ```
 
 ---
@@ -449,27 +449,27 @@ sequenceDiagram
     LLM-->>GATE: { embedding: [0.12, -0.34, ...] }  # 1536 dims
     GATE-->>MEM: embedding vector
 
-    MEM->>PG: SELECT content, metadata,\n1 - (embedding <=> query_vec) AS similarity\nFROM memory_vectors\nWHERE agent_id = {aid}\nORDER BY embedding <=> query_vec\nLIMIT 5
+    MEM->>PG: SELECT content, metadata,<br/>1 - (embedding <=> query_vec) AS similarity<br/>FROM memory_vectors<br/>WHERE agent_id = {aid}<br/>ORDER BY embedding <=> query_vec<br/>LIMIT 5
     PG-->>MEM: top 5 memories with similarity scores
 
     MEM-->>GATE: [ { content, similarity, metadata } ]
     GATE-->>SDK: memories
     SDK-->>Agent: [ { content, similarity } ]
 
-    Agent->>Agent: Inject top memories into system prompt\nbefore LLM call
+    Agent->>Agent: Inject top memories into system prompt<br/>before LLM call
 
     Note over Agent: After interaction — store new memory
 
     Agent->>SDK: memory.remember("Customer 4821 credit limit is 75000")
 
-    SDK->>GATE: POST /memory/store\n{ content: "Customer 4821 credit limit is 75000" }
+    SDK->>GATE: POST /memory/store<br/>{ content: "Customer 4821 credit limit is 75000" }
     GATE->>MEM: Forward store request
 
     MEM->>GATE: POST /v1/embeddings (embed the content)
     GATE->>LLM: POST /embeddings { input: content }
     LLM-->>MEM: embedding vector
 
-    MEM->>PG: INSERT memory_vectors\n{ agent_id, content, embedding, metadata, created_at }
+    MEM->>PG: INSERT memory_vectors<br/>{ agent_id, content, embedding, metadata, created_at }
     PG-->>MEM: inserted ✓
     MEM-->>Agent: stored ✓
 
@@ -496,21 +496,21 @@ sequenceDiagram
 
 ```mermaid
 flowchart TD
-    CREATE["atom-studio creates agent"] --> SIGN["Sign RS256 JWT:\n{ sub: agent-{id}, type: agent,\n  domain_id, agent_id, iss }"]
+    CREATE["atom-studio creates agent"] --> SIGN["Sign RS256 JWT:<br/>{ sub: agent-{id}, type: agent,<br/>  domain_id, agent_id, iss }"]
     SIGN --> HASH_T["sha256(raw_token) → token_hash"]
-    HASH_T --> STORE["INSERT agent_tokens\n{ agent_id, token_hash,\n  issued_at, expires_at=null }"]
-    SIGN --> DISPLAY["Show token ONCE in UI\nnever stored again\ncopy and use with atom-cli"]
+    HASH_T --> STORE["INSERT agent_tokens<br/>{ agent_id, token_hash,<br/>  issued_at, expires_at=null }"]
+    SIGN --> DISPLAY["Show token ONCE in UI<br/>never stored again<br/>copy and use with atom-cli"]
 
-    DISPLAY --> AGENT["Agent pod carries JWT\nin ATOM_AGENT_JWT env var\n(from k8s Secret)"]
+    DISPLAY --> AGENT["Agent pod carries JWT<br/>in ATOM_AGENT_JWT env var<br/>(from k8s Secret)"]
 
-    AGENT --> GATE_CHECK["Every GATE request:\n1. RS256 verify signature\n2. Check exp\n3. Redis GET token_revoked:{hash}"]
+    AGENT --> GATE_CHECK["Every GATE request:<br/>1. RS256 verify signature<br/>2. Check exp<br/>3. Redis GET token_revoked:{hash}"]
 
     GATE_CHECK -->|not revoked| ALLOWED["Request proceeds"]
     GATE_CHECK -->|revoked flag set| DENIED["401 token_revoked"]
 
-    REVOKE_UI["Admin clicks Revoke in Studio\nor token regeneration"] --> REVOKE_DB["UPDATE agent_tokens\nSET revoked_at=now()\nrevoked_by=user_id"]
-    REVOKE_DB --> REVOKE_REDIS["SET token_revoked:{hash} 1\nEX 86400 in Redis\n(propagates to GATE within ms)"]
-    REVOKE_REDIS --> SCALE_DOWN["Scale agent Deployment to 0\nuntil redeployed with new token"]
+    REVOKE_UI["Admin clicks Revoke in Studio<br/>or token regeneration"] --> REVOKE_DB["UPDATE agent_tokens<br/>SET revoked_at=now()<br/>revoked_by=user_id"]
+    REVOKE_DB --> REVOKE_REDIS["SET token_revoked:{hash} 1<br/>EX 86400 in Redis<br/>(propagates to GATE within ms)"]
+    REVOKE_REDIS --> SCALE_DOWN["Scale agent Deployment to 0<br/>until redeployed with new token"]
 ```
 
 ---
@@ -521,29 +521,29 @@ flowchart TD
 
 ```mermaid
 flowchart TD
-    REQ["Incoming request\n+ JWT claims"] --> BUILD_INPUT["Build OPA input:\n{ token: claims,\n  request: { method, path },\n  agent: { tools, skills } }"]
+    REQ["Incoming request<br/>+ JWT claims"] --> BUILD_INPUT["Build OPA input:<br/>{ token: claims,<br/>  request: { method, path },<br/>  agent: { tools, skills } }"]
 
-    BUILD_INPUT --> EVAL["OPA PrepareForEval\nquery: data.atom.authz.allow\n(in-process, <1ms)"]
+    BUILD_INPUT --> EVAL["OPA PrepareForEval<br/>query: data.atom.authz.allow<br/>(in-process, <1ms)"]
 
     EVAL --> RULES{"Evaluate Rego rules"}
 
-    RULES --> R1["agent_auth.rego\nIs token type=agent?\nDoes agent_id match path?"]
-    RULES --> R2["domain_isolation.rego\nDoes token.domain_id\nmatch path domain_id?"]
-    RULES --> R3["tool_access.rego\nIs requested tool in\nagent.tools list?"]
-    RULES --> R4["PLACEHOLDER_bfsi.rego\ncompliant := true\n(future PCI/SOC2 rules)"]
+    RULES --> R1["agent_auth.rego<br/>Is token type=agent?<br/>Does agent_id match path?"]
+    RULES --> R2["domain_isolation.rego<br/>Does token.domain_id<br/>match path domain_id?"]
+    RULES --> R3["tool_access.rego<br/>Is requested tool in<br/>agent.tools list?"]
+    RULES --> R4["PLACEHOLDER_bfsi.rego<br/>compliant := true<br/>(future PCI/SOC2 rules)"]
 
     R1 --> COMBINE{"All allow=true?"}
     R2 --> COMBINE
     R3 --> COMBINE
     R4 --> COMBINE
 
-    COMBINE -->|yes| ALLOW["allow: true\nproceed to proxy"]
-    COMBINE -->|no| DENY["allow: false\nreason: first deny reason\n→ 403 Forbidden"]
+    COMBINE -->|yes| ALLOW["allow: true<br/>proceed to proxy"]
+    COMBINE -->|no| DENY["allow: false<br/>reason: first deny reason<br/>→ 403 Forbidden"]
 
-    ALLOW --> AUDIT_OK["Append to audit chain:\npolicy_decision: allow"]
-    DENY --> AUDIT_DENY["Append to audit chain:\npolicy_decision: deny + reason"]
+    ALLOW --> AUDIT_OK["Append to audit chain:<br/>policy_decision: allow"]
+    DENY --> AUDIT_DENY["Append to audit chain:<br/>policy_decision: deny + reason"]
 
-    HOTRELOAD["policies/ file change\n(fsnotify)"] -->|reload| EVAL
+    HOTRELOAD["policies/ file change<br/>(fsnotify)"] -->|reload| EVAL
 ```
 
 ---

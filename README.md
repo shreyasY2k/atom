@@ -84,7 +84,7 @@ make ingress-up                 # port-forwards ingress → localhost:8088
 sudo make ingress-hosts         # writes /etc/hosts entries (one-time)
 
 # 5. Open
-open http://studio.atom.local:8088
+open http://studio.atom.local
 ```
 
 ---
@@ -137,8 +137,9 @@ and rate limits on every request, then logs it to the immutable `audit_log_chain
 
 ## Service Map — Kubernetes (`make k8s-deploy` + `make ingress-up`)
 
-> Requires `sudo make ingress-hosts` to write `/etc/hosts` and `make ingress-up` running
-> in the background. All HTTP services are reachable at port **8088**.
+> Requires `sudo make ingress-hosts` (one-time) and `make ingress-up` per session.
+> On **kind**: services are at port **80** — no port number needed in URLs.
+> On **Docker Desktop** (non-kind): services are at port **8088** via port-forward.
 
 ### /etc/hosts entry (one-time)
 
@@ -152,28 +153,28 @@ and rate limits on every request, then logs it to the immutable `audit_log_chain
 
 | Service | URL (k8s) | Credentials |
 |---------|-----------|-------------|
-| atom-studio (UI + API) | http://studio.atom.local:8088 | admin@atom.local / **admin123** |
-| atom-studio API only | http://api.atom.local:8088/docs | — (Swagger UI) |
-| GATE | http://gate.atom.local:8088 | Bearer JWT (issued by studio) |
-| atom-runtime | http://runtime.atom.local:8088/healthz | — |
+| atom-studio (UI + API) | http://studio.atom.local | admin@atom.local / **admin123** |
+| atom-studio API only | http://api.atom.local/docs | — (Swagger UI) |
+| GATE | http://gate.atom.local | Bearer JWT (issued by studio) |
+| atom-runtime | http://runtime.atom.local/healthz | — |
 | atom-llm | cluster-internal only | Bearer **sk-atom-dev** |
 
 ### Observability
 
 | Service | URL (k8s) | Credentials |
 |---------|-----------|-------------|
-| Grafana | http://grafana.atom.local:8088 | **admin** / **atom-grafana-dev** |
-| Alloy | http://alloy.atom.local:8088 | — |
-| Loki | http://loki.atom.local:8088 | — |
-| Tempo | http://tempo.atom.local:8088 | — |
+| Grafana | http://grafana.atom.local | **admin** / **atom-grafana-dev** |
+| Alloy | http://alloy.atom.local | — |
+| Loki | http://loki.atom.local | — |
+| Tempo | http://tempo.atom.local | — |
 
 ### Infrastructure
 
 | Service | URL (k8s) | Credentials |
 |---------|-----------|-------------|
-| MinIO S3 API | http://minio.atom.local:8088 | **minioadmin** / **changeme** |
-| MinIO console | http://minio-ui.atom.local:8088 | **minioadmin** / **changeme** |
-| OPA | http://opa.atom.local:8088 | — |
+| MinIO S3 API | http://minio.atom.local | **minioadmin** / **changeme** |
+| MinIO console | http://minio-ui.atom.local | **minioadmin** / **changeme** |
+| OPA | http://opa.atom.local | — |
 | Postgres | localhost:5432 (TCP via ingress) | **atom** / **changeme** — DB: `atom` |
 | Redis | localhost:6379 (TCP via ingress) | password: **changeme** |
 | Kafka | localhost:9092 (TCP via ingress) | — (no SASL in dev) |
@@ -222,7 +223,7 @@ atom/
 
 ```bash
 # 1. Login via CLI
-bin/atom login   # studio URL: http://api.atom.local:8088 or http://localhost:3001
+bin/atom login   # interactive: prompts for studio URL, email, password
 
 # 2. Create domain + agent in Studio UI, copy the JWT shown once after creation
 
@@ -230,10 +231,10 @@ bin/atom login   # studio URL: http://api.atom.local:8088 or http://localhost:30
 bin/atom deploy --agent-id <uuid> --skip-build --image <your-image>
 
 # 4. Approve in Studio
-open http://studio.atom.local:8088/hitl
+open http://studio.atom.local/hitl
 
 # 5. Call the deployed agent through GATE
-curl -X POST http://gate.atom.local:8088/domain/<did>/agent/<aid>/run \
+curl -X POST http://gate.atom.local/domain/<did>/agent/<aid>/run \
   -H "Authorization: Bearer <agent-jwt>" \
   -H "Content-Type: application/json" \
   -d '{"message": "Summarise RBI DPDP compliance requirements"}'
@@ -245,9 +246,9 @@ curl -X POST http://gate.atom.local:8088/domain/<did>/agent/<aid>/run \
 |------|-------|
 | Live log stream | Studio → Agent → Live Logs |
 | Audit chain | Studio → Audit Log → Verify Chain |
-| All service traces | http://grafana.atom.local:8088 → Explore → Tempo |
-| Agent pod logs | http://grafana.atom.local:8088 → Explore → Loki: `{namespace="atom-agents"}` |
-| MinIO audit archive | http://minio-ui.atom.local:8088 → atom-audit bucket |
+| All service traces | http://grafana.atom.local → Explore → Tempo |
+| Agent pod logs | http://grafana.atom.local → Explore → Loki: `{namespace="atom-agents"}` |
+| MinIO audit archive | http://minio-ui.atom.local → atom-audit bucket |
 
 ### Key make targets
 
@@ -345,11 +346,11 @@ kubectl get ingress -n atom-system
 
 **GATE returns `token_revoked`**
 ```bash
-TOKEN=$(curl -s -X POST http://api.atom.local:8088/api/auth/login \
+TOKEN=$(curl -s -X POST http://api.atom.local/api/auth/login \
   -H "Content-Type: application/json" \
   -d '{"email":"admin@atom.local","password":"admin123"}' \
   | python3 -c "import sys,json; print(json.load(sys.stdin)['access_token'])")
-curl -X POST http://api.atom.local:8088/api/domains/<did>/agents/<aid>/regenerate-token \
+curl -X POST http://api.atom.local/api/domains/<did>/agents/<aid>/regenerate-token \
   -H "Authorization: Bearer $TOKEN"
 ```
 

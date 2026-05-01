@@ -305,7 +305,7 @@ Suspension revokes the agent's token and scales its deployment to 0 replicas.
 # Set these variables
 DOMAIN_ID="<domain-uuid>"
 AGENT_ID="<agent-uuid>"
-STUDIO_URL="http://studio.atom.local:8088"   # or http://localhost:3001 for docker-compose
+STUDIO_URL="http://studio.atom.local"   # or http://localhost:3001 for docker-compose
 
 # 1. Login to get an access token
 TOKEN=$(curl -s -X POST $STUDIO_URL/api/auth/login \
