@@ -1,355 +1,222 @@
 # ATOM — Agentic Transformation & Operations Manager
 
-> A secure, auditable, BFSI-grade platform for developing, governing, and deploying AI agents.
-> Every LLM call flows through GATE: authenticated, policy-checked, rate-limited, and audit-logged.
+A BFSI-grade platform for developing, governing, and deploying AI agents.
+Every LLM call flows through **GATE** — authenticated, policy-checked, rate-limited, and immutably audit-logged.
 
 ---
 
 ## Prerequisites
 
-### Always required
+| Tool | Why | Install |
+|------|-----|---------|
+| Docker Desktop 24+ | runs the entire stack | [docker.com](https://www.docker.com/products/docker-desktop) |
+| Go 1.22+ | builds the `atom` CLI | `brew install go` |
+| Python 3.11+ | agent code + dev tooling | `brew install python@3.11` |
+| openssl | JWT key generation | pre-installed on macOS/Linux |
 
-| Tool | Version | Install |
-|------|---------|---------|
-| Docker Desktop | 24+ | [docker.com](https://www.docker.com/products/docker-desktop) |
-| make | any | macOS: `xcode-select --install` · Linux: `sudo apt install build-essential` |
-| openssl | 3+ | pre-installed on macOS/Linux |
-
-### For the `atom` CLI
-
-| Tool | Version | Install |
-|------|---------|---------|
-| Go | 1.22+ | `brew install go` |
-
-### For Kubernetes mode only
-
-| Tool | Version | Install |
-|------|---------|---------|
-| kind | any | `brew install kind` |
-| kubectl | any | bundled with Docker Desktop |
-| helm | 3+ | `brew install helm` |
-| golang-migrate | any | `brew install golang-migrate` |
-| psql | any | `brew install libpq && brew link libpq --force` |
-
-### For development (building from source)
-
-| Tool | Version | Install |
-|------|---------|---------|
-| Python 3.11+ | 3.11+ | `brew install python@3.11` |
-| uv | any | `curl -LsSf https://astral.sh/uv/install.sh \| sh` |
-| OPA CLI | any | `brew install opa` |
-| Node.js | 20+ | `brew install node@20` *(frontend dev only)* |
+> **Kubernetes only:** also install `kind`, `kubectl`, `helm`, `golang-migrate`, `psql` — see `SETUP.md`.
 
 ---
 
-## Quick Start
+## Start the stack
 
-### 1. Clone and configure
+### Option A — Docker Compose (recommended for getting started)
 
 ```bash
+# 1. Clone
 git clone https://github.com/shreyasY2k/atom.git && cd atom
-make generate-keys              # creates .keys/jwt_private.pem + jwt_public.pem
+
+# 2. Generate keys and configure
+make generate-keys
 cp .env.example .env
-# Edit .env — set GEMINI_API_KEY (free at aistudio.google.com/app/apikey)
+# Edit .env — set GEMINI_API_KEY  (free key: aistudio.google.com/app/apikey)
+# Also set ATOM_ENCRYPTION_KEY and PLATFORM_HMAC_SECRET to real values:
+#   openssl rand -hex 32   (run twice, one value per variable)
+
+# 3. Start everything
+docker compose up -d        # pulls pre-built images (~1 min)
+make migrate-dev            # apply DB schema
+make seed-dev               # create admin user
+
+# 4. Open Studio
+open http://localhost:3000  # admin@atom.local / admin123
 ```
 
-### 2. Start the stack
+### Option B — Kubernetes (kind)
 
-**Docker Compose — operator mode (pulls pre-built GHCR images, no build needed)**
 ```bash
-docker compose up -d
-make migrate-dev && make seed-dev
-open http://localhost:3000
+make generate-keys && cp .env.example .env   # set keys + GEMINI_API_KEY
+make infra-up                                # kind cluster + infra (Postgres, Redis, etc.)
+make k8s-deploy                              # build + deploy all services
+make monitoring-up                           # Grafana + Loki + Tempo
+sudo make ingress-hosts && make ingress-up   # *.atom.local on port 80
+
+open http://studio.atom.local               # admin@atom.local / admin123
 ```
-
-**Docker Compose — developer mode (builds from source)**
-```bash
-make dev-up
-make migrate-dev && make seed-dev
-open http://localhost:3000
-```
-
-**Kubernetes (kind)**
-```bash
-make infra-up           # kind cluster + Postgres/Redis/MinIO/Redpanda/OPA/nginx
-make k8s-deploy         # build images, load into kind, apply manifests, migrate + seed
-make monitoring-up      # Grafana + Loki + Tempo + Alloy
-sudo make ingress-hosts # /etc/hosts entries (one-time)
-make ingress-up         # expose all services at *.atom.local on port 80
-open http://studio.atom.local
-```
-
-### 3. Credentials
-
-| Service | Username | Password |
-|---------|----------|----------|
-| atom-studio | admin@atom.local | **admin123** |
-| Grafana | admin | **atom-grafana-dev** |
-| MinIO | minioadmin | **changeme** |
-| Postgres | atom | **changeme** |
 
 ---
 
-## The Core User Journey
+## Create and run your first agent
 
-Build an agent locally, test it without any infrastructure, then deploy it to ATOM with full governance.
-
-### Phase 1 — Build and test locally (no ATOM stack needed)
+### Step 1 — Build the CLI and login
 
 ```bash
-# 1. Build the CLI
-make cli-build            # → bin/atom
-
-# 2. Login to atom-studio
+make cli-build              # → bin/atom
 bin/atom login
-#  Prompts for:
-#    Studio URL → http://localhost:3001  (docker)  or  http://api.atom.local  (k8s)
-#    Email      → admin@atom.local
-#    Password   → admin123
-
-# 3. Scaffold a new agent project (interactive wizard)
-bin/atom create
-#  Asks: project name, description, LLM provider (Gemini/OpenAI/Anthropic/local),
-#        model, tools (web_search, calculator, etc.), HITL (y/n)
-#  Creates: <project-name>/ with agent.py, config.py, tools.py, server.py, Dockerfile
-
-cd <project-name>/
-
-# 4. Install dependencies and test in dev mode
-cp .env.example .env
-# Edit .env — set LLM_API_KEY  (ATOM_MODE=dev is already set)
-# Dev mode calls the LLM provider directly — no GATE, no domain, no token needed
-
-pip install -r requirements.txt
-python agent.py               # fully functional — test your agent logic here
+# Prompts for Studio URL, email, password
+# Docker: http://localhost:3001 · k8s: http://api.atom.local
 ```
 
-### Phase 2 — Deploy to ATOM (governed, audited, HITL)
+### Step 2 — Create a domain and agent in Studio
+
+```
+Open http://localhost:3000  (or http://studio.atom.local for k8s)
+
+Domains → New Domain → pick a name
+Agents  → New Agent  → fill the wizard
+         → copy the one-time JWT token shown at the end
+         → note the domain UUID and agent UUID from the URL
+```
+
+### Step 3 — Scaffold the agent project
 
 ```bash
-# 5. Create domain and agent in Studio
-#    Open: http://localhost:3000 (docker) or http://studio.atom.local (k8s)
-#    → Domains → New Domain → give it a name
-#    → Agents  → New Agent  → fill the wizard (model, tools, HITL settings, RPM limit)
-#
-#    Studio shows a one-time JWT token after creation — copy it immediately.
-#    Note the domain UUID and agent UUID from the URL:
-#      http://studio.atom.local/domains/<DOMAIN-ID>/agents/<AGENT-ID>
+bin/atom create             # interactive: name, model, tools, HITL
+cd <project-name>/
+bash setup-dev.sh           # creates .venv, installs atom-sdk + deps
+source .venv/bin/activate
+```
 
-# 6. Update .env with prod credentials
-# Add these lines to .env:
-#   ATOM_MODE=prod
-#   ATOM_GATE_URL=http://localhost:8080          # or http://gate.atom.local (k8s)
-#   ATOM_DOMAIN_ID=<domain-uuid-from-studio-url>
-#   ATOM_AGENT_ID=<agent-uuid-from-studio-url>
-#   ATOM_AGENT_JWT=<one-time-token-shown-at-creation>
-#   ATOM_MODEL_NAME=gemini-2.5-flash             # must be in agent allowed_models list
+### Step 4 — Fill in credentials and run
 
-# 7. (Optional) Verify prod mode locally before deploying
-python agent.py               # now routes all LLM calls through GATE (JWT-authenticated)
+```bash
+# Edit .env — fill in the values from Studio:
+# ATOM_GATE_URL=http://localhost:8080
+# ATOM_DOMAIN_ID=<domain-uuid>
+# ATOM_AGENT_ID=<agent-uuid>
+# ATOM_AGENT_JWT=<token-from-studio>
+# ATOM_MODEL_NAME=gemini-2.5-flash
 
-# 8. Deploy — builds Docker image + submits deployment for HITL approval
-bin/atom deploy
-# Flags: --agent-id <uuid>   (auto-reads ATOM_AGENT_ID from .env)
-#        --image <name:tag>  (defaults to project directory name)
-#        --message "text"    (deployment changelog)
-#        --skip-build        (skip docker build, use existing image)
+python agent.py
+# Conversations appear in Studio → Agents → Conversations tab
+```
 
-# 9. Approve in Studio → HITL queue → click Approve
-# atom-runtime builds the k8s pod (or Docker container) automatically
+### Step 5 — Deploy and chat via GATE
 
-# 10. Chat with the deployed agent through GATE
+```bash
+bin/atom deploy             # builds Docker image, submits for HITL approval
+
+# Studio → HITL queue → Approve
+
+# Chat through GATE (docker-compose)
 curl -X POST http://localhost:8080/domain/<domain-id>/agent/<agent-id>/run \
-  -H "Authorization: Bearer <agent-jwt>" \
-  -H "Content-Type: application/json" \
-  -d '{"message": "Hello! What can you help me with?"}'
-
-# Kubernetes:
-curl -X POST http://gate.atom.local/domain/<domain-id>/agent/<agent-id>/run \
   -H "Authorization: Bearer <agent-jwt>" \
   -H "Content-Type: application/json" \
   -d '{"message": "Hello!"}'
 
-# 11. Stream live logs
-bin/atom logs <agent-id>
+bin/atom logs <agent-id>    # stream live logs
 ```
-
-> **Finding domain_id and agent_id:** In Studio, navigate to an agent's detail page.
-> The URL contains both: `.../domains/<DOMAIN-ID>/agents/<AGENT-ID>`
-> They also appear in the agent detail sidebar on the right.
-
-> **Token lifetime:** The JWT shown at creation is the agent's identity token.
-> It has no expiry — revoke it explicitly via Studio → Agent → Regenerate Token.
-> The *same* token is used for both `ATOM_AGENT_JWT` (in .env) and the `Authorization: Bearer`
-> header when calling the deployed agent through GATE.
 
 ---
 
-## Try the 4 Example Agents (one command)
+## Try 4 example agents instantly
 
 ```bash
 pip install httpx
-
-python examples/provision.py          # Docker Compose
-python examples/provision.py --mode k8s  # Kubernetes
+python examples/provision.py          # docker-compose
+python examples/provision.py --mode k8s  # kubernetes
 ```
 
-Provisions instantly: **Financial Assistant**, **Document Summarizer**, **Risk Checker**, **Support Bot**.
-Prints exact `curl` commands to chat with each agent. See `examples/README.md`.
+Creates: **Financial Assistant**, **Document Summarizer**, **Risk Checker**, **Customer Support Bot** — all deployed, credentials printed, ready to chat. See `examples/README.md`.
 
 ---
 
-## Service Map
+## Services and credentials
 
 ### Docker Compose
 
-| Service | URL | Credentials |
-|---------|-----|-------------|
-| atom-studio UI | http://localhost:3000 | admin@atom.local / **admin123** |
-| atom-studio API | http://localhost:3001/docs | — |
+| Service | URL | Login |
+|---------|-----|-------|
+| atom-studio | http://localhost:3000 | admin@atom.local / **admin123** |
 | GATE | http://localhost:8080 | Bearer JWT |
 | atom-llm | http://localhost:4000 | Bearer **sk-atom-dev** |
-| Grafana | http://localhost:3005 | **admin** / **atom-grafana-dev** |
-| Loki | http://localhost:3100 | — |
-| Tempo | http://localhost:3200 | — |
-| Alloy UI | http://localhost:12345 | — |
-| MinIO console | http://localhost:9001 | **minioadmin** / **changeme** |
-| Postgres | localhost:5432 | **atom** / **changeme** |
-| Redis | localhost:6379 | password: **changeme** |
-| Kafka | localhost:19092 | — |
+| Grafana | http://localhost:3005 | admin / **atom-grafana-dev** |
+| MinIO console | http://localhost:9001 | minioadmin / **changeme** |
+| Postgres | localhost:5432 | atom / **changeme** |
 
-### Kubernetes (kind — port 80, no port suffix needed)
+### Kubernetes (after `sudo make ingress-hosts`)
 
-> Run `sudo make ingress-hosts` once to add `/etc/hosts` entries.
-
-| Service | URL | Credentials |
-|---------|-----|-------------|
+| Service | URL | Login |
+|---------|-----|-------|
 | atom-studio | http://studio.atom.local | admin@atom.local / **admin123** |
-| API / Swagger | http://api.atom.local/docs | — |
 | GATE | http://gate.atom.local | Bearer JWT |
-| Grafana | http://grafana.atom.local | **admin** / **atom-grafana-dev** |
-| Alloy UI | http://alloy.atom.local | — |
-| Loki | http://loki.atom.local | — |
-| Tempo | http://tempo.atom.local | — |
-| MinIO console | http://minio-ui.atom.local | **minioadmin** / **changeme** |
-| Postgres | localhost:5432 (TCP ingress) | **atom** / **changeme** |
-| Redis | localhost:6379 (TCP ingress) | **changeme** |
-| Kafka | localhost:9092 (TCP ingress) | — |
+| Grafana | http://grafana.atom.local | admin / **atom-grafana-dev** |
+| MinIO console | http://minio-ui.atom.local | minioadmin / **changeme** |
+| Postgres | localhost:5432 (TCP via ingress) | atom / **changeme** |
 
 ---
 
-## Key Make Targets
+## CLI
 
 ```bash
-make generate-keys        # JWT RSA key pair (run once)
-make bootstrap            # install all dev tools
+bin/atom login              # authenticate (prompts for Studio URL, email, password)
+bin/atom create             # scaffold a new agent project (interactive)
+bin/atom deploy             # build image + submit for HITL approval
+  --agent-id <uuid>         # (reads .env if not set)
+  --image    <name:tag>     # override image name
+  --message  "text"         # changelog note
+  --skip-build              # skip docker build, use existing image
+bin/atom logs <agent-id>    # stream live logs from a deployed agent
+```
 
-# Docker Compose
-make dev-up / dev-down / dev-down-clean
-make migrate-dev          # DB schema
-make seed-dev             # admin user + sample domain
-make cli-build            # build bin/atom
-
-# Kubernetes
-make infra-up             # cluster + infra services
-make k8s-deploy           # build, load, apply, migrate, seed
-make monitoring-up        # Grafana + Loki + Tempo + Alloy
-make ingress-up           # expose *.atom.local
-sudo make ingress-hosts   # /etc/hosts (one-time)
-make seed-k8s             # re-seed k8s Postgres
-make deploy-from-ghcr     # operator deploy (no local build)
-
-# Testing
-make test                 # unit + integration
-make test-e2e             # E2E (needs running stack)
-make test-load            # k6 load test
-
-# Publishing
-make ghcr-push            # push images to ghcr.io/shreyasy2k/
+Install without building:
+```bash
+# Download binary
+curl -fsSL https://github.com/shreyasY2k/atom/releases/latest/download/atom_$(uname -s | tr '[:upper:]' '[:lower:]')_$(uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/') \
+  -o /usr/local/bin/atom && chmod +x /usr/local/bin/atom
 ```
 
 ---
 
-## Operational Procedures
+## atom-sdk (Python)
 
-`RUNBOOK.md` covers: JWT rotation, HMAC rotation, adding LLM providers, OPA policies,
-scaling GATE, MinIO restore, audit chain validation, agent suspension, cluster rebuild.
-
----
-
-## Architecture
-
-See `ARCHITECTURE.md` for detailed Mermaid diagrams of:
-- System architecture (all services + data flows)
-- Deployment flow (CLI → Studio → HITL → atom-runtime → k8s)
-- Runtime request flow (caller → GATE → OPA → agent → LLM)
-- Agent creation flow
-- HITL decision flow
-- Audit chain flow
-- Memory access flow
-- Token lifecycle
-
-```
-External caller ──▶ GATE :8080 ──▶ agent pod :8080
-                      │ │               │
-                      │ └──▶ atom-llm ──▶ LLM provider
-                      ▼               ▼
-                   Postgres      Kafka ──▶ log-archiver ──▶ MinIO
-                   Redis         └──▶ Studio WebSocket (live logs)
-                   OPA
-
-Grafana Alloy ──▶ Loki (pod logs) + Tempo (OTLP traces) ──▶ Grafana
+```bash
+# Install from GitHub (no PyPI needed)
+pip install "git+https://github.com/shreyasY2k/atom.git#subdirectory=atom-sdk/atom_platform_sdk"
 ```
 
 ---
 
-## Repository Layout
+## Detailed documentation
+
+| Doc | What's in it |
+|-----|-------------|
+| `SETUP.md` | Full setup guide for docker-compose and k8s, verification steps, troubleshooting |
+| `docs/DEVELOPER_GUIDE.md` | Building agents, SDK patterns, tools, OPA policies |
+| `RUNBOOK.md` | JWT rotation, HMAC rotation, adding LLM providers, scaling, restoring data |
+| `ARCHITECTURE.md` | Mermaid diagrams for every flow (request, deployment, HITL, audit chain) |
+| `docs/SECURITY.md` | Security hardening checklist |
+| `examples/README.md` | Example agents + provision script |
+
+---
+
+## Repository layout
 
 ```
 atom/
-├── gate/             Go: JWT auth, OPA, HMAC audit chain, reverse proxy
-├── atom-llm/         LiteLLM fork: virtual keys, model routing
-├── atom-sdk/         agentscope fork: AtomChatModel, HITL hooks
-├── atom-runtime/     k8s/Docker deployment controller
-├── atom-memory/      pgvector + Redis memory library
-├── atom-studio/      FastAPI backend + React/Vite frontend
-├── atom-cli/         Go CLI: login / create / deploy / logs
-├── examples/         4 ready-to-run agents + provision.py script
-├── infra/            Helm values, k8s manifests, kind config, Grafana dashboards
-├── migrations/       golang-migrate SQL (001–012)
-├── policies/         OPA Rego policies (hot-reload)
-├── tests/            e2e/ + load/
-├── docs/             DEVELOPER_GUIDE.md, RUNBOOK.md, SECURITY.md
-├── docker-compose.yml      Operator mode (GHCR images)
-└── docker-compose.dev.yml  Developer mode (build from source)
+├── gate/              Go: JWT auth, OPA, rate-limit, HMAC audit chain, proxy
+├── atom-llm/          LiteLLM fork: virtual keys, model routing to LLM providers
+├── atom-sdk/          agentscope fork: AtomChatModel, HITL hooks, Toolkit
+├── atom-runtime/      Deployment controller: k8s pods or Docker containers
+├── atom-memory/       pgvector (long-term) + Redis (short-term) memory library
+├── atom-studio/       FastAPI API + React UI: domains, agents, HITL, audit, runs
+├── atom-cli/          Go CLI: login / create / deploy / logs
+├── examples/          4 BFSI example agents + provision.py
+├── infra/             Helm values, k8s manifests, Grafana dashboards, kind config
+├── migrations/        Database schema (SQL, 001–012)
+├── policies/          OPA Rego policies (GATE hot-reloads within 5s)
+├── tests/             E2E tests (pytest) + load tests (k6)
+├── docs/              DEVELOPER_GUIDE, RUNBOOK, SECURITY
+├── docker-compose.yml       Operator mode — pulls GHCR images
+└── docker-compose.dev.yml   Developer mode — builds from source
 ```
-
----
-
-## CLI Reference
-
-```bash
-bin/atom login    # authenticate with atom-studio (interactive)
-bin/atom create   # scaffold a new agent project (interactive wizard)
-bin/atom deploy   # build Docker image + submit deployment for HITL approval
-                  #   --agent-id  <uuid>       agent UUID (reads .env if not set)
-                  #   --image     <image:tag>   override image name
-                  #   --message   <text>        deployment changelog
-                  #   --skip-build              skip docker build
-bin/atom logs <agent-id>   # stream live logs for a deployed agent
-```
-
----
-
-## Environment Variables
-
-| Variable | Default | Notes |
-|----------|---------|-------|
-| `GEMINI_API_KEY` | — | **Required** — [get free key](https://aistudio.google.com/app/apikey) |
-| `POSTGRES_PASSWORD` | `changeme` | Must match Helm postgres-values.yaml |
-| `REDIS_PASSWORD` | `changeme` | Must match Helm redis-values.yaml |
-| `PLATFORM_HMAC_SECRET` | pre-set | Do not change after first `make migrate-dev` |
-| `ATOM_ENCRYPTION_KEY` | pre-set | Do not change after first `make migrate-dev` |
-| `LITELLM_MASTER_KEY` | `sk-atom-dev` | atom-llm admin key |
-| `ATOM_LLM_KEY` | `sk-atom-dev` | Same as LITELLM_MASTER_KEY |
-| `MINIO_SECRET_KEY` | `changeme` | MinIO root password |
