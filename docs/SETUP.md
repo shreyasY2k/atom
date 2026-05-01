@@ -50,15 +50,7 @@ migrate -version && psql --version
 git clone https://github.com/shreyasY2k/atom.git && cd atom
 ```
 
-### 2.2 Generate JWT key pair (required for both modes)
-
-```bash
-make generate-keys
-# Creates .keys/jwt_private.pem + .keys/jwt_public.pem
-# These files are gitignored — never commit them.
-```
-
-### 2.3 Configure environment
+### 2.2 Configure environment
 
 ```bash
 cp .env.example .env
@@ -80,6 +72,15 @@ ATOM_LLM_KEY=sk-atom-dev
 > `PLATFORM_HMAC_SECRET` and `ATOM_ENCRYPTION_KEY` are pre-generated in the template.
 > Do **not** change them after your first `make migrate-dev` — they protect the audit chain
 > and encrypted keys in the database.
+
+### 2.3 Generate JWT key pair
+
+```bash
+make generate-keys
+# Creates .keys/jwt_private.pem + .keys/jwt_public.pem
+# These files are gitignored — never commit them.
+# Reads key paths from .env, so cp .env.example .env must run first.
+```
 
 ---
 

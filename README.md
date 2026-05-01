@@ -14,7 +14,7 @@ Every LLM call flows through **GATE** — authenticated, policy-checked, rate-li
 | Python 3.11+ | agent code + dev tooling | `brew install python@3.11` |
 | openssl | JWT key generation | pre-installed on macOS/Linux |
 
-> **Kubernetes only:** also install `kind`, `kubectl`, `helm`, `golang-migrate`, `psql` — see `SETUP.md`.
+> **Kubernetes only:** also install `kind`, `kubectl`, `helm`, `golang-migrate`, `psql` — see [docs/SETUP.md](docs/SETUP.md).
 
 ---
 
@@ -191,12 +191,14 @@ pip install "git+https://github.com/shreyasY2k/atom.git#subdirectory=atom-sdk/at
 
 | Doc | What's in it |
 |-----|-------------|
-| `SETUP.md` | Full setup guide for docker-compose and k8s, verification steps, troubleshooting |
-| `docs/DEVELOPER_GUIDE.md` | Building agents, SDK patterns, tools, OPA policies |
-| `RUNBOOK.md` | JWT rotation, HMAC rotation, adding LLM providers, scaling, restoring data |
-| `ARCHITECTURE.md` | Mermaid diagrams for every flow (request, deployment, HITL, audit chain) |
-| `docs/SECURITY.md` | Security hardening checklist |
-| `examples/README.md` | Example agents + provision script |
+| [docs/SETUP.md](docs/SETUP.md) | Full setup guide for docker-compose and k8s, verification steps, troubleshooting |
+| [docs/DEVELOPER_GUIDE.md](docs/DEVELOPER_GUIDE.md) | Building agents, SDK patterns, tools, OPA policies |
+| [docs/RUNBOOK.md](docs/RUNBOOK.md) | JWT rotation, HMAC rotation, adding LLM providers, scaling, restoring data |
+| [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | Mermaid diagrams for every flow (request, deployment, HITL, audit chain) |
+| [docs/SECURITY.md](docs/SECURITY.md) | Security hardening checklist |
+| [docs/kafka-schemas.md](docs/kafka-schemas.md) | Kafka topic message schemas |
+| [docs/decisions/](docs/decisions/) | Architecture Decision Records (ADR-001 … ADR-015) |
+| [examples/README.md](examples/README.md) | Example agents + provision script |
 
 ---
 
@@ -216,7 +218,8 @@ atom/
 ├── migrations/        Database schema (SQL, 001–012)
 ├── policies/          OPA Rego policies (GATE hot-reloads within 5s)
 ├── tests/             E2E tests (pytest) + load tests (k6)
-├── docs/              DEVELOPER_GUIDE, RUNBOOK, SECURITY
+├── docs/              SETUP, ARCHITECTURE, RUNBOOK, DEVELOPER_GUIDE, SECURITY, kafka-schemas
+│   └── decisions/     Architecture Decision Records (ADR-001 … ADR-015)
 ├── docker-compose.yml       Operator mode — pulls GHCR images
 └── docker-compose.dev.yml   Developer mode — builds from source
 ```
