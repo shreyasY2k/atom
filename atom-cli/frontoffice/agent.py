@@ -16,7 +16,7 @@ load_dotenv()
 import agentscope
 from agentscope.agent import ReActAgent
 from agentscope.message import Msg
-from agentscope.memory import TemporaryMemory
+from agentscope.memory import InMemoryMemory
 
 from config import get_model_config
 from tools import build_toolkit
@@ -36,12 +36,12 @@ def main() -> None:
 
     toolkit = build_toolkit()
 
-    memory = TemporaryMemory()
+    memory = InMemoryMemory()
 
     agent = ReActAgent(
         name="frontoffice",
         model_config_name="atom-default" if mode == "prod" else "dev-model",
-        service_toolkit=toolkit,
+        toolkit=toolkit,
         sys_prompt=(
             "treasure agent  "
             "Think step by step. Use tools when you need external information. "

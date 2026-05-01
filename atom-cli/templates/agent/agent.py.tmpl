@@ -17,7 +17,7 @@ import agentscope
 from agentscope.agent import ReActAgent
 from agentscope.message import Msg
 {{- if .UseMemory}}
-from agentscope.memory import TemporaryMemory
+from agentscope.memory import InMemoryMemory
 {{- end}}
 
 from config import get_model_config
@@ -38,12 +38,12 @@ def main() -> None:
 
     toolkit = build_toolkit()
 {{if .UseMemory}}
-    memory = TemporaryMemory()
+    memory = InMemoryMemory()
 {{end}}
     agent = ReActAgent(
         name="{{.ProjectName}}",
         model_config_name="atom-default" if mode == "prod" else "dev-model",
-        service_toolkit=toolkit,
+        toolkit=toolkit,
         sys_prompt=(
             "{{pystr .Description}}  "
             "Think step by step. Use tools when you need external information. "
