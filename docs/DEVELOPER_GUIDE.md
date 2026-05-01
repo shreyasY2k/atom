@@ -50,15 +50,26 @@ Generated files:
 ### Step 3 — Test in dev mode (no ATOM infrastructure needed)
 
 ```bash
-cp .env.example .env
-# Edit .env — set LLM_API_KEY
-# ATOM_MODE=dev is already set — the agent calls your LLM directly
+# setup-dev.sh installs atom-sdk + requirements + copies .env in one step
+bash setup-dev.sh
 
-pip install -r requirements.txt
+# Then edit .env and set LLM_API_KEY
+# (ATOM_MODE=dev is already set — agent calls LLM directly)
+
 python agent.py           # fully functional interactive loop
 ```
 
 In dev mode the agent calls the LLM provider directly. No GATE, no domain, no token.
+
+> **Why `setup-dev.sh`?** `atom-sdk` (the agentscope fork) is NOT in `requirements.txt`
+> because the Dockerfile installs it from `.atom-sdk/` at build time. For local dev you
+> must install it separately. `setup-dev.sh` reads `atom_root` from `~/.atom/config.json`
+> (written by `atom login`) and runs `pip install <atom_root>/atom-sdk` for you.
+>
+> If `setup-dev.sh` fails or you skipped `atom login`, install manually:
+> ```bash
+> pip install /path/to/atom-repo/atom-sdk
+> ```
 
 ### Step 4 — Create a domain + agent in Studio
 

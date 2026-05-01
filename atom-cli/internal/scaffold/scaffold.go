@@ -54,6 +54,7 @@ func Generate(a *wizard.Answers) error {
 		".gitignore":       "agent/gitignore.tmpl",
 		"README.md":        "agent/README.md.tmpl",
 		"Dockerfile":       "agent/Dockerfile.tmpl",
+		"setup-dev.sh":     "agent/setup-dev.sh.tmpl",
 	}
 
 	for outFile, tmplPath := range files {
@@ -68,6 +69,11 @@ func Generate(a *wizard.Answers) error {
 		filepath.Join(a.ProjectName, ".env"),
 	); err != nil {
 		return fmt.Errorf("create .env: %w", err)
+	}
+
+	// Make setup-dev.sh executable
+	if err := os.Chmod(filepath.Join(a.ProjectName, "setup-dev.sh"), 0o755); err != nil {
+		return fmt.Errorf("chmod setup-dev.sh: %w", err)
 	}
 
 	return nil

@@ -1,5 +1,12 @@
-# atom-sdk (agentscope fork) is installed from .atom-sdk/ by the Dockerfile.
-# Do NOT add agentscope or atom-sdk here — they conflict with the local install.
+# ── NOTE: atom-sdk (agentscope) is NOT listed here ──────────────────────────
+# Production:  Dockerfile installs it from .atom-sdk/ (copied by atom deploy).
+# Local dev:   Install manually from the ATOM monorepo before pip install -r:
+#
+#   ATOM_ROOT=$(python3 -c "import json; print(json.load(open('~/.atom/config.json'))['atom_root'])")
+#   pip install "$ATOM_ROOT/atom-sdk"
+#
+# See README.md step 0 for the full command.
+# ─────────────────────────────────────────────────────────────────────────────
 fastapi>=0.111.0
 uvicorn[standard]>=0.29.0
 python-dotenv>=1.0.0

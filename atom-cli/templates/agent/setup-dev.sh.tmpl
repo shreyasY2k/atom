@@ -1,0 +1,31 @@
+#!/usr/bin/env bash
+# setup-dev.sh — install everything needed to run agent.py in dev mode
+set -e
+
+echo "→ Installing atom-sdk (agentscope fork)..."
+ATOM_ROOT=$(python3 -c "
+import json, os, sys
+cfg = os.path.expanduser('~/.atom/config.json')
+try:
+    print(json.load(open(cfg))['atom_root'])
+except Exception:
+    sys.exit('Run: bin/atom login  first (sets ATOM monorepo path in ~/.atom/config.json)')
+")
+pip install --quiet "$ATOM_ROOT/atom-sdk"
+echo "  ✓ atom-sdk installed from $ATOM_ROOT/atom-sdk"
+
+echo "→ Installing project dependencies..."
+pip install --quiet -r requirements.txt
+echo "  ✓ requirements.txt installed"
+
+echo "→ Configuring .env..."
+if [ ! -f .env ]; then
+    cp .env.example .env
+    echo "  ✓ .env created from .env.example"
+    echo "  ⚠  Edit .env and set LLM_API_KEY before running"
+else
+    echo "  ✓ .env already exists"
+fi
+
+echo ""
+echo "Done. Run: python agent.py"
