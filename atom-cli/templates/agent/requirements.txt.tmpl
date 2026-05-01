@@ -2,8 +2,8 @@
 # Production:  Dockerfile installs it from .atom-sdk/ (copied by atom deploy).
 # Local dev:   Install manually from the ATOM monorepo before pip install -r:
 #
-#   ATOM_ROOT=$(python3 -c "import json; print(json.load(open('~/.atom/config.json'))['atom_root'])")
-#   pip install "$ATOM_ROOT/atom-sdk"
+#   bash setup-dev.sh          # handles venv + atom-sdk + requirements in one step
+#   source .venv/bin/activate  # activate on subsequent sessions
 #
 # See README.md step 0 for the full command.
 # ─────────────────────────────────────────────────────────────────────────────
