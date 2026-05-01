@@ -1,27 +1,34 @@
-name: Publish atom-platform-sdk to PyPI
+name: Publish atom-platform-sdk
+
+# Builds the Python wheel and attaches it to GitHub Releases.
+# Install from GitHub (no PyPI needed):
+#   pip install git+https://github.com/shreyasY2k/atom.git#subdirectory=atom-sdk/atom_platform_sdk
+#
+# Or from a specific release tag:
+#   pip install "atom-platform-sdk @ https://github.com/shreyasY2k/atom/releases/download/v0.1.0/atom_platform_sdk-0.1.0-py3-none-any.whl"
 
 on:
   push:
     tags: ["v*"]
 
 jobs:
-  publish:
+  build-sdk:
+    name: Build and attach SDK wheel to release
     runs-on: ubuntu-latest
-    environment: pypi
     permissions:
-      id-token: write  # needed for trusted PyPI publishing
+      contents: write   # needed to upload release assets
 
     steps:
       - uses: actions/checkout@v4
 
-      - uses: astral-sh/setup-uv@v3
+      - uses: astral-sh/setup-uv@v5
 
-      - name: Build package
+      - name: Build wheel
         run: |
           cd atom-sdk/atom_platform_sdk
-          uv build
+          uv build --wheel
 
-      - name: Publish to PyPI
-        uses: pypa/gh-action-pypi-publish@release/v1
+      - name: Upload wheel to GitHub Release
+        uses: softprops/action-gh-release@v2
         with:
-          packages-dir: atom-sdk/atom_platform_sdk/dist/
+          files: atom-sdk/atom_platform_sdk/dist/*.whl

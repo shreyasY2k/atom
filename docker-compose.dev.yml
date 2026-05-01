@@ -252,20 +252,6 @@ services:
     ports:
       - "3000:3000"
 
-  # ── agentscope-studio (trace viewer stub) ────────────────────────────────────
-  # Accepts agentscope tRPC trace calls (/trpc/registerRun, /trpc/pushMessage)
-  # and serves a minimal web UI at http://localhost:3002.
-  # Agents connect via: agentscope.init(studio_url="http://agentscope-studio:3002")
-  agentscope-studio:
-    image: python:3.12-slim
-    container_name: agentscope-studio
-    working_dir: /app
-    command: sh -c "pip install -q fastapi uvicorn && python studio_stub.py"
-    volumes:
-      - ./agentscope-studio:/app:ro
-    ports:
-      - "3002:3002"
-
   # ── atom-runtime (k8s deployment controller) ─────────────────────────────────
   # Receives approved deployment requests from atom-studio and applies k8s
   # manifests to the kind cluster.

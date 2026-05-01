@@ -135,7 +135,7 @@ dev-up: ## Start full stack via docker-compose (first run may take a few minutes
 	@echo "  Redpanda:            localhost:19092 (external)"
 	@echo ""
 	@echo "  ── Developer ────────────────────────────────────────"
-	@echo "  agentscope-studio:   http://localhost:3002  (trace viewer stub)"
+	@echo "  atom-studio tRPC:    http://localhost:3001  (agentscope.init studio_url)"
 	@echo ""
 	@echo "  Hot-reload frontend: cd atom-studio/frontend && npm run dev  → :5173"
 	@echo "  After first run:     make migrate-dev && make seed-dev"

@@ -14,7 +14,7 @@ flowchart TB
     subgraph tooling["Developer Tooling"]
         ST["atom-studio\n(UI + FastAPI)"]
         CL["atom-cli\n(Go + Cobra)"]
-        REG["Container Registry\n(local kind-registry\nor ECR/GCR)"]
+        REG["Container Registry\n(GHCR / kind load\nor any OCI registry)"]
     end
 
     subgraph gateway["Gateway Layer — atom-system namespace"]
@@ -24,8 +24,8 @@ flowchart TB
 
     subgraph services["Core Services — atom-system namespace"]
         LLM["atom-llm\nLiteLLM fork\nvirtual keys · tools · skills"]
-        MEM["atom-memory\npgvector + Redis"]
-        HITL["HiClaw HITL\nhuman-in-the-loop"]
+        MEM["atom-memory\npgvector + Redis\n(library, not a pod)"]
+        HITL["HITL queue\nin atom-studio API"]
         RUNTIME["atom-runtime\nk8s deployment controller"]
     end
 
@@ -41,8 +41,9 @@ flowchart TB
     end
 
     subgraph obs["Observability — atom-system namespace"]
-        AL["Grafana Alloy\nOTEL collector"]
-        TP["Tempo\ntrace store"]
+        AL["Grafana Alloy\nOTEL collector\n+ log shipper"]
+        LK["Grafana Loki\nlog store"]
+        TP["Grafana Tempo\ntrace store"]
         GR["Grafana\ndashboards"]
     end
 
@@ -75,12 +76,14 @@ flowchart TB
     KF -- "archive\nbatch files" --> MN
     ST -- "read/write\nall schema" --> PG
 
-    GATE -- "OTLP traces" --> AL
+    GATE -- "OTLP traces\n(HTTP :4318)" --> AL
     LLM -- "OTLP traces" --> AL
-    PODS -- "stdout logs" --> AL
+    ST -- "OTLP traces" --> AL
+    PODS -- "k8s pod logs\n(loki.source.kubernetes)" --> AL
     AL -- "traces" --> TP
+    AL -- "logs" --> LK
     TP --- GR
-    AL --- GR
+    LK --- GR
 ```
 
 ---
@@ -156,26 +159,25 @@ sequenceDiagram
     Note over GATE: Next request to this agent:<br/>reads cluster_service_name from Postgres<br/>caches in Redis for 60s<br/>proxies to agent-{id}.atom-agents.svc:8080
 ```
 
-### Container Registry Setup (kind)
+### Container Registry Setup
 
-For local development, kind needs access to a local registry:
-
-```
-kind-registry (docker container, port 5000)
-  ↑ docker push localhost:5000/my-agent:abc123
-  ↓ k8s image pull (configured via containerdConfigPatches in kind cluster.yaml)
-
-atom_agent.yaml:
-  registry: localhost:5000
-  image: my-loan-agent
-```
-
-`atom deploy` internally runs:
+**Local development (kind):**
 ```bash
-docker build -t localhost:5000/my-loan-agent:$(git rev-parse --short HEAD) .
-docker push localhost:5000/my-loan-agent:$(git rev-parse --short HEAD)
-# then submits to studio with the full image ref
+# Build agent image and make it available to the kind cluster
+docker build -t my-loan-agent:$(git rev-parse --short HEAD) .
+kind load docker-image my-loan-agent:$(git rev-parse --short HEAD) --name atom
+# then submit to Studio with image ref: my-loan-agent:<sha>
 ```
+
+**Production / CI:**
+```bash
+docker build -t ghcr.io/shreyasy2k/my-loan-agent:$(git rev-parse --short HEAD) .
+docker push ghcr.io/shreyasy2k/my-loan-agent:$(git rev-parse --short HEAD)
+# Kubernetes pulls from GHCR directly (imagePullPolicy: IfNotPresent)
+```
+
+Platform services (GATE, atom-llm, etc.) are published to `ghcr.io/shreyasy2k/atom-*:latest`
+by GitHub Actions on every merge to main. No local build required for operators.
 
 ---
 
@@ -550,15 +552,19 @@ flowchart TD
 
 | Component | What it knows / controls |
 |---|---|
-| **atom-studio** | Users, domains, agents, tokens, HITL queue, deployment approvals |
-| **GATE** | JWT validation, OPA policy, routing table (from PG), audit chain |
-| **OPA** | Which agents are allowed to call which resources |
-| **atom-llm** | Which virtual key maps to which agent; model access |
-| **atom-runtime** | How to build k8s manifests; what image to deploy |
-| **atom-memory** | Agent-scoped vectors (pgvector) + short-term (Redis) |
-| **atom-sdk** | How to call GATE (not LLM directly); how to request HITL |
-| **Container Registry** | The built agent Docker images |
-| **Postgres** | Source of truth for everything |
-| **Redis** | Fast cache for GATE: rate counters, token revocation, routing |
-| **Kafka** | Ordered event stream for audit + logs |
-| **MinIO** | Long-term archive; S3-compatible |
+| **atom-studio** | Users, domains, agents, tokens, HITL queue, deployment approvals, run history |
+| **GATE** | JWT validation, OPA policy, routing table (from PG+Redis cache), audit chain |
+| **OPA** | Which agents are allowed to call which resources (in-process, hot-reload) |
+| **atom-llm** | Which virtual key maps to which agent; model routing; LiteLLM config |
+| **atom-runtime** | How to build k8s manifests; which image to deploy; RBAC for atom-agents ns |
+| **atom-memory** | Python library (not a pod) — pgvector long-term + Redis short-term per agent |
+| **atom-sdk** | How agents call GATE; how to request HITL; AtomChatModel; memory injection |
+| **Container Registry** | Built agent Docker images (GHCR for platform services, any OCI for agents) |
+| **Postgres** | Source of truth: users, domains, agents, tokens, deployments, audit chain |
+| **Redis** | Fast cache for GATE: rate counters, token revocation blacklist, routing cache |
+| **Kafka (Redpanda)** | Ordered event stream: audit, LLM calls, agent logs, deployments |
+| **MinIO** | Long-term audit archive; S3-compatible; batched by log-archiver service |
+| **Grafana Alloy** | OTLP receiver (traces → Tempo) + k8s log collector (logs → Loki) |
+| **Grafana Loki** | Log aggregation and query backend |
+| **Grafana Tempo** | Distributed trace storage; TraceQL metrics (local-blocks, no Prometheus) |
+| **Grafana** | Unified observability dashboards (GATE, LLM usage, audit chain, agent activity) |

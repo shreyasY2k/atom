@@ -17,23 +17,24 @@ immutable hash-chained audit log.
 
 ## Quick Start
 
-### Option A — Docker Compose (local dev, hot-reload)
+### Option A — Docker Compose, operator mode (pulls from GHCR — no build needed)
 
 ```bash
-# 1. Clone + bootstrap
 git clone https://github.com/shreyasY2k/atom.git && cd atom
-make bootstrap          # installs Go, Python, kubectl, OPA, migrate, etc.
+make generate-keys               # create .keys/ JWT key pair (once)
+cp .env.example .env             # set GEMINI_API_KEY at minimum
+docker compose up -d             # pulls ghcr.io/shreyasy2k/atom-*:latest
+make migrate-dev && make seed-dev
+open http://localhost:3000       # admin@atom.local / admin123
+```
 
-# 2. Keys + env
-make generate-keys      # .keys/jwt_private.pem + jwt_public.pem
-cp .env.example .env    # edit: set GEMINI_API_KEY at minimum
+### Option B — Docker Compose, developer mode (builds from source)
 
-# 3. Start (~20 containers)
-make dev-up
-make migrate-dev
-make seed-dev           # creates admin@atom.local / admin123
-
-# 4. Open
+```bash
+git clone https://github.com/shreyasY2k/atom.git && cd atom
+make generate-keys && cp .env.example .env
+make dev-up                      # builds images locally (~3-5 min first run)
+make migrate-dev && make seed-dev
 open http://localhost:3000
 ```
 
@@ -58,9 +59,11 @@ open http://studio.atom.local
 > # or: go install github.com/shreyasY2k/atom/atom-cli/cmd/atom@latest
 > ```
 
-> **atom-sdk (Python)** — install without cloning:
+> **atom-sdk (Python)** — install direct from GitHub (no PyPI needed):
 > ```bash
-> pip install atom-platform-sdk
+> pip install "git+https://github.com/shreyasY2k/atom.git#subdirectory=atom-sdk/atom_platform_sdk"
+> # or from a specific release wheel:
+> # pip install "atom-platform-sdk @ https://github.com/shreyasY2k/atom/releases/latest/download/atom_platform_sdk-latest-py3-none-any.whl"
 > ```
 
 ### Option C — Kubernetes, developer path (build from source)
@@ -119,7 +122,7 @@ and rate limits on every request, then logs it to the immutable `audit_log_chain
 | GATE | http://localhost:8080 | — (Bearer JWT) | Agent proxy |
 | atom-llm | http://localhost:4000 | Bearer **sk-atom-dev** | LiteLLM gateway |
 | atom-runtime | http://localhost:8090 | — | Deploy controller |
-| Grafana | http://localhost:3005 | **admin** / **admin** | Dashboards |
+| Grafana | http://localhost:3005 | **admin** / **atom-grafana-dev** | Dashboards |
 | Alloy UI | http://localhost:12345 | — | Pipeline visualiser |
 | Loki | http://localhost:3100 | — | Log aggregation API |
 | Tempo | http://localhost:3200 | — | Tracing API |
