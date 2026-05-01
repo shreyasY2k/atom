@@ -68,6 +68,26 @@ services:
       - "9001:9001"
     volumes:
       - minio_data:/data
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  minio-init:
+    image: minio/mc:latest
+    container_name: atom-minio-init
+    restart: "no"
+    depends_on:
+      minio:
+        condition: service_healthy
+    entrypoint: >
+      /bin/sh -c "
+        mc alias set local http://minio:9000 ${MINIO_ACCESS_KEY:-minioadmin} ${MINIO_SECRET_KEY:-changeme};
+        mc mb --ignore-existing local/atom-audit;
+        mc mb --ignore-existing local/atom-policies;
+        echo 'MinIO buckets ready';
+      "
 
   # ── Redpanda (Kafka-compatible broker) ────────────────────────────────────────
   redpanda:
@@ -88,6 +108,25 @@ services:
       - "19092:19092"
     volumes:
       - redpanda_data:/var/lib/redpanda/data
+    healthcheck:
+      test: ["CMD", "rpk", "cluster", "info"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  redpanda-init:
+    image: redpandadata/redpanda:latest
+    container_name: atom-redpanda-init
+    restart: "no"
+    depends_on:
+      redpanda:
+        condition: service_healthy
+    entrypoint: >
+      /bin/sh -c "
+        rpk topic create atom.audit atom.llm atom.agent.logs atom.deployments
+          --brokers redpanda:9092 2>/dev/null || true;
+        echo 'Kafka topics ready';
+      "
 
   # ── OPA (policy engine) ───────────────────────────────────────────────────────
   opa:
@@ -205,6 +244,11 @@ services:
     image: ghcr.io/shreyasy2k/atom-log-archiver:latest
     container_name: atom-log-archiver
     restart: unless-stopped
+    depends_on:
+      redpanda-init:
+        condition: service_completed_successfully
+      minio-init:
+        condition: service_completed_successfully
     env_file: .env
     environment:
       KAFKA_BROKERS: redpanda:9092
