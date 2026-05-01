@@ -69,7 +69,7 @@ async def list_audit_log(
             {
                 "seq": r["seq"],
                 "prev_hash": r["prev_hash"],
-                "event": r["event"],
+                "event": r["event"],  # dict (JSONB decoded by asyncpg codec)
                 "hmac": r["hmac"],
                 "created_at": r["created_at"].isoformat(),
             }
@@ -92,7 +92,7 @@ async def verify_chain(
     async with get_conn() as conn:
         rows = await conn.fetch(
             """
-            SELECT seq, prev_hash, event, hmac
+            SELECT seq, prev_hash, COALESCE(event_raw, '') AS event_raw, hmac
             FROM audit_log_chain
             ORDER BY seq ASC
             LIMIT $1
@@ -104,32 +104,41 @@ async def verify_chain(
         return {"valid": True, "checked": 0, "message": "no entries in audit log"}
 
     entries = list(rows)
+    checked = 0
 
     for i, entry in enumerate(entries):
-        eb = _event_bytes(entry["event"])
+        raw = entry["event_raw"]
+        if not raw:
+            # Pre-migration row — skip, event_raw not stored.
+            continue
+
+        eb = raw.encode()
         expected_mac = _hmac_hex(_SECRET, entry["prev_hash"], eb)
 
         if expected_mac != entry["hmac"]:
             return {
                 "valid": False,
-                "checked": i + 1,
+                "checked": checked,
                 "first_invalid_seq": entry["seq"],
-                "reason": "HMAC mismatch (possible tampering or JSON key-order difference)",
+                "reason": "HMAC mismatch",
             }
 
         if i > 0:
-            prev_eb = _event_bytes(entries[i - 1]["event"])
-            expected_prev = hashlib.sha256(prev_eb).hexdigest()
-            if expected_prev != entry["prev_hash"]:
-                return {
-                    "valid": False,
-                    "checked": i + 1,
-                    "first_invalid_seq": entry["seq"],
-                    "reason": "prev_hash mismatch — chain link broken",
-                }
+            prev_raw = entries[i - 1]["event_raw"]
+            if prev_raw:
+                expected_prev = hashlib.sha256(prev_raw.encode()).hexdigest()
+                if expected_prev != entry["prev_hash"]:
+                    return {
+                        "valid": False,
+                        "checked": checked,
+                        "first_invalid_seq": entry["seq"],
+                        "reason": "prev_hash mismatch — chain link broken",
+                    }
+
+        checked += 1
 
     return {
         "valid": True,
-        "checked": len(entries),
-        "message": f"all {len(entries)} entries verified",
+        "checked": checked,
+        "message": f"all {checked} entries verified",
     }

@@ -143,10 +143,13 @@ func (l *Logger) write(ctx context.Context, j job) error {
 
 	mac := computeHMAC(l.secret, prevHash, eventJSON)
 
+	// event_raw stores the original json.Marshal bytes so the verifier can
+	// recompute HMAC against the exact bytes that were signed, rather than
+	// the Postgres-normalised (alphabetically sorted) JSONB representation.
 	_, err = l.pool.Exec(ctx,
-		`INSERT INTO audit_log_chain (prev_hash, event, hmac)
-		 VALUES ($1, $2, $3)`,
-		prevHash, eventJSON, mac,
+		`INSERT INTO audit_log_chain (prev_hash, event, event_raw, hmac)
+		 VALUES ($1, $2, $3, $4)`,
+		prevHash, eventJSON, string(eventJSON), mac,
 	)
 	if err != nil {
 		return fmt.Errorf("insert audit entry: %w", err)
@@ -160,17 +163,19 @@ func (l *Logger) write(ctx context.Context, j job) error {
 	return nil
 }
 
-// lastHash returns sha256(last event JSON) or "genesis" if the table is empty.
+// lastHash returns sha256(last event_raw bytes) or "genesis" if the table is empty.
+// Uses event_raw (original json.Marshal bytes) not the JSONB column so the hash
+// is consistent regardless of Postgres key-ordering normalisation.
 func (l *Logger) lastHash(ctx context.Context) (string, error) {
-	var eventJSON []byte
+	var raw string
 	err := l.pool.QueryRow(ctx,
-		`SELECT event FROM audit_log_chain ORDER BY seq DESC LIMIT 1`).
-		Scan(&eventJSON)
-	if err != nil {
-		// Table empty — first entry uses genesis hash.
+		`SELECT COALESCE(event_raw, '') FROM audit_log_chain ORDER BY seq DESC LIMIT 1`).
+		Scan(&raw)
+	if err != nil || raw == "" {
+		// Table empty or pre-migration row without event_raw — use genesis.
 		return genesisHash, nil //nolint:nilerr
 	}
-	sum := sha256.Sum256(eventJSON)
+	sum := sha256.Sum256([]byte(raw))
 	return hex.EncodeToString(sum[:]), nil
 }
 
@@ -185,7 +190,7 @@ func computeHMAC(secret []byte, prevHash string, eventJSON []byte) string {
 // Returns nil if the chain is intact.
 func ValidateChain(ctx context.Context, pool *pgxpool.Pool, secret []byte, n int) error {
 	rows, err := pool.Query(ctx,
-		`SELECT seq, prev_hash, event, hmac
+		`SELECT seq, prev_hash, COALESCE(event_raw, '') AS event_raw, hmac
 		 FROM audit_log_chain
 		 ORDER BY seq DESC
 		 LIMIT $1`, n)
@@ -197,14 +202,14 @@ func ValidateChain(ctx context.Context, pool *pgxpool.Pool, secret []byte, n int
 	type entry struct {
 		seq      int64
 		prevHash string
-		event    []byte
+		raw      string // original json.Marshal bytes
 		mac      string
 	}
 
 	entries := make([]entry, 0, n)
 	for rows.Next() {
 		var e entry
-		if scanErr := rows.Scan(&e.seq, &e.prevHash, &e.event, &e.mac); scanErr != nil {
+		if scanErr := rows.Scan(&e.seq, &e.prevHash, &e.raw, &e.mac); scanErr != nil {
 			return fmt.Errorf("scan row: %w", scanErr)
 		}
 		entries = append(entries, e)
@@ -216,12 +221,17 @@ func ValidateChain(ctx context.Context, pool *pgxpool.Pool, secret []byte, n int
 	}
 
 	for i, e := range entries {
-		expected := computeHMAC(secret, e.prevHash, e.event)
+		if e.raw == "" {
+			// Pre-migration row — skip, cannot verify without original bytes.
+			continue
+		}
+		eb := []byte(e.raw)
+		expected := computeHMAC(secret, e.prevHash, eb)
 		if expected != e.mac {
 			return fmt.Errorf("chain broken at seq %d: HMAC mismatch", e.seq)
 		}
-		if i > 0 {
-			prevSum := sha256.Sum256(entries[i-1].event)
+		if i > 0 && entries[i-1].raw != "" {
+			prevSum := sha256.Sum256([]byte(entries[i-1].raw))
 			expectedPrev := hex.EncodeToString(prevSum[:])
 			if expectedPrev != e.prevHash {
 				return fmt.Errorf("chain broken at seq %d: prev_hash mismatch", e.seq)

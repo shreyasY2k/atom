@@ -112,9 +112,22 @@ class KafkaAuditLogger(_Base):  # type: ignore[misc]
         usage = getattr(response_obj, "usage", None) if response_obj else None
         metadata = kwargs.get("litellm_params", {}).get("metadata", {}) or {}
 
+        # ATOM GATE injects X-ATOM-Agent-ID on every proxied request.
+        # The patched LiteLLM fork maps it to metadata["atom_agent_id"].
+        # The unpatched PyPI build exposes it in proxy_server_request.headers.
+        proxy_headers: Dict = kwargs.get("proxy_server_request", {}).get("headers", {}) or {}
+        # Headers may be a dict-like with any casing; normalise to lowercase.
+        if hasattr(proxy_headers, "items"):
+            proxy_headers = {k.lower(): v for k, v in proxy_headers.items()}
+        agent_id = (
+            metadata.get("atom_agent_id")
+            or metadata.get("agent_id")
+            or proxy_headers.get("x-atom-agent-id")
+        )
+
         return {
             "timestamp": datetime.now(timezone.utc).isoformat(),
-            "agent_id": metadata.get("atom_agent_id") or metadata.get("agent_id"),
+            "agent_id": agent_id,
             "model": kwargs.get("model", "unknown"),
             "prompt_tokens": getattr(usage, "prompt_tokens", 0) if usage else 0,
             "completion_tokens": getattr(usage, "completion_tokens", 0) if usage else 0,
