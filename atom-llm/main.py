@@ -42,7 +42,39 @@ if os.environ.get("OTEL_EXPORTER_OTLP_ENDPOINT"):
 
     litellm.callbacks.append(OTELLogger())
 
+def _prisma_push() -> None:
+    """Push LiteLLM's Prisma schema before the server starts.
+
+    LiteLLM wraps its own prisma setup in a silent try/except, so schema
+    failures let the proxy start with missing tables. Running it here makes
+    the failure fatal and immediately visible in the container logs.
+    Only runs when DATABASE_URL is set (skipped in no-DB local mode).
+    """
+    import subprocess
+    import sys
+
+    db_url = os.environ.get("DATABASE_URL")
+    if not db_url:
+        return
+
+    import litellm as _lt
+    schema = os.path.join(os.path.dirname(_lt.__file__), "proxy", "schema.prisma")
+    if not os.path.exists(schema):
+        print(f"[atom-llm] WARNING: schema.prisma not found at {schema}, skipping prisma push", flush=True)
+        return
+
+    print(f"[atom-llm] running prisma db push on {schema}", flush=True)
+    result = subprocess.run(
+        ["prisma", "db", "push", "--schema", schema, "--accept-data-loss", "--skip-generate"],
+        capture_output=False,
+    )
+    if result.returncode != 0:
+        print("[atom-llm] prisma db push failed — aborting startup", flush=True)
+        sys.exit(result.returncode)
+
+
 if __name__ == "__main__":
     import uvicorn
 
+    _prisma_push()
     uvicorn.run(app, host="0.0.0.0", port=int(os.environ.get("PORT", "4000")))

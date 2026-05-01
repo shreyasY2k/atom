@@ -46,14 +46,9 @@ COPY atom_extensions/ /app/atom_extensions/
 COPY main.py /app/main.py
 # Bake in the dev config so the image works standalone (k8s doesn't need a mount)
 COPY config.dev.yaml /app/config.dev.yaml
-# Entrypoint runs prisma db push before starting the proxy so schema errors
-# surface immediately rather than being swallowed by LiteLLM's internal try/except.
-COPY entrypoint.dev.sh /app/entrypoint.dev.sh
-RUN chmod +x /app/entrypoint.dev.sh
-
 ENV PYTHONPATH="/app:${PYTHONPATH}"
 ENV CONFIG_FILE_PATH="/app/config.dev.yaml"
 
 EXPOSE 4000
 
-CMD ["/app/entrypoint.dev.sh"]
+CMD ["python", "/app/main.py"]
