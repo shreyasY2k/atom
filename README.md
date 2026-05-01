@@ -27,8 +27,8 @@ Every LLM call flows through **GATE** — authenticated, policy-checked, rate-li
 git clone https://github.com/shreyasY2k/atom.git && cd atom
 
 # 2. Generate keys and configure
-make generate-keys
 cp .env.example .env
+make generate-keys
 # Edit .env — set GEMINI_API_KEY  (free key: aistudio.google.com/app/apikey)
 # Also set ATOM_ENCRYPTION_KEY and PLATFORM_HMAC_SECRET to real values:
 #   openssl rand -hex 32   (run twice, one value per variable)
@@ -45,7 +45,7 @@ open http://localhost:3000  # admin@atom.local / admin123
 ### Option B — Kubernetes (kind)
 
 ```bash
-make generate-keys && cp .env.example .env   # set keys + GEMINI_API_KEY
+cp .env.example .env && make generate-keys   # then set GEMINI_API_KEY in .env
 make infra-up                                # kind cluster + infra (Postgres, Redis, etc.)
 make k8s-deploy                              # build + deploy all services
 make monitoring-up                           # Grafana + Loki + Tempo
