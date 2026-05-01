@@ -1,6 +1,9 @@
 import asyncio
 import json
+import logging
 from datetime import datetime, timedelta, timezone
+
+log = logging.getLogger(__name__)
 
 from ..database import get_conn
 from ..kafka_producer import emit as kafka_emit
@@ -115,23 +118,27 @@ async def expire_stale_hitl() -> None:
     """Background loop: expire pending HITL records whose deadline has passed."""
     while True:
         await asyncio.sleep(5)
-        async with get_conn() as conn:
-            rows = await conn.fetch(
-                """
-                UPDATE hitl_workflows
-                SET status='timed_out'
-                WHERE status='pending' AND expires_at < now()
-                RETURNING id, agent_id
-                """
-            )
-            for row in rows:
-                agent = await conn.fetchrow(
-                    "SELECT hitl_fallback FROM agents WHERE id=$1", row["agent_id"]
+        try:
+            async with get_conn() as conn:
+                rows = await conn.fetch(
+                    """
+                    UPDATE hitl_workflows
+                    SET status='timed_out'
+                    WHERE status='pending' AND expires_at < now()
+                    RETURNING id, agent_id
+                    """
                 )
-                await manager.broadcast(
-                    {
-                        "type": "DECISION_TIMED_OUT",
-                        "hitl_id": str(row["id"]),
-                        "fallback": agent["hitl_fallback"] if agent else "ABORT",
-                    }
-                )
+                for row in rows:
+                    agent = await conn.fetchrow(
+                        "SELECT hitl_fallback FROM agents WHERE id=$1", row["agent_id"]
+                    )
+                    await manager.broadcast(
+                        {
+                            "type": "DECISION_TIMED_OUT",
+                            "hitl_id": str(row["id"]),
+                            "fallback": agent["hitl_fallback"] if agent else "ABORT",
+                        }
+                    )
+        except Exception as exc:
+            # Typically fires before migrations run — table doesn't exist yet.
+            log.debug("expire_stale_hitl: %s", exc)

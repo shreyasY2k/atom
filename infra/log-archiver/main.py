@@ -72,8 +72,18 @@ async def _flush(s3, topic: str, messages: list[bytes]) -> None:
     log.info("archived %d msg(s) → s3://%s/%s", len(messages), MINIO_BUCKET, key)
 
 
+def _ensure_bucket(s3) -> None:
+    """Create the MinIO bucket if it doesn't exist yet."""
+    try:
+        s3.head_bucket(Bucket=MINIO_BUCKET)
+    except Exception:
+        s3.create_bucket(Bucket=MINIO_BUCKET)
+        log.info("created MinIO bucket: %s", MINIO_BUCKET)
+
+
 async def run() -> None:
     s3 = _s3()
+    _ensure_bucket(s3)
     log.info(
         "connecting to Kafka brokers=%s topics=%s group=%s",
         KAFKA_BROKERS,

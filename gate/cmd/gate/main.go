@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -178,6 +179,11 @@ func otelMiddleware(tp *sdktrace.TracerProvider) fiber.Handler {
 }
 
 func setupOTEL(ctx context.Context, endpoint string) (*sdktrace.TracerProvider, error) {
+	// otlptracehttp.WithEndpoint expects "host:port" with no scheme.
+	// Strip http:// or https:// so a full URL in OTEL_EXPORTER_OTLP_ENDPOINT
+	// doesn't produce the "http://http://..." double-prefix error.
+	endpoint = strings.TrimPrefix(endpoint, "https://")
+	endpoint = strings.TrimPrefix(endpoint, "http://")
 	exp, err := otlptracehttp.New(ctx,
 		otlptracehttp.WithEndpoint(endpoint),
 		otlptracehttp.WithInsecure(),

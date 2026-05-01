@@ -1,7 +1,10 @@
 import hashlib
 import json
+import logging
 
 import httpx
+
+log = logging.getLogger(__name__)
 
 from ..config import get_settings
 from ..kafka_producer import emit as kafka_emit
@@ -151,6 +154,9 @@ async def trigger_deployment(hitl_payload: dict, conn) -> None:
                     "agent_jwt": agent_jwt,
                 },
             )
-    except Exception:
-        # atom-runtime may be unavailable in dev; deployment stays 'approved'
-        pass
+    except Exception as exc:
+        log.error(
+            "trigger_deployment: atom-runtime call failed for deployment %s — %s",
+            deployment_id,
+            exc,
+        )

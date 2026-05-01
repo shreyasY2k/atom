@@ -118,6 +118,8 @@ services:
       JWT_PRIVATE_KEY_PATH: /etc/atom/jwt_private.pem
       GATE_PORT: "8080"
       GATE_ENV: production
+      # GATE's Go OTEL SDK expects host:port (no scheme); override .env which has http:// prefix
+      OTEL_EXPORTER_OTLP_ENDPOINT: alloy:4318
     volumes:
       - ./.keys:/etc/atom:ro
       - ./policies:/policies:ro
@@ -137,6 +139,8 @@ services:
       KAFKA_BROKERS: redpanda:9092
       STORE_MODEL_IN_DB: "False"
       DISABLE_SPEND_LOGS: "True"
+      # Override .env so Python OTEL exporter reaches alloy inside Docker (not localhost)
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://alloy:4318
     ports:
       - "4000:4000"
 
@@ -157,6 +161,8 @@ services:
       KAFKA_BROKERS: redpanda:9092
       JWT_PRIVATE_KEY_PATH: /etc/atom/jwt_private.pem
       JWT_PUBLIC_KEY_PATH: /etc/atom/jwt_public.pem
+      # Override .env so Python OTEL exporter reaches alloy inside Docker (not localhost)
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://alloy:4318
     volumes:
       - ./.keys:/etc/atom:ro
     ports:
@@ -183,6 +189,10 @@ services:
     environment:
       DATABASE_URL: postgresql://atom:${POSTGRES_PASSWORD:-changeme}@postgres:5432/atom?sslmode=disable
       ATOM_STUDIO_API_URL: http://atom-studio-api:3001
+      # Self-URL used when registering with atom-studio; must be the docker service name.
+      # Without this the default is http://localhost:8090 which resolves inside atom-studio's
+      # own container (wrong host) and trigger_deployment silently fails.
+      ATOM_RUNTIME_SELF_URL: http://atom-runtime:8090
       RUNTIME_BACKEND: docker
       DOCKER_NETWORK: atom_default
     volumes:
