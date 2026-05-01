@@ -1,27 +1,59 @@
-"""ATOM Example Agent — summarizer"""
+"""
+summarizer — standalone dev mode
+
+Run locally for testing:
+    pip install agentscope openai python-dotenv
+    ATOM_MODEL_NAME=gemini-2.5-flash python agent.py
+
+In production, server.py wraps this behind FastAPI.
+"""
 import os
-from agentscope.agents import ReActAgent
+from dotenv import load_dotenv
+load_dotenv()
+
+import agentscope
+from agentscope.agent import ReActAgent
+from agentscope.formatter import OpenAIChatFormatter
 from agentscope.message import Msg
+from agentscope.model import AtomChatModel
 
-SYSTEM_PROMPT = """You are a document summarisation specialist. When given text, produce:
-1. A 3-sentence executive summary
-2. Key points as bullets (max 5)
-3. Any action items or decisions required
-Be concise and precise."""
+from tools import build_toolkit
 
+SYS_PROMPT = "You are a document summarisation specialist. Produce an executive summary, key points, and action items."
 
 
-def build_agent():
+def build_agent() -> ReActAgent:
+    agentscope.init()
+    model = AtomChatModel(
+        model_name=os.getenv("ATOM_MODEL_NAME", "gemini-2.5-flash"),
+        stream=False,
+    )
     return ReActAgent(
         name="summarizer",
-        model_config_name="atom-default",
-        sys_prompt=SYSTEM_PROMPT,
-        max_iters=3,
+        model=model,
+        formatter=OpenAIChatFormatter(),
+        toolkit=build_toolkit(),
+        sys_prompt=SYS_PROMPT,
+        max_iters=5,
     )
 
-def run(message: str, agent=None) -> str:
-    if agent is None:
-        agent = build_agent()
-    from agentscope.message import Msg
-    reply = agent(Msg(name="user", role="user", content=message))
-    return reply.content if reply else "No response"
+
+def main() -> None:
+    print("Document summarisation specialist")
+    print("Type 'exit' to quit.\n")
+    agent = build_agent()
+    while True:
+        user_input = input("You: ").strip()
+        if user_input.lower() in ("exit", "quit", "q"):
+            break
+        if not user_input:
+            continue
+        import asyncio
+        response = asyncio.run(agent(Msg(name="user", content=user_input, role="user")))
+        blocks = response.get_content_blocks("text")
+        reply = " ".join(b.get("text", "") for b in blocks) if blocks else str(response.content)
+        print(f"\nAgent: {reply}\n")
+
+
+if __name__ == "__main__":
+    main()

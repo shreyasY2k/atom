@@ -190,9 +190,24 @@ class StudioClient:
 # ── Build + load images ───────────────────────────────────────────────────────
 
 def build_image(agent_key: str, image_tag: str):
+    agent_dir = AGENTS_DIR / agent_key
+    sdk_src   = EXAMPLES_DIR.parent / "atom-sdk"
+    sdk_dst   = agent_dir / ".atom-sdk"
+
+    # Copy atom-sdk into agent dir (same as what atom deploy does)
+    if sdk_src.exists():
+        info(f"Copying atom-sdk → {sdk_dst}...")
+        run(["rm", "-rf", str(sdk_dst)])
+        run(["cp", "-r", str(sdk_src), str(sdk_dst)])
+    else:
+        info("atom-sdk not found — agent must install agentscope from PyPI")
+
     info(f"Building {image_tag}...")
-    run(["docker", "build", "-t", image_tag, str(AGENTS_DIR / agent_key), "-q"])
+    run(["docker", "build", "-t", image_tag, str(agent_dir), "-q"])
     ok(f"Built {image_tag}")
+
+    # Clean up .atom-sdk copy from agent dir
+    run(["rm", "-rf", str(sdk_dst)])
 
 
 def load_image_k8s(image_tag: str, cluster: str = "atom"):

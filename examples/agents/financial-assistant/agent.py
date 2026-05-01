@@ -1,38 +1,59 @@
 """
-ATOM Example Agent — Financial Assistant
+financial-assistant — standalone dev mode
 
-Answers BFSI compliance and regulatory questions.
-Demonstrates: ReAct agent, Gemini, memory injection.
+Run locally for testing:
+    pip install agentscope openai python-dotenv
+    ATOM_MODEL_NAME=gemini-2.5-flash python agent.py
+
+In production, server.py wraps this behind FastAPI.
 """
-
 import os
-from agentscope.agents import ReActAgent
+from dotenv import load_dotenv
+load_dotenv()
+
+import agentscope
+from agentscope.agent import ReActAgent
+from agentscope.formatter import OpenAIChatFormatter
 from agentscope.message import Msg
+from agentscope.model import AtomChatModel
 
-SYSTEM_PROMPT = """You are a BFSI (Banking, Financial Services and Insurance) compliance
-assistant specialising in Indian regulatory frameworks. You help teams understand:
-- RBI guidelines and circulars
-- SEBI regulations
-- DPDP Act (Digital Personal Data Protection)
-- PCI-DSS requirements
-- KYC/AML obligations
+from tools import build_toolkit
 
-Always cite the relevant regulation or circular when answering.
-If unsure, say so clearly — do not fabricate regulatory text."""
+SYS_PROMPT = "You are a BFSI compliance assistant specialising in Indian regulatory frameworks. Always cite the relevant regulation."
 
 
-def build_agent():
+def build_agent() -> ReActAgent:
+    agentscope.init()
+    model = AtomChatModel(
+        model_name=os.getenv("ATOM_MODEL_NAME", "gemini-2.5-flash"),
+        stream=False,
+    )
     return ReActAgent(
         name="financial-assistant",
-        model_config_name="atom-default",
-        sys_prompt=SYSTEM_PROMPT,
-        max_iters=3,
+        model=model,
+        formatter=OpenAIChatFormatter(),
+        toolkit=build_toolkit(),
+        sys_prompt=SYS_PROMPT,
+        max_iters=5,
     )
 
 
-def run(message: str, agent=None) -> str:
-    if agent is None:
-        agent = build_agent()
-    msg = Msg(name="user", role="user", content=message)
-    reply = agent(msg)
-    return reply.content if reply else "No response"
+def main() -> None:
+    print("BFSI compliance and regulatory Q&A")
+    print("Type 'exit' to quit.\n")
+    agent = build_agent()
+    while True:
+        user_input = input("You: ").strip()
+        if user_input.lower() in ("exit", "quit", "q"):
+            break
+        if not user_input:
+            continue
+        import asyncio
+        response = asyncio.run(agent(Msg(name="user", content=user_input, role="user")))
+        blocks = response.get_content_blocks("text")
+        reply = " ".join(b.get("text", "") for b in blocks) if blocks else str(response.content)
+        print(f"\nAgent: {reply}\n")
+
+
+if __name__ == "__main__":
+    main()

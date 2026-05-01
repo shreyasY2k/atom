@@ -1,7 +1,9 @@
-agentscope>=0.1.0
-fastapi>=0.100.0
-uvicorn[standard]>=0.24.0
-httpx>=0.27.0
+# atom-sdk (agentscope fork) is installed from .atom-sdk/ by the Dockerfile.
+# The provision.py script copies atom-sdk/ → .atom-sdk/ before docker build.
+fastapi>=0.111.0
+uvicorn[standard]>=0.29.0
 python-dotenv>=1.0.0
+aiokafka>=0.11.0
+httpx>=0.27.0
 opentelemetry-sdk>=1.25.0
 opentelemetry-exporter-otlp-proto-http>=1.25.0
