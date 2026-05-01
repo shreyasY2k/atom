@@ -4,10 +4,10 @@ import logging
 
 import httpx
 
-log = logging.getLogger(__name__)
-
 from ..config import get_settings
 from ..kafka_producer import emit as kafka_emit
+
+log = logging.getLogger(__name__)
 
 # atom-runtime URL can be overridden at runtime via /api/runtime/register
 _runtime_url: str | None = None

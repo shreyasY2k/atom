@@ -3,11 +3,11 @@ import json
 import logging
 from datetime import datetime, timedelta, timezone
 
-log = logging.getLogger(__name__)
-
 from ..database import get_conn
 from ..kafka_producer import emit as kafka_emit
 from ..ws.manager import manager
+
+log = logging.getLogger(__name__)
 
 
 async def create_hitl_request(
