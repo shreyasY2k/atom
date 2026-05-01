@@ -48,7 +48,6 @@ func Generate(a *wizard.Answers) error {
 		"agent.py":         "agent/agent.py.tmpl",
 		"server.py":        "agent/server.py.tmpl",
 		"tools.py":         "agent/tools.py.tmpl",
-		"config.py":        "agent/config.py.tmpl",
 		"requirements.txt": "agent/requirements.txt.tmpl",
 		".env.example":     "agent/env.example.tmpl",
 		".gitignore":       "agent/gitignore.tmpl",
