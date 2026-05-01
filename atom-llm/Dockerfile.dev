@@ -12,12 +12,13 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
 # Install LiteLLM and ATOM runtime dependencies from PyPI.
+# Pinned to a specific version so the Prisma schema stays stable across
+# rebuilds — an unpinned version can upgrade to a new schema that conflicts
+# with the existing postgres_data volume and breaks the prisma db push on startup.
 # confluent-kafka may fail on ARM64 wheels — fall back to kafka-python.
-# Pin LiteLLM to a version that supports the dot-format startup hook so
-# docker-compose and k8s both use the same format.
 RUN pip install --no-cache-dir \
-        "litellm[proxy]>=1.50.0,<2.0.0" \
-        prisma \
+        "litellm[proxy]==1.83.14" \
+        "prisma==0.15.0" \
         asyncpg \
         httpx \
         python-dotenv \
@@ -25,8 +26,8 @@ RUN pip install --no-cache-dir \
         opentelemetry-exporter-otlp-proto-http \
         confluent-kafka 2>/dev/null \
     || pip install --no-cache-dir \
-        "litellm[proxy]>=1.50.0,<2.0.0" \
-        prisma \
+        "litellm[proxy]==1.83.14" \
+        "prisma==0.15.0" \
         asyncpg \
         httpx \
         python-dotenv \
@@ -45,10 +46,14 @@ COPY atom_extensions/ /app/atom_extensions/
 COPY main.py /app/main.py
 # Bake in the dev config so the image works standalone (k8s doesn't need a mount)
 COPY config.dev.yaml /app/config.dev.yaml
+# Entrypoint runs prisma db push before starting the proxy so schema errors
+# surface immediately rather than being swallowed by LiteLLM's internal try/except.
+COPY entrypoint.dev.sh /app/entrypoint.dev.sh
+RUN chmod +x /app/entrypoint.dev.sh
 
 ENV PYTHONPATH="/app:${PYTHONPATH}"
 ENV CONFIG_FILE_PATH="/app/config.dev.yaml"
 
 EXPOSE 4000
 
-CMD ["python", "/app/main.py"]
+CMD ["/app/entrypoint.dev.sh"]

@@ -101,6 +101,7 @@ atom-llm/*
 !atom-llm/main.py
 !atom-llm/Dockerfile
 !atom-llm/Dockerfile.dev
+!atom-llm/entrypoint.dev.sh
 !atom-llm/config.dev.yaml
 !atom-llm/UPSTREAM_DIFF.md
 !atom-llm/LICENSE

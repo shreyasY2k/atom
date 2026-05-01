@@ -19,8 +19,13 @@ from pydantic import BaseModel
 router = APIRouter(prefix="/atom", tags=["atom-provision"])
 
 LITELLM_BASE = "http://localhost:4000"
-MASTER_KEY = os.environ["LITELLM_MASTER_KEY"]
-HEADERS = {"Authorization": f"Bearer {MASTER_KEY}", "Content-Type": "application/json"}
+
+
+def _auth_headers() -> dict:
+    key = os.environ.get("LITELLM_MASTER_KEY")
+    if not key:
+        raise RuntimeError("LITELLM_MASTER_KEY is not set")
+    return {"Authorization": f"Bearer {key}", "Content-Type": "application/json"}
 
 
 # ── Request / Response models ─────────────────────────────────────────────────
@@ -71,7 +76,7 @@ async def provision_domain(req: ProvisionDomainRequest):
     async with httpx.AsyncClient() as client:
         resp = await client.post(
             f"{LITELLM_BASE}/team/new",
-            headers=HEADERS,
+            headers=_auth_headers(),
             json={
                 "team_id": req.domain_id,
                 "team_alias": req.domain_name,
@@ -110,7 +115,7 @@ async def provision_agent(req: ProvisionAgentRequest):
     async with httpx.AsyncClient() as client:
         resp = await client.post(
             f"{LITELLM_BASE}/key/generate",
-            headers=HEADERS,
+            headers=_auth_headers(),
             json=key_body,
         )
         if resp.status_code not in (200, 201):
@@ -134,7 +139,7 @@ async def deprovision_agent(req: DeprovisionAgentRequest):
     async with httpx.AsyncClient() as client:
         resp = await client.post(
             f"{LITELLM_BASE}/key/delete",
-            headers=HEADERS,
+            headers=_auth_headers(),
             json={"keys": [req.virtual_key]},
         )
         if resp.status_code not in (200, 201):
@@ -148,7 +153,7 @@ async def deprovision_domain(req: DeprovisionDomainRequest):
     async with httpx.AsyncClient() as client:
         resp = await client.post(
             f"{LITELLM_BASE}/team/delete",
-            headers=HEADERS,
+            headers=_auth_headers(),
             json={"team_ids": [req.litellm_id]},
         )
         if resp.status_code not in (200, 201):
