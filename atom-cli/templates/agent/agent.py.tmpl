@@ -14,7 +14,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 import agentscope
-from agentscope.agents import ReActAgent
+from agentscope.agent import ReActAgent
 from agentscope.message import Msg
 {{- if .UseMemory}}
 from agentscope.memory import TemporaryMemory
