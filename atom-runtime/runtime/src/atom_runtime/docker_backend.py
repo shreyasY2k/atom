@@ -52,6 +52,11 @@ def _remove_existing(client: docker.DockerClient, name: str) -> None:
         pass
 
 
+def _compose_project_from_network(network: str) -> str:
+    """Derive compose project name from the network name (strip _default suffix)."""
+    return network.removesuffix("_default") if network.endswith("_default") else network
+
+
 def _run_container(
     client: docker.DockerClient,
     agent_id: str,
@@ -88,7 +93,8 @@ def _run_container(
         labels={
             "atom.io/agent-id": agent_id,
             "atom.io/domain-id": domain_id,
-            "com.docker.compose.project": "atom-dev",
+            # Align with the compose project so `docker compose ps` shows agent containers.
+            "com.docker.compose.project": _compose_project_from_network(network),
         },
         restart_policy={"Name": "unless-stopped"},
     )
