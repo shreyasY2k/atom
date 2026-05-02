@@ -5,6 +5,7 @@ project_name: atom
 before:
   hooks:
     - go work sync
+    - bash -c 'cd atom-cli && go mod tidy'
 
 builds:
   - id: atom-cli
@@ -28,11 +29,11 @@ builds:
 
 archives:
   - id: atom-cli
-    builds: [atom-cli]
+    ids: [atom-cli]
     name_template: "atom_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
     format_overrides:
       - goos: windows
-        format: zip
+        formats: [zip]
 
 checksum:
   name_template: "atom_{{ .Version }}_checksums.txt"
