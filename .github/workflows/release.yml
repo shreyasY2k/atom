@@ -79,7 +79,7 @@ jobs:
           # made builds with existing images take 15+ min.
           cache-from: type=registry,ref=${{ env.REGISTRY }}/${{ env.ORG }}/${{ matrix.name }}:latest
           cache-to: type=inline
-          platforms: ${{ startsWith(github.ref, 'refs/tags/') && 'linux/amd64,linux/arm64' || 'linux/amd64' }}
+          platforms: linux/amd64,linux/arm64
 
   # ── CLI binaries → GitHub Release ──────────────────────────────────────────
   # This job only runs on version tags (e.g. v0.1.0), not on every main push.

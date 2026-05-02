@@ -140,7 +140,7 @@ services:
   # ── GATE ─────────────────────────────────────────────────────────────────────
   gate:
     image: ghcr.io/shreyasy2k/atom-gate:latest
-    platform: linux/amd64
+
     container_name: atom-gate
     restart: unless-stopped
     depends_on:
@@ -169,7 +169,7 @@ services:
   # ── atom-llm (LiteLLM gateway) ────────────────────────────────────────────────
   atom-llm:
     image: ghcr.io/shreyasy2k/atom-llm:latest
-    platform: linux/amd64
+
     container_name: atom-llm
     restart: unless-stopped
     depends_on:
@@ -188,7 +188,7 @@ services:
   # ── atom-studio API ───────────────────────────────────────────────────────────
   atom-studio-api:
     image: ghcr.io/shreyasy2k/atom-studio-api:latest
-    platform: linux/amd64
+
     container_name: atom-studio-api
     restart: unless-stopped
     depends_on:
@@ -213,7 +213,7 @@ services:
   # ── atom-studio UI ────────────────────────────────────────────────────────────
   atom-studio-ui:
     image: ghcr.io/shreyasy2k/atom-studio-ui:latest
-    platform: linux/amd64
+
     container_name: atom-studio-ui
     restart: unless-stopped
     depends_on:
@@ -224,7 +224,7 @@ services:
   # ── atom-runtime ──────────────────────────────────────────────────────────────
   atom-runtime:
     image: ghcr.io/shreyasy2k/atom-runtime:latest
-    platform: linux/amd64
+
     container_name: atom-runtime
     restart: unless-stopped
     depends_on:
@@ -251,7 +251,7 @@ services:
   # ── log-archiver (Kafka → MinIO) ──────────────────────────────────────────────
   log-archiver:
     image: ghcr.io/shreyasy2k/atom-log-archiver:latest
-    platform: linux/amd64
+
     container_name: atom-log-archiver
     restart: unless-stopped
     depends_on:
