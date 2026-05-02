@@ -23,13 +23,15 @@ type deployResp struct {
 }
 
 // BuildImage runs `docker build -t image .` in the given directory.
-// If GITHUB_TOKEN is set it is injected as a BuildKit secret so pip can
-// clone from private GitHub repos without baking the token into any layer.
+// Automatically injects a GitHub token as a build-arg so pip can clone
+// from private repos. Token resolution order:
+//  1. GITHUB_TOKEN env var (explicit)
+//  2. git credential store (macOS Keychain, Windows Credential Manager, etc.)
 func BuildImage(dir, image string) error {
 	args := []string{"build", "-t", image, dir}
-	if token := os.Getenv("GITHUB_TOKEN"); token != "" {
+	if token := resolveGitHubToken(); token != "" {
 		args = append(args, "--build-arg", "GITHUB_TOKEN="+token)
-		fmt.Println("  [docker] GITHUB_TOKEN detected — passing as build-arg for private repo access")
+		fmt.Println("  [docker] GitHub credentials found — passing token as build-arg")
 	}
 	cmd := exec.Command("docker", args...)
 	cmd.Stdout = newPrefixWriter("  [docker] ")
@@ -38,6 +40,27 @@ func BuildImage(dir, image string) error {
 		return fmt.Errorf("docker build failed: %w", err)
 	}
 	return nil
+}
+
+// resolveGitHubToken returns a GitHub token from the environment or the
+// system git credential store (macOS Keychain, Windows Credential Manager, etc.).
+func resolveGitHubToken() string {
+	if t := os.Getenv("GITHUB_TOKEN"); t != "" {
+		return t
+	}
+	// Ask git's credential helper for github.com credentials.
+	cmd := exec.Command("git", "credential", "fill")
+	cmd.Stdin = strings.NewReader("protocol=https\nhost=github.com\n\n")
+	out, err := cmd.Output()
+	if err != nil {
+		return ""
+	}
+	for _, line := range strings.Split(string(out), "\n") {
+		if strings.HasPrefix(line, "password=") {
+			return strings.TrimPrefix(line, "password=")
+		}
+	}
+	return ""
 }
 
 // Submit calls POST /api/deployments/{agent_id} on atom-studio.
