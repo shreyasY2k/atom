@@ -171,9 +171,8 @@ bin/atom logs <agent-id>    # stream live logs from a deployed agent
 
 Install without building:
 ```bash
-# Download binary
-curl -fsSL https://github.com/shreyasY2k/atom/releases/latest/download/atom_$(uname -s | tr '[:upper:]' '[:lower:]')_$(uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/') \
-  -o /usr/local/bin/atom && chmod +x /usr/local/bin/atom
+curl -fsSL https://github.com/shreyasY2k/atom/releases/latest/download/atom_$(uname -s | tr '[:upper:]' '[:lower:]')_$(uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/').tar.gz \
+  | tar -xz -C /usr/local/bin atom
 ```
 
 ---

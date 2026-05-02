@@ -27,7 +27,8 @@ builds:
 archives:
   - id: atom-cli
     ids: [atom-cli]
-    name_template: "atom_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    # No version in filename so /releases/latest/download/atom_<os>_<arch>.tar.gz works
+    name_template: "atom_{{ .Os }}_{{ .Arch }}"
     format_overrides:
       - goos: windows
         formats: [zip]
