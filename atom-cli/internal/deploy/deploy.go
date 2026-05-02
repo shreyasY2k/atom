@@ -28,8 +28,8 @@ type deployResp struct {
 func BuildImage(dir, image string) error {
 	args := []string{"build", "-t", image, dir}
 	if token := os.Getenv("GITHUB_TOKEN"); token != "" {
-		args = append(args, "--secret", "id=github_token,env=GITHUB_TOKEN")
-		fmt.Println("  [docker] GITHUB_TOKEN detected — injecting as build secret for private repo access")
+		args = append(args, "--build-arg", "GITHUB_TOKEN="+token)
+		fmt.Println("  [docker] GITHUB_TOKEN detected — passing as build-arg for private repo access")
 	}
 	cmd := exec.Command("docker", args...)
 	cmd.Stdout = newPrefixWriter("  [docker] ")

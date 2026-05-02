@@ -6,15 +6,11 @@ RUN apt-get update && apt-get install -y --no-install-recommends git \
 
 COPY requirements.txt .
 
-# Inject GITHUB_TOKEN via BuildKit secret so pip can clone from private repos.
-# The token is never stored in any image layer.
-# Public repos: build without --secret (required=false skips credential setup).
-# Private repos: atom deploy passes --secret id=github_token,env=GITHUB_TOKEN
-#   when GITHUB_TOKEN is set in the environment.
-RUN --mount=type=secret,id=github_token,required=false \
-    TOKEN=$(cat /run/secrets/github_token 2>/dev/null || echo "") && \
-    if [ -n "$TOKEN" ]; then \
-      git config --global url."https://${TOKEN}@github.com/".insteadOf "https://github.com/"; \
+# GITHUB_TOKEN is passed by `atom deploy` when set in the environment.
+# Required for private repos; omit for public repos.
+ARG GITHUB_TOKEN
+RUN if [ -n "$GITHUB_TOKEN" ]; then \
+      git config --global url."https://${GITHUB_TOKEN}@github.com/".insteadOf "https://github.com/"; \
     fi && \
     pip install --no-cache-dir -r requirements.txt && \
     rm -f /root/.gitconfig
