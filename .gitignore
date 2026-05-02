@@ -90,6 +90,9 @@ temp/
 # === atom deploy build artifact ===
 **/.atom-sdk/
 
+# === Agent projects (scaffolded by atom create; live in their own repos) ===
+treasury-frontoffice/
+
 # =============================================================================
 # === Upstream clone bulk — only ATOM-specific files are tracked            ===
 # =============================================================================
