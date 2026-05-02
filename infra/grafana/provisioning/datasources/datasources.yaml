@@ -41,11 +41,11 @@ datasources:
       lokiSearch:
         datasourceUid: loki
 
-  # ── Alloy — self-observability metrics ─────────────────────────────────────
-  - name: Alloy
+  # ── Prometheus — atom-llm metrics + Alloy self-metrics ─────────────────────
+  - name: Prometheus
     type: prometheus
-    uid: alloy
+    uid: prometheus
     access: proxy
-    url: http://alloy:12345
+    url: http://prometheus:9090
     isDefault: false
     editable: true

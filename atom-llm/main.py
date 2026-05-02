@@ -9,6 +9,8 @@ Config loading: LiteLLM reads CONFIG_FILE_PATH (or WORKER_CONFIG) env var
 during its lifespan startup event. Set CONFIG_FILE_PATH to the YAML path.
 """
 
+import json
+import logging
 import os
 
 from dotenv import load_dotenv
@@ -28,6 +30,41 @@ from atom_extensions.tools_skills import atom_tools_router  # noqa: E402
 app.include_router(provision_router)
 app.include_router(atom_tools_router)
 
+# ── JSON logging with trace_id ────────────────────────────────────────────────
+# Outputs structured JSON so Alloy's regex '"trace_id":"(\w+)"' can extract
+# trace IDs and Grafana can link Loki log lines → Tempo traces.
+
+def _get_trace_id() -> str:
+    try:
+        from opentelemetry import trace  # noqa: PLC0415
+        ctx = trace.get_current_span().get_span_context()
+        return format(ctx.trace_id, "032x") if ctx and ctx.is_valid else ""
+    except Exception:
+        return ""
+
+class _AtomJsonFormatter(logging.Formatter):
+    def format(self, record: logging.LogRecord) -> str:
+        obj: dict = {
+            "time": self.formatTime(record, "%Y-%m-%dT%H:%M:%S"),
+            "level": record.levelname,
+            "logger": record.name,
+            "msg": record.getMessage(),
+            "service": "atom-llm",
+        }
+        tid = _get_trace_id()
+        if tid:
+            obj["trace_id"] = tid
+        if record.exc_info:
+            obj["error"] = self.formatException(record.exc_info)[:1000]
+        return json.dumps(obj)
+
+_handler = logging.StreamHandler()
+_handler.setFormatter(_AtomJsonFormatter())
+logging.root.handlers = [_handler]
+logging.root.setLevel(logging.INFO)
+
+# ── Callbacks ─────────────────────────────────────────────────────────────────
+
 # Register Kafka audit callback if KAFKA_BROKERS is configured.
 if os.environ.get("KAFKA_BROKERS"):
     import litellm
@@ -41,6 +78,16 @@ if os.environ.get("OTEL_EXPORTER_OTLP_ENDPOINT"):
     from atom_extensions.otel import OTELLogger
 
     litellm.callbacks.append(OTELLogger())
+
+# Register Prometheus metrics callback so LiteLLM exposes /metrics.
+try:
+    import litellm  # noqa: F811
+    from litellm.integrations.prometheus import PrometheusLogger
+
+    litellm.callbacks.append(PrometheusLogger())
+    logging.getLogger(__name__).info("Prometheus metrics enabled at /metrics")
+except Exception as exc:
+    logging.getLogger(__name__).warning("Prometheus metrics not available: %s", exc)
 
 def _prisma_push() -> None:
     """Push LiteLLM's Prisma schema before the server starts.

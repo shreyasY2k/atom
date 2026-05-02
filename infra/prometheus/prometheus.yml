@@ -1,0 +1,16 @@
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+scrape_configs:
+  # LiteLLM / atom-llm — LLM call rate, token spend, error rate
+  - job_name: atom-llm
+    static_configs:
+      - targets: [atom-llm:4000]
+    metrics_path: /metrics
+
+  # Alloy self-metrics
+  - job_name: alloy
+    static_configs:
+      - targets: [alloy:12345]
+    metrics_path: /metrics

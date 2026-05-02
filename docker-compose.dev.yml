@@ -360,6 +360,20 @@ services:
       - "3200:3200"   # Tempo HTTP API / UI
       - "4319:4317"   # OTLP gRPC (external; internal uses port 4317 directly)
 
+  # ── Prometheus (metrics store for atom-llm + Alloy self-metrics) ─────────────
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: atom-prometheus
+    restart: unless-stopped
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.retention.time=7d
+    volumes:
+      - ./infra/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus_data:/prometheus
+    ports:
+      - "9090:9090"
+
   # ── Grafana ──────────────────────────────────────────────────────────────────
   grafana:
     image: grafana/grafana:latest
@@ -368,6 +382,7 @@ services:
     depends_on:
       - loki
       - tempo
+      - prometheus
     environment:
       GF_SECURITY_ADMIN_PASSWORD: atom-grafana-dev
       GF_USERS_ALLOW_SIGN_UP: "false"
@@ -388,3 +403,4 @@ volumes:
   grafana_data:
   loki_data:
   tempo_data:
+  prometheus_data:
