@@ -34,7 +34,7 @@ make generate-keys
 #   openssl rand -hex 32   (run twice, one value per variable)
 
 # 3. Start everything
-docker compose up -d        # pulls pre-built images (~1 min)
+make up                     # pulls pre-built images (~1 min)
 make migrate-dev            # apply DB schema
 make seed-dev               # create admin user
 
@@ -83,8 +83,9 @@ Agents  → New Agent  → fill the wizard
 ```bash
 bin/atom create             # interactive: name, model, tools, HITL
 cd <project-name>/
-bash setup-dev.sh           # creates .venv, installs atom-sdk + deps
-source .venv/bin/activate
+python3 -m venv .venv && source .venv/bin/activate
+pip install -r requirements.txt
+pip install "git+https://github.com/shreyasY2k/atom.git#subdirectory=atom-sdk/atom_platform_sdk"
 ```
 
 ### Step 4 — Fill in credentials and run
@@ -95,7 +96,7 @@ source .venv/bin/activate
 # ATOM_DOMAIN_ID=<domain-uuid>
 # ATOM_AGENT_ID=<agent-uuid>
 # ATOM_AGENT_JWT=<token-from-studio>
-# ATOM_MODEL_NAME=gemini/gemini-2.5-flash
+# ATOM_MODEL_NAME=gemini-2.5-flash
 
 python agent.py
 # Conversations appear in Studio → Agents → Conversations tab

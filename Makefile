@@ -109,6 +109,13 @@ infra-down: ## Tear down infra services (delete atom-infra / atom-system / atom-
 	@kubectl delete namespace atom-infra atom-system atom-agents 2>/dev/null || true
 	@echo "✓ Infra namespaces deleted."
 
+# ── Operator mode (docker-compose.yml — pulls pre-built GHCR images) ──────────
+up: ## Start stack in operator mode (pulls pre-built GHCR images)
+	@docker compose up -d
+
+down: ## Stop operator-mode stack (keeps volumes)
+	@docker compose down
+
 # ── Local dev (docker-compose) ────────────────────────────────────────────────
 dev-up: ## Start full stack via docker-compose (first run may take a few minutes)
 	@docker compose -f docker-compose.dev.yml up -d

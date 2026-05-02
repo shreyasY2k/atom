@@ -187,9 +187,25 @@ func forward(c fiber.Ctx, client *fasthttp.Client, targetURL, domainID, agentID,
 		return c.Status(fiber.StatusBadGateway).JSON(fiber.Map{"error": "upstream_unavailable"})
 	}
 
+	// Snapshot CORS headers set by the cors middleware before CopyTo wipes them.
+	corsOrigin := string(c.Response().Header.Peek("Access-Control-Allow-Origin"))
+	corsMethods := string(c.Response().Header.Peek("Access-Control-Allow-Methods"))
+	corsHeaders := string(c.Response().Header.Peek("Access-Control-Allow-Headers"))
+
 	resp.Header.CopyTo(&c.Response().Header)
 	c.Response().SetStatusCode(resp.StatusCode())
 	c.Response().SetBody(resp.Body())
+
+	// Restore CORS headers stripped by CopyTo.
+	if corsOrigin != "" {
+		c.Response().Header.Set("Access-Control-Allow-Origin", corsOrigin)
+	}
+	if corsMethods != "" {
+		c.Response().Header.Set("Access-Control-Allow-Methods", corsMethods)
+	}
+	if corsHeaders != "" {
+		c.Response().Header.Set("Access-Control-Allow-Headers", corsHeaders)
+	}
 	return nil
 }
 

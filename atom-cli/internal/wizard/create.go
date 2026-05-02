@@ -40,7 +40,7 @@ var providers = []Provider{
 	{
 		Label:         "Google Gemini (needs GEMINI_API_KEY)",
 		Name:          "gemini",
-		DefaultModel:  "gemini/gemini-2.5-flash",
+		DefaultModel:  "gemini-2.5-flash",
 		BaseURL:       "https://generativelanguage.googleapis.com/v1beta/openai",
 		APIKeyVar:     "GEMINI_API_KEY",
 		APIKeyExample: "AIza...",
