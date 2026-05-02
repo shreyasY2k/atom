@@ -1,13 +1,18 @@
 FROM python:3.11-slim
 WORKDIR /app
 
-# git is required to pip-install atom-platform-sdk from GitHub
 RUN apt-get update && apt-get install -y --no-install-recommends git \
     && rm -rf /var/lib/apt/lists/*
 
-# Install all dependencies — includes atom-platform-sdk declared in requirements.txt
 COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+
+RUN --mount=type=secret,id=github_token,required=false \
+    TOKEN=$(cat /run/secrets/github_token 2>/dev/null || echo "") && \
+    if [ -n "$TOKEN" ]; then \
+      git config --global url."https://${TOKEN}@github.com/".insteadOf "https://github.com/"; \
+    fi && \
+    pip install --no-cache-dir -r requirements.txt && \
+    rm -f /root/.gitconfig
 
 COPY . .
 EXPOSE 8080
