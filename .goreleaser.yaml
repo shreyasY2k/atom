@@ -9,8 +9,10 @@ before:
 
 builds:
   - id: atom-cli
-    dir: atom-cli
-    main: ./cmd/atom
+    # No dir: — use full path from repo root so GoReleaser v2 does not
+    # auto-generate "cd atom-cli && go mod tidy" (which fails because
+    # `cd` is not a standalone executable on Linux).
+    main: ./atom-cli/cmd/atom
     binary: atom
     env:
       - CGO_ENABLED=0
