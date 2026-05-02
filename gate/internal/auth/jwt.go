@@ -6,6 +6,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
+	"log/slog"
 	"strings"
 	"time"
 
@@ -35,26 +36,42 @@ func Middleware(pubKey *rsa.PublicKey, pool *pgxpool.Pool, rdb *redis.Client) fi
 	return func(c fiber.Ctx) error {
 		raw, err := extractBearer(c)
 		if err != nil {
+			slog.Warn("auth rejected: missing bearer token",
+				"path", c.Path(), "remote_ip", c.IP())
 			return unauthorized(c, "missing_token")
 		}
 
 		claims, err := parseToken(raw, pubKey)
 		if err != nil {
+			reason := "invalid_token"
 			if isExpired(err) {
-				return unauthorized(c, "token_expired")
+				reason = "token_expired"
 			}
-			return unauthorized(c, "invalid_token")
+			slog.Warn("auth rejected: token validation failed",
+				"reason", reason,
+				"path", c.Path(),
+				"remote_ip", c.IP(),
+				"err", err)
+			return unauthorized(c, reason)
 		}
 
 		// Revocation check for agent tokens only.
 		if claims.Type == "agent" {
 			if revoked, checkErr := isRevoked(c.Context(), raw, pool, rdb); checkErr != nil {
-				// Log but don't fail — revocation check is best-effort
-				_ = checkErr
+				slog.Warn("auth: revocation check error (passing request)",
+					"agent_id", claims.AgentID, "err", checkErr)
 			} else if revoked {
+				slog.Warn("auth rejected: token revoked",
+					"agent_id", claims.AgentID, "path", c.Path())
 				return unauthorized(c, "token_revoked")
 			}
 		}
+
+		slog.Debug("auth ok",
+			"token_type", claims.Type,
+			"agent_id", claims.AgentID,
+			"domain_id", claims.DomainID,
+			"path", c.Path())
 
 		c.Locals(claimsKey, claims)
 		return c.Next()

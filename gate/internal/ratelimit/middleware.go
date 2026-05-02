@@ -3,6 +3,7 @@ package ratelimit
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"strconv"
 	"time"
 
@@ -43,6 +44,12 @@ func Middleware(rdb *redis.Client) fiber.Handler {
 		}
 
 		if count > int64(limit) {
+			slog.Warn("rate limit exceeded",
+				"subject", claims.Subject,
+				"token_type", claims.Type,
+				"count", count,
+				"limit", limit,
+				"path", c.Path())
 			c.Set("Retry-After", strconv.Itoa(windowSeconds))
 			return c.Status(fiber.StatusTooManyRequests).
 				JSON(fiber.Map{"error": "rate_limit_exceeded"})

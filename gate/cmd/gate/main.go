@@ -28,6 +28,7 @@ import (
 	"github.com/your-org/atom/gate/internal/auth"
 	"github.com/your-org/atom/gate/internal/config"
 	"github.com/your-org/atom/gate/internal/health"
+	glog "github.com/your-org/atom/gate/internal/logging"
 	"github.com/your-org/atom/gate/internal/policy"
 	"github.com/your-org/atom/gate/internal/ratelimit"
 	"github.com/your-org/atom/gate/internal/router"
@@ -41,6 +42,15 @@ func main() {
 		slog.Error("config load", "err", err)
 		os.Exit(1)
 	}
+	slog.Info("config loaded",
+		"gate_port", cfg.GatePort,
+		"atom_llm_url", cfg.AtomLLMURL,
+		"atom_studio_url", cfg.AtomStudioURL,
+		"atom_memory_url", cfg.AtomMemoryURL,
+		"opa_bundle_path", cfg.OPABundlePath,
+		"otel_endpoint", cfg.OTELEndpoint,
+		"kafka_brokers_count", len(cfg.KafkaBrokers),
+	)
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
@@ -108,6 +118,9 @@ func main() {
 	app.Get("/healthz", health.Healthz)
 	app.Get("/readyz", health.Readyz(pool, rdb))
 
+	// Access logger — runs first so it captures the full request lifecycle.
+	app.Use(glog.Middleware())
+
 	// CORS — allow Studio UI and local dev frontends to call GATE directly.
 	app.Use(cors.New(cors.Config{
 		AllowOriginsFunc: func(origin string) bool {
@@ -159,6 +172,12 @@ func errorHandler(c fiber.Ctx, err error) error {
 	if errors.As(err, &fe) {
 		code = fe.Code
 	}
+	slog.Error("unhandled error",
+		"method", c.Method(),
+		"path", c.Path(),
+		"status", code,
+		"remote_ip", c.IP(),
+		"err", err)
 	return c.Status(code).JSON(fiber.Map{"error": err.Error()})
 }
 

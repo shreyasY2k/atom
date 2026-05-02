@@ -126,10 +126,14 @@ func llmProxy(client *fasthttp.Client, upstreamRoot, fallbackKey, encryptionKey 
 
 		llmKey, err := resolveVirtualKey(c.Context(), agentID, pool, rdb, fallbackKey, encryptionKey)
 		if err != nil || llmKey == "" {
-			slog.Warn("no LiteLLM virtual key for agent", "agent_id", agentID, "err", err)
+			slog.Warn("llm proxy: no virtual key for agent",
+				"agent_id", agentID, "domain_id", domainID, "err", err)
 			return c.Status(fiber.StatusForbidden).JSON(fiber.Map{"error": "agent_not_provisioned"})
 		}
 
+		slog.Info("llm proxy",
+			"agent_id", agentID, "domain_id", domainID,
+			"upstream", targetURL, "method", c.Method())
 		return forward(c, client, targetURL, domainID, agentID, llmKey)
 	}
 }
@@ -143,12 +147,15 @@ func agentProxy(client *fasthttp.Client, pool *pgxpool.Pool, rdb *redis.Client) 
 
 		// Reject cross-domain agent tokens at the router layer too.
 		if claims, ok := auth.GetClaims(c); ok && claims.Type == "agent" && claims.DomainID != domainID {
+			slog.Warn("agent proxy: cross-domain token rejected",
+				"token_domain", claims.DomainID, "request_domain", domainID, "agent_id", agentID)
 			return c.Status(fiber.StatusForbidden).JSON(fiber.Map{"error": "domain_mismatch"})
 		}
 
 		svcName, err := resolveServiceName(c.Context(), agentID, pool, rdb)
 		if err != nil {
-			slog.Error("resolve service name", "agent_id", agentID, "err", err)
+			slog.Error("agent proxy: service name resolution failed",
+				"agent_id", agentID, "domain_id", domainID, "err", err)
 			return c.Status(fiber.StatusBadGateway).JSON(fiber.Map{"error": "agent_not_found"})
 		}
 
@@ -161,6 +168,9 @@ func agentProxy(client *fasthttp.Client, pool *pgxpool.Pool, rdb *redis.Client) 
 			targetURL += "?" + qs
 		}
 
+		slog.Info("agent proxy",
+			"agent_id", agentID, "domain_id", domainID,
+			"upstream", targetURL, "method", c.Method())
 		return forward(c, client, targetURL, domainID, agentID, "")
 	}
 }
@@ -184,8 +194,16 @@ func forward(c fiber.Ctx, client *fasthttp.Client, targetURL, domainID, agentID,
 	}
 
 	if err := client.Do(req, resp); err != nil {
+		slog.Error("upstream request failed",
+			"target", targetURL,
+			"method", string(req.Header.Method()),
+			"err", err)
 		return c.Status(fiber.StatusBadGateway).JSON(fiber.Map{"error": "upstream_unavailable"})
 	}
+
+	slog.Debug("upstream response",
+		"target", targetURL,
+		"upstream_status", resp.StatusCode())
 
 	// Snapshot CORS headers set by the cors middleware before CopyTo wipes them.
 	corsOrigin := string(c.Response().Header.Peek("Access-Control-Allow-Origin"))

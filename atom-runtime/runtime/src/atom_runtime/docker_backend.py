@@ -78,9 +78,10 @@ def _run_container(
         "ATOM_DOMAIN_ID": domain_id,
         "ATOM_GATE_URL": gate_url,
     }
-    # Forward Kafka brokers so the agent can stream logs to atom.agent.logs
-    if kb := _os.environ.get("KAFKA_BROKERS"):
-        env["KAFKA_BROKERS"] = kb
+    # Forward Kafka brokers so the agent can stream logs to atom.agent.logs.
+    # Default to redpanda:9092 (the docker-compose internal address) so agent
+    # containers always have a valid broker even if the env var is absent.
+    env["KAFKA_BROKERS"] = _os.environ.get("KAFKA_BROKERS", "redpanda:9092")
     # Studio URL so the agent can record conversation runs
     env["ATOM_STUDIO_URL"] = _os.environ.get("ATOM_STUDIO_API_URL", "http://atom-studio-api:3001")
 
