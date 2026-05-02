@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"os"
 	"os/exec"
 	"strings"
 )
@@ -22,8 +23,15 @@ type deployResp struct {
 }
 
 // BuildImage runs `docker build -t image .` in the given directory.
+// If GITHUB_TOKEN is set it is injected as a BuildKit secret so pip can
+// clone from private GitHub repos without baking the token into any layer.
 func BuildImage(dir, image string) error {
-	cmd := exec.Command("docker", "build", "-t", image, dir)
+	args := []string{"build", "-t", image, dir}
+	if token := os.Getenv("GITHUB_TOKEN"); token != "" {
+		args = append(args, "--secret", "id=github_token,env=GITHUB_TOKEN")
+		fmt.Println("  [docker] GITHUB_TOKEN detected — injecting as build secret for private repo access")
+	}
+	cmd := exec.Command("docker", args...)
 	cmd.Stdout = newPrefixWriter("  [docker] ")
 	cmd.Stderr = newPrefixWriter("  [docker] ")
 	if err := cmd.Run(); err != nil {
