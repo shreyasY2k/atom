@@ -29,15 +29,16 @@ func runCreate(_ *cobra.Command, _ []string) error {
 
 	fmt.Printf("\n✓ Created ./%s/\n\n", answers.ProjectName)
 
-	// Create virtual environment
-	fmt.Printf("→ Creating .venv ...\n")
-	venvCmd := exec.Command("python3", "-m", "venv", ".venv")
+	// Create virtual environment using Python 3.11+ (prefer 3.11 for compatibility)
+	pyBin := detectPython()
+	fmt.Printf("→ Creating .venv with %s ...\n", pyBin)
+	venvCmd := exec.Command(pyBin, "-m", "venv", ".venv")
 	venvCmd.Dir = answers.ProjectName
 	venvCmd.Stdout = os.Stdout
 	venvCmd.Stderr = os.Stderr
 	if err := venvCmd.Run(); err != nil {
 		fmt.Printf("\n⚠  Could not create .venv: %s\n", err)
-		fmt.Printf("   Run manually: cd %s && python3 -m venv .venv && .venv/bin/pip install -r requirements.txt\n\n", answers.ProjectName)
+		fmt.Printf("   Run manually: cd %s && %s -m venv .venv && .venv/bin/pip install -r requirements.txt\n\n", answers.ProjectName, pyBin)
 		printNextSteps(answers.ProjectName)
 		return nil
 	}
@@ -57,6 +58,18 @@ func runCreate(_ *cobra.Command, _ []string) error {
 
 	printNextSteps(answers.ProjectName)
 	return nil
+}
+
+// detectPython returns the first available Python 3.11+ binary.
+// Prefers 3.11 for widest atom-sdk compatibility, falls back to newer versions
+// or the generic python3 if no versioned binary is found.
+func detectPython() string {
+	for _, candidate := range []string{"python3.11", "python3.12", "python3.13", "python3"} {
+		if path, err := exec.LookPath(candidate); err == nil && path != "" {
+			return candidate
+		}
+	}
+	return "python3"
 }
 
 func printNextSteps(project string) {

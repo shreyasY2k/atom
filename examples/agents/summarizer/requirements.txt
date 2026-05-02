@@ -1,5 +1,5 @@
-# atom-platform-sdk — ATOM's agent SDK (AtomChatModel, HITL, Toolkit)
-atom-platform-sdk @ git+https://github.com/shreyasY2k/atom.git#subdirectory=atom-sdk/atom_platform_sdk
+# ATOM's agentscope fork — includes AtomChatModel (PyPI agentscope does NOT have it)
+agentscope @ git+https://github.com/shreyasY2k/atom.git#subdirectory=atom-sdk
 
 # atom-sdk (agentscope fork) is installed from .atom-sdk/ by the Dockerfile.
 # The provision.py script copies atom-sdk/ → .atom-sdk/ before docker build.
