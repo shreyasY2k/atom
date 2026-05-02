@@ -30,8 +30,9 @@ datasources:
     editable: true
     jsonData:
       httpMethod: GET
+      # nodeGraph disabled — generates | by() TraceQL that this Tempo version rejects
       nodeGraph:
-        enabled: true
+        enabled: false
       traceToLogs:
         datasourceUid: loki
         tags: [service, container]

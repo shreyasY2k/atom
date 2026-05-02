@@ -38,6 +38,7 @@ def _setup_otel(app: FastAPI) -> None:
     if not endpoint:
         return
     try:
+        import json  # noqa: PLC0415
         from opentelemetry import trace  # noqa: PLC0415
         from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExporter  # noqa: PLC0415
         from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor  # noqa: PLC0415
@@ -53,6 +54,32 @@ def _setup_otel(app: FastAPI) -> None:
         provider.add_span_processor(BatchSpanProcessor(exporter))
         trace.set_tracer_provider(provider)
         FastAPIInstrumentor.instrument_app(app)
+
+        class _JsonFmt(logging.Formatter):
+            def format(self, record: logging.LogRecord) -> str:
+                try:
+                    ctx = trace.get_current_span().get_span_context()
+                    tid = format(ctx.trace_id, "032x") if ctx and ctx.is_valid else ""
+                except Exception:
+                    tid = ""
+                obj: dict = {
+                    "time": self.formatTime(record, "%Y-%m-%dT%H:%M:%S"),
+                    "level": record.levelname,
+                    "logger": record.name,
+                    "msg": record.getMessage(),
+                    "service": service_name,
+                }
+                if tid:
+                    obj["trace_id"] = tid
+                if record.exc_info:
+                    obj["error"] = self.formatException(record.exc_info)[:1000]
+                return json.dumps(obj)
+
+        handler = logging.StreamHandler()
+        handler.setFormatter(_JsonFmt())
+        logging.root.handlers = [handler]
+        logging.root.setLevel(logging.INFO)
+
         logger.info("OTEL tracing enabled → %s (service=%s)", endpoint, service_name)
     except ImportError:
         logger.warning("opentelemetry packages not installed — OTEL tracing disabled")

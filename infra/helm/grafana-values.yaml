@@ -50,7 +50,7 @@ datasources:
         jsonData:
           httpMethod: GET
           nodeGraph:
-            enabled: true
+            enabled: false
           traceToLogs:
             datasourceUid: loki
             tags: [service, container]
