@@ -50,10 +50,8 @@ Generated files:
 ### Step 3 — Test in dev mode (no ATOM infrastructure needed)
 
 ```bash
-python3 -m venv .venv
+# atom create already ran this — just activate for new terminal sessions
 source .venv/bin/activate
-pip install -r requirements.txt
-pip install "git+https://github.com/shreyasY2k/atom.git#subdirectory=atom-sdk/atom_platform_sdk"
 
 # Edit .env — set LLM_API_KEY
 # (ATOM_MODE=dev is already set — agent calls LLM directly, no GATE)
@@ -66,9 +64,10 @@ In dev mode the agent calls the LLM provider directly. No GATE, no domain, no to
 > **Python 3.11+ required.** macOS ships Python 3.9 — atom-sdk requires 3.11+.
 > Install Python 3.11 first if missing: `brew install python@3.11`
 >
-> `atom-sdk` is NOT in `requirements.txt` because the Dockerfile installs it from
-> `.atom-sdk/` at Docker build time. For local dev, install it directly from GitHub
-> as shown above.
+> `atom create` handles venv creation and `pip install -r requirements.txt`
+> automatically. `requirements.txt` declares `atom-platform-sdk` as a git URL so
+> the same file drives both local dev and `docker build` — no local copy of the
+> SDK is needed anywhere.
 
 ### Step 4 — Create a domain + agent in Studio
 

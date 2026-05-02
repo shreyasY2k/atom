@@ -2,8 +2,6 @@ package cmd
 
 import (
 	"fmt"
-	"os"
-	"path/filepath"
 	"strings"
 
 	"github.com/manifoldco/promptui"
@@ -49,48 +47,15 @@ func runLogin(_ *cobra.Command, _ []string) error {
 	}
 	fmt.Println("✓")
 
-	atomRoot := detectAtomRoot()
-
 	cfg := &config.Config{
 		StudioURL:    studioURL,
 		AccessToken:  access,
 		RefreshToken: refresh,
-		AtomRoot:     atomRoot,
 	}
 	if err := config.Save(cfg); err != nil {
 		return fmt.Errorf("save config: %w", err)
 	}
 
 	fmt.Printf("Logged in. Config saved to ~/.atom/config.json\n")
-	if atomRoot != "" {
-		fmt.Printf("ATOM root detected: %s\n", atomRoot)
-	} else {
-		fmt.Printf("Tip: set ATOM_ROOT env var to point at the ATOM repo (needed for atom-sdk install)\n")
-	}
 	return nil
-}
-
-// detectAtomRoot walks up from cwd looking for the ATOM monorepo root
-// (identified by go.work or the atom-sdk/ directory).
-func detectAtomRoot() string {
-	// 1. Env override
-	if v := os.Getenv("ATOM_ROOT"); v != "" {
-		return v
-	}
-	// 2. Walk up from cwd
-	dir, _ := os.Getwd()
-	for i := 0; i < 8; i++ {
-		if _, err := os.Stat(filepath.Join(dir, "atom-sdk")); err == nil {
-			return dir
-		}
-		if _, err := os.Stat(filepath.Join(dir, "go.work")); err == nil {
-			return dir
-		}
-		parent := filepath.Dir(dir)
-		if parent == dir {
-			break
-		}
-		dir = parent
-	}
-	return ""
 }
