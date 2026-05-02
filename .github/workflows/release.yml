@@ -73,8 +73,11 @@ jobs:
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha,scope=${{ matrix.name }}
-          cache-to: type=gha,mode=max,scope=${{ matrix.name }}
-          platforms: linux/amd64,linux/arm64
+          cache-to: type=gha,mode=min,scope=${{ matrix.name }}
+          # arm64 via QEMU emulation is 10-20x slower than native; only pay
+          # that cost on release tags where a multi-arch image is needed.
+          # Branch pushes get amd64-only so CI stays fast.
+          platforms: ${{ startsWith(github.ref, 'refs/tags/') && 'linux/amd64,linux/arm64' || 'linux/amd64' }}
 
   # ── CLI binaries → GitHub Release ──────────────────────────────────────────
   # This job only runs on version tags (e.g. v0.1.0), not on every main push.
