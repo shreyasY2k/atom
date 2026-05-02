@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
-	"path/filepath"
 
 	"github.com/spf13/cobra"
 	"github.com/your-org/atom/atom-cli/internal/scaffold"
@@ -30,25 +29,42 @@ func runCreate(_ *cobra.Command, _ []string) error {
 
 	fmt.Printf("\n✓ Created ./%s/\n\n", answers.ProjectName)
 
-	// Auto-run setup-dev.sh inside the new project directory.
-	setupScript := filepath.Join(answers.ProjectName, "setup-dev.sh")
-	fmt.Printf("→ Running setup-dev.sh ...\n\n")
-	cmd := exec.Command("bash", setupScript)
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-	if err := cmd.Run(); err != nil {
-		fmt.Printf("\n⚠  setup-dev.sh failed (%s)\n", err)
-		fmt.Printf("   Run manually:  cd %s && bash setup-dev.sh\n\n", answers.ProjectName)
+	// Create virtual environment
+	fmt.Printf("→ Creating .venv ...\n")
+	venvCmd := exec.Command("python3", "-m", "venv", ".venv")
+	venvCmd.Dir = answers.ProjectName
+	venvCmd.Stdout = os.Stdout
+	venvCmd.Stderr = os.Stderr
+	if err := venvCmd.Run(); err != nil {
+		fmt.Printf("\n⚠  Could not create .venv: %s\n", err)
+		fmt.Printf("   Run manually: cd %s && python3 -m venv .venv && .venv/bin/pip install -r requirements.txt\n\n", answers.ProjectName)
+		printNextSteps(answers.ProjectName)
+		return nil
 	}
 
-	fmt.Printf("\nNext steps:\n")
-	fmt.Printf("  cd %s\n", answers.ProjectName)
-	fmt.Printf("  source .venv/bin/activate\n")
-	fmt.Printf("  # Edit .env — paste ATOM_* values from Studio after creating an agent\n")
-	fmt.Printf("  python agent.py         # runs in dev mode\n")
-	fmt.Printf("\nWhen ready for production:\n")
-	fmt.Printf("  atom-studio → create domain → create agent → copy JWT\n")
-	fmt.Printf("  Fill in ATOM_GATE_URL, ATOM_DOMAIN_ID, ATOM_AGENT_ID, ATOM_AGENT_JWT in .env\n")
-	fmt.Printf("  ../bin/atom deploy      # submit for HITL approval\n")
+	// Install all dependencies (requirements.txt includes atom-platform-sdk)
+	fmt.Printf("→ Installing dependencies (includes atom-platform-sdk) ...\n")
+	pipCmd := exec.Command(".venv/bin/pip", "install", "-r", "requirements.txt")
+	pipCmd.Dir = answers.ProjectName
+	pipCmd.Stdout = os.Stdout
+	pipCmd.Stderr = os.Stderr
+	if err := pipCmd.Run(); err != nil {
+		fmt.Printf("\n⚠  pip install failed: %s\n", err)
+		fmt.Printf("   Run manually: cd %s && .venv/bin/pip install -r requirements.txt\n\n", answers.ProjectName)
+	} else {
+		fmt.Printf("\n✓ .venv ready — atom-platform-sdk installed\n")
+	}
+
+	printNextSteps(answers.ProjectName)
 	return nil
+}
+
+func printNextSteps(project string) {
+	fmt.Printf("\nNext steps:\n")
+	fmt.Printf("  cd %s\n", project)
+	fmt.Printf("  source .venv/bin/activate\n")
+	fmt.Printf("  # Edit .env — paste ATOM_* values from Studio after creating a domain + agent\n")
+	fmt.Printf("  python agent.py\n")
+	fmt.Printf("\nTo deploy:\n")
+	fmt.Printf("  atom deploy\n")
 }

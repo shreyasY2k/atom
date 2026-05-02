@@ -9,22 +9,18 @@ All LLM calls route through GATE — authenticated, rate-limited, and audit-logg
 
 ## Setup
 
-### Step 1 — Install dependencies
-
-```bash
-python3 -m venv .venv
-source .venv/bin/activate
-pip install -r requirements.txt
-pip install "git+https://github.com/shreyasY2k/atom.git#subdirectory=atom-sdk/atom_platform_sdk"
-```
-
-### Step 2 — Activate the virtual env in new terminals
+`atom create` already created `.venv` and installed all dependencies.
+For every new terminal session just activate the venv:
 
 ```bash
 source .venv/bin/activate
 ```
 
-### Step 3 — Create agent in atom-studio
+---
+
+## Configure and run
+
+### Step 1 — Create agent in atom-studio
 
 ```
 Open http://localhost:3000 (docker) or http://studio.atom.local (k8s)
@@ -32,14 +28,12 @@ Open http://localhost:3000 (docker) or http://studio.atom.local (k8s)
 1. Domains → New Domain → give it a name
 2. Agents  → New Agent  → fill wizard (pick {{.ModelName}} in allowed models)
 3. Copy the one-time JWT token shown at the end
-4. Note domain UUID and agent UUID from the Studio URL:
-     http://studio.atom.local/domains/<DOMAIN-ID>/agents/<AGENT-ID>
+4. Note domain UUID and agent UUID from the Studio URL
 ```
 
-### Step 4 — Configure .env
+### Step 2 — Fill in .env
 
 ```bash
-# .env was created from .env.example — fill in the values:
 ATOM_GATE_URL=http://localhost:8080    # or http://gate.atom.local (k8s)
 ATOM_DOMAIN_ID=<domain-uuid>
 ATOM_AGENT_ID=<agent-uuid>
@@ -47,10 +41,28 @@ ATOM_AGENT_JWT=<token-from-studio>
 ATOM_MODEL_NAME={{.ModelName}}
 ```
 
-### Step 5 — Run
+### Step 3 — Run
 
 ```bash
 python agent.py
+```
+
+---
+
+## Deploy to ATOM
+
+```bash
+atom deploy
+# Submits for HITL approval → atom-runtime starts the container
+```
+
+Approve in Studio → HITL queue. Chat through GATE:
+
+```bash
+curl -X POST http://localhost:8080/domain/<domain-id>/agent/<agent-id>/run \
+  -H "Authorization: Bearer <agent-jwt>" \
+  -H "Content-Type: application/json" \
+  -d '{"message": "Hello!"}'
 ```
 
 ---
@@ -64,26 +76,6 @@ python agent.py
 | `tools.py` | Tool implementations |
 | `Dockerfile` | Production container (built by `atom deploy`) |
 | `.env` | Credentials (gitignored) |
-
----
-
-## Deploy to ATOM
-
-Once the agent runs locally, deploy it with full governance:
-
-```bash
-bin/atom deploy
-# Submits for HITL approval in atom-studio → atom-runtime deploys the pod
-```
-
-Approve in Studio → HITL queue. Then call the deployed agent through GATE:
-
-```bash
-curl -X POST http://localhost:8080/domain/<domain-id>/agent/<agent-id>/run \
-  -H "Authorization: Bearer <agent-jwt>" \
-  -H "Content-Type: application/json" \
-  -d '{"message": "Hello!"}'
-```
 
 ---
 

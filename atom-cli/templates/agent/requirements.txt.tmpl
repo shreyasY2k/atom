@@ -1,12 +1,7 @@
-# ── NOTE: atom-sdk (agentscope) is NOT listed here ──────────────────────────
-# Production:  Dockerfile installs it from .atom-sdk/ (copied by atom deploy).
-# Local dev:   Install manually from the ATOM monorepo before pip install -r:
-#
-#   bash setup-dev.sh          # handles venv + atom-sdk + requirements in one step
-#   source .venv/bin/activate  # activate on subsequent sessions
-#
-# See README.md step 0 for the full command.
-# ─────────────────────────────────────────────────────────────────────────────
+# atom-platform-sdk — ATOM's agent SDK (AtomChatModel, HITL, Toolkit)
+# Installed automatically by `atom create`; also pulled into the Docker image at build time.
+atom-platform-sdk @ git+https://github.com/shreyasY2k/atom.git#subdirectory=atom-sdk/atom_platform_sdk
+
 fastapi>=0.111.0
 uvicorn[standard]>=0.29.0
 python-dotenv>=1.0.0

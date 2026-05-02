@@ -1,10 +1,11 @@
 FROM python:3.12-slim
 WORKDIR /app
 
-# atom-sdk is copied to .atom-sdk/ by the provision script before docker build
-COPY .atom-sdk /tmp/atom-sdk
-RUN pip install --no-cache-dir /tmp/atom-sdk && rm -rf /tmp/atom-sdk
+# git is required to pip-install atom-platform-sdk from GitHub
+RUN apt-get update && apt-get install -y --no-install-recommends git \
+    && rm -rf /var/lib/apt/lists/*
 
+# Install all dependencies — includes atom-platform-sdk declared in requirements.txt
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 

@@ -82,10 +82,9 @@ Agents  → New Agent  → fill the wizard
 
 ```bash
 bin/atom create             # interactive: name, model, tools, HITL
+# atom create automatically creates .venv and installs atom-platform-sdk + deps
 cd <project-name>/
-python3 -m venv .venv && source .venv/bin/activate
-pip install -r requirements.txt
-pip install "git+https://github.com/shreyasY2k/atom.git#subdirectory=atom-sdk/atom_platform_sdk"
+source .venv/bin/activate
 ```
 
 ### Step 4 — Fill in credentials and run

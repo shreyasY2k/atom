@@ -265,12 +265,17 @@ cli-build: ## Build atom CLI binary to bin/
 	@cd atom-cli && go build -o ../bin/atom ./cmd/atom
 	@echo "✓ bin/atom built."
 
+get-examples: ## Sparse-clone example agents from GitHub (no full repo clone needed)
+	@echo "→ Downloading example agents from GitHub..."
+	@git clone --filter=blob:none --sparse --depth=1 https://github.com/shreyasY2k/atom.git .atom-examples-tmp 2>/dev/null
+	@cd .atom-examples-tmp && git sparse-checkout set examples/agents
+	@mkdir -p examples
+	@cp -r .atom-examples-tmp/examples/agents examples/
+	@rm -rf .atom-examples-tmp
+	@echo "✓ Example agents downloaded to ./examples/agents/"
+	@echo "  cd examples/agents/financial-assistant && atom deploy"
+
 # ── Agent development ─────────────────────────────────────────────────────────
-agent-build: ## Build frontoffice agent Docker image (requires .atom-sdk to be copied first)
-	@cp -r atom-sdk atom-cli/frontoffice/.atom-sdk
-	@docker build -t frontoffice:latest atom-cli/frontoffice/
-	@rm -rf atom-cli/frontoffice/.atom-sdk
-	@echo "✓ frontoffice:latest built."
 
 agent-restart: ## Restart a running agent container with a fresh JWT (AGENT_ID= required)
 	@if [ -z "$(AGENT_ID)" ]; then echo "Usage: make agent-restart AGENT_ID=<uuid>"; exit 1; fi
