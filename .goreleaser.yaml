@@ -2,11 +2,6 @@ version: 2
 
 project_name: atom
 
-before:
-  hooks:
-    - go work sync
-    - bash -c 'cd atom-cli && go mod tidy'
-
 builds:
   - id: atom-cli
     # No dir: — use full path from repo root so GoReleaser v2 does not

@@ -101,11 +101,19 @@ jobs:
           go-version-file: atom-cli/go.mod
           cache: true
 
+      # GoReleaser v2 auto-generates "cd <dir> && go mod tidy" hooks from
+      # the go workspace and runs them via exec() not a shell, so `cd` fails.
+      # Run the prep steps here in bash and tell GoReleaser to skip before hooks.
+      - name: Prepare modules
+        run: |
+          go work sync
+          cd atom-cli && go mod tidy
+
       - name: Run GoReleaser
         uses: goreleaser/goreleaser-action@v6
         with:
           distribution: goreleaser
           version: latest
-          args: release --clean
+          args: release --clean --skip=before
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
