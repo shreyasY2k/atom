@@ -12,11 +12,14 @@ WS /ws/agents/{agent_id}/runs/{run_id} broadcasts live messages as they arrive.
 """
 
 import json
+import logging
 import uuid
 from datetime import timezone
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
+
+log = logging.getLogger(__name__)
 
 from pydantic import BaseModel
 
@@ -175,9 +178,11 @@ async def record_run(agent_id: str, payload: RunRecordPayload):
     (agent JWT is not a human JWT; the endpoint is internal-network only).
     """
     run_id = payload.run_id or str(uuid.uuid4())
+    log.info("record_run agent=%s run=%s latency_ms=%s", agent_id, run_id, payload.latency_ms)
     async with get_conn() as conn:
         agent = await conn.fetchrow("SELECT id FROM agents WHERE id=$1", agent_id)
         if not agent:
+            log.warning("record_run agent not found agent=%s", agent_id)
             raise HTTPException(status_code=404, detail="agent not found")
         row = await conn.fetchrow(
             """

@@ -1,9 +1,13 @@
+import logging
+
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel
 
 from ..auth.middleware import require_auth
 from ..database import get_conn
 from .service import register_runtime_url, submit_deployment
+
+log = logging.getLogger(__name__)
 
 router = APIRouter()
 runtime_router = APIRouter()
@@ -31,9 +35,11 @@ async def submit_deployment_route(
     payload: DeploymentSubmitPayload,
     claims: dict = Depends(require_auth),
 ):
+    log.info("submit_deployment agent=%s image=%s by=%s", agent_id, payload.image, claims["sub"])
     async with get_conn() as conn:
         agent = await conn.fetchrow("SELECT id FROM agents WHERE id=$1", agent_id)
         if not agent:
+            log.warning("submit_deployment agent not found agent=%s", agent_id)
             raise HTTPException(status.HTTP_404_NOT_FOUND, detail="Agent not found")
         deployment = await submit_deployment(
             agent_id=agent_id,
@@ -43,6 +49,7 @@ async def submit_deployment_route(
             submitted_by=claims["sub"],
             conn=conn,
         )
+    log.info("deployment submitted id=%s agent=%s status=%s", deployment["id"], agent_id, deployment.get("status"))
     return deployment
 
 
@@ -83,6 +90,7 @@ async def get_deployment(
 @runtime_router.post("/deploy-result")
 async def deploy_result(payload: DeployResultPayload):
     """Called back by atom-runtime once the k8s rollout finishes."""
+    log.info("deploy_result deployment=%s status=%s error=%s", payload.deployment_id, payload.status, payload.error)
     allowed = {"deployed", "failed", "rolled_back"}
     if payload.status not in allowed:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, detail=f"Invalid status: {payload.status}")

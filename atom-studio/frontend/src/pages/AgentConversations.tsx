@@ -5,7 +5,7 @@ import { format } from 'date-fns'
 import {
   ChevronLeft, ChevronRight, ExternalLink,
   Wrench, Brain, Circle, Send, Bot, User,
-  MessageSquare, Clock, Zap,
+  MessageSquare, Clock, Zap, Trash2, Terminal,
 } from 'lucide-react'
 import api from '@/lib/api'
 import { useAuthStore } from '@/lib/auth'
@@ -151,6 +151,9 @@ export function AgentConversations({ domainId, agentId, gateUrl }: AgentConversa
       {/* ── Live chat panel ─────────────────────────────────────────────── */}
       <LiveChatPanel agentId={agentId} gateUrl={gateUrl} onRunCreated={() => queryClient.invalidateQueries({ queryKey: ['runs', agentId] })} />
 
+      {/* ── Live agent logs (Kafka stream) ──────────────────────────────── */}
+      <LiveLogsPanel agentId={agentId} />
+
       {isLoading && <p className="text-sm text-muted-foreground">Loading…</p>}
 
       {/* ── Run list ────────────────────────────────────────────────────── */}
@@ -201,10 +204,18 @@ interface LiveChatPanelProps {
   onRunCreated: () => void
 }
 
+const CHAT_STORAGE_KEY = (id: string) => `atom-chat-${id}`
+
 function LiveChatPanel({ agentId, gateUrl, onRunCreated }: LiveChatPanelProps) {
   const [input, setInput] = useState('')
   const [sending, setSending] = useState(false)
-  const [chatHistory, setChatHistory] = useState<{ role: 'user' | 'agent'; text: string; ts: Date }[]>([])
+  const [chatHistory, setChatHistory] = useState<{ role: 'user' | 'agent'; text: string; ts: Date }[]>(() => {
+    try {
+      const stored = localStorage.getItem(CHAT_STORAGE_KEY(agentId))
+      if (!stored) return []
+      return JSON.parse(stored).map((m: { role: string; text: string; ts: string }) => ({ ...m, ts: new Date(m.ts) }))
+    } catch { return [] }
+  })
   const [agentInfo, setAgentInfo] = useState<{ domain_id?: string; status?: string } | null>(null)
   const scrollRef = useRef<HTMLDivElement>(null)
   const token = useAuthStore(s => s.accessToken)
@@ -228,7 +239,11 @@ function LiveChatPanel({ agentId, gateUrl, onRunCreated }: LiveChatPanelProps) {
     const msg = input.trim()
     setInput('')
     setSending(true)
-    setChatHistory(h => [...h, { role: 'user', text: msg, ts: new Date() }])
+    const save = (h: { role: 'user' | 'agent'; text: string; ts: Date }[]) => {
+      localStorage.setItem(CHAT_STORAGE_KEY(agentId), JSON.stringify(h))
+      return h
+    }
+    setChatHistory(h => save([...h, { role: 'user', text: msg, ts: new Date() }]))
 
     try {
       const resp = await fetch(
@@ -245,17 +260,22 @@ function LiveChatPanel({ agentId, gateUrl, onRunCreated }: LiveChatPanelProps) {
       if (resp.ok) {
         const data = await resp.json()
         const reply = data.reply ?? data.response ?? data.content ?? JSON.stringify(data)
-        setChatHistory(h => [...h, { role: 'agent', text: reply, ts: new Date() }])
+        setChatHistory(h => save([...h, { role: 'agent', text: reply, ts: new Date() }]))
         onRunCreated()
       } else {
-        setChatHistory(h => [...h, { role: 'agent', text: `Error ${resp.status}: ${resp.statusText}`, ts: new Date() }])
+        setChatHistory(h => save([...h, { role: 'agent', text: `Error ${resp.status}: ${resp.statusText}`, ts: new Date() }]))
       }
     } catch (err) {
-      setChatHistory(h => [...h, { role: 'agent', text: `Could not reach agent: ${err}`, ts: new Date() }])
+      setChatHistory(h => save([...h, { role: 'agent', text: `Could not reach agent: ${err}`, ts: new Date() }]))
     } finally {
       setSending(false)
       setTimeout(() => scrollRef.current?.scrollTo({ top: 9999, behavior: 'smooth' }), 50)
     }
+  }
+
+  function clearHistory() {
+    localStorage.removeItem(CHAT_STORAGE_KEY(agentId))
+    setChatHistory([])
   }
 
   if (!canChat && agentInfo) {
@@ -278,6 +298,11 @@ function LiveChatPanel({ agentId, gateUrl, onRunCreated }: LiveChatPanelProps) {
           <Badge variant="outline" className="text-xs text-green-600 border-green-600 ml-auto">
             Agent online
           </Badge>
+        )}
+        {chatHistory.length > 0 && (
+          <Button variant="ghost" size="icon" className="h-6 w-6 ml-1" onClick={clearHistory} title="Clear chat history">
+            <Trash2 className="h-3 w-3" />
+          </Button>
         )}
       </CardHeader>
 
@@ -517,6 +542,63 @@ function MessageBubble({ message }: { message: Message }) {
       </div>
       {isUser && <User className="h-4 w-4 mt-1 shrink-0 text-muted-foreground" />}
     </div>
+  )
+}
+
+// ── Live logs panel (Kafka atom.agent.logs stream) ────────────────────────────
+
+function LiveLogsPanel({ agentId }: { agentId: string }) {
+  const [logs, setLogs] = useState<{ ts: string; msg: string; source: string }[]>([])
+  const [connected, setConnected] = useState(false)
+  const scrollRef = useRef<HTMLDivElement>(null)
+  const token = useAuthStore(s => s.accessToken)
+
+  useEffect(() => {
+    if (!token) return
+    const wsUrl = `${window.location.protocol === 'https:' ? 'wss' : 'ws'}://${window.location.host}/ws/agents/${agentId}/logs?token=${token}`
+    const ws = new WebSocket(wsUrl)
+    ws.onopen = () => setConnected(true)
+    ws.onclose = () => setConnected(false)
+    ws.onmessage = (e) => {
+      try {
+        const data = JSON.parse(e.data)
+        setLogs(prev => {
+          const next = [...prev.slice(-199), { ts: data.timestamp || new Date().toISOString(), msg: data.message || String(e.data), source: data.source || '' }]
+          return next
+        })
+        setTimeout(() => scrollRef.current?.scrollTo({ top: 9999, behavior: 'smooth' }), 30)
+      } catch {}
+    }
+    return () => ws.close()
+  }, [agentId, token])
+
+  return (
+    <Card className="border-dashed">
+      <CardHeader className="py-2 px-4 border-b flex flex-row items-center gap-2">
+        <Terminal className="h-4 w-4 text-muted-foreground" />
+        <span className="text-sm font-medium text-muted-foreground">Agent Logs</span>
+        <div className={`ml-auto h-2 w-2 rounded-full ${connected ? 'bg-green-500' : 'bg-muted'}`} title={connected ? 'Connected' : 'Disconnected'} />
+        {logs.length > 0 && (
+          <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => setLogs([])} title="Clear logs">
+            <Trash2 className="h-3 w-3" />
+          </Button>
+        )}
+      </CardHeader>
+      <div ref={scrollRef} className="max-h-40 overflow-y-auto bg-black/90 rounded-b-md px-3 py-2 font-mono text-xs">
+        {logs.length === 0 ? (
+          <p className="text-muted-foreground/50 text-center py-2">
+            {connected ? 'Waiting for logs…' : 'Connecting…'}
+          </p>
+        ) : (
+          logs.map((l, i) => (
+            <div key={i} className="flex gap-2 text-green-400/90 leading-5">
+              <span className="text-muted-foreground/50 shrink-0">{l.ts.slice(11, 19)}</span>
+              <span className="whitespace-pre-wrap break-all">{l.msg}</span>
+            </div>
+          ))
+        )}
+      </div>
+    </Card>
   )
 }
 
