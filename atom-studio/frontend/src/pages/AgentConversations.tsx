@@ -98,7 +98,7 @@ function useLiveRun(agentId: string, runId: string | null, enabled: boolean) {
         } else {
           setLiveMessages(prev => [...prev, msg as Message])
         }
-      } catch {}
+      } catch { /* ignore parse errors */ }
     }
     ws.onerror = () => setStatus('complete')
     return () => { ws.close(); wsRef.current = null }
@@ -567,7 +567,7 @@ function LiveLogsPanel({ agentId }: { agentId: string }) {
           return next
         })
         setTimeout(() => scrollRef.current?.scrollTo({ top: 9999, behavior: 'smooth' }), 30)
-      } catch {}
+      } catch { /* ignore parse errors */ }
     }
     return () => ws.close()
   }, [agentId, token])

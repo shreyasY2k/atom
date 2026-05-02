@@ -56,3 +56,17 @@ repos:
         files: \.rego$
         pass_filenames: false
         args: [policies/]
+
+      - id: eslint
+        name: eslint (atom-studio frontend)
+        language: system
+        entry: bash -c 'cd atom-studio/frontend && npm run lint'
+        pass_filenames: false
+        files: ^atom-studio/frontend/src/.*\.(ts|tsx)$
+
+      - id: pytest-studio
+        name: pytest (atom-studio)
+        language: system
+        entry: bash -c 'uv run --project atom-studio/backend --with pytest-asyncio python -m pytest atom-studio/backend/src/tests/ -q'
+        pass_filenames: false
+        files: ^atom-studio/

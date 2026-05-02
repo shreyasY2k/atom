@@ -18,14 +18,13 @@ from datetime import timezone
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
-
-log = logging.getLogger(__name__)
-
 from pydantic import BaseModel
 
 from ..auth.middleware import require_auth
 from ..database import get_conn
 from ..ws.run_broadcaster import run_broadcaster
+
+log = logging.getLogger(__name__)
 
 
 def _parse_jsonb_list(value: Any) -> list:

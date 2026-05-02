@@ -5,8 +5,6 @@ from fastapi import APIRouter, Body, Depends, HTTPException, status
 from ..auth.middleware import require_auth
 from ..ws.emit_agent_log import emit_agent_log
 from .service import (
-
-log = logging.getLogger(__name__)
     AgentCreatePayload,
     create_agent,
     delete_agent,
@@ -15,6 +13,8 @@ log = logging.getLogger(__name__)
     list_all_agents,
     regenerate_token,
 )
+
+log = logging.getLogger(__name__)
 
 # ── Per-domain agent routes (mounted at /api/domains/{domain_id}/agents) ──────
 
