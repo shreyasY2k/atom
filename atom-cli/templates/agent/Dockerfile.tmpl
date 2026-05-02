@@ -1,19 +1,13 @@
 FROM python:3.11-slim
 WORKDIR /app
 
+# git is required to install agentscope fork from GitHub
 RUN apt-get update && apt-get install -y --no-install-recommends git \
     && rm -rf /var/lib/apt/lists/*
 
+# Install all dependencies — agentscope fork (AtomChatModel) declared in requirements.txt
 COPY requirements.txt .
-
-# GITHUB_TOKEN is passed by `atom deploy` when set in the environment.
-# Required for private repos; omit for public repos.
-ARG GITHUB_TOKEN
-RUN if [ -n "$GITHUB_TOKEN" ]; then \
-      git config --global url."https://${GITHUB_TOKEN}@github.com/".insteadOf "https://github.com/"; \
-    fi && \
-    pip install --no-cache-dir -r requirements.txt && \
-    rm -f /root/.gitconfig
+RUN pip install --no-cache-dir -r requirements.txt
 
 COPY . .
 
