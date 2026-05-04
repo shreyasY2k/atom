@@ -1,0 +1,42 @@
+---
+# Loads dev seed data (admin@atom.local / admin123).
+# Applied by `make k8s-deploy` after atom-migrate Job completes.
+# ConfigMap atom-seed-data is created by `make k8s-deploy` from migrations/seed_dev.sql.
+# To re-run: kubectl delete job atom-seed -n atom-system && kubectl apply -f this file
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: atom-seed
+  namespace: atom-system
+  labels:
+    app: atom-seed
+spec:
+  backoffLimit: 2
+  ttlSecondsAfterFinished: 600
+  template:
+    spec:
+      restartPolicy: OnFailure
+      containers:
+        - name: seed
+          image: pgvector/pgvector:pg16
+          command: ["/bin/sh", "-c"]
+          args:
+            - |
+              psql -h $POSTGRES_HOST -p $POSTGRES_PORT -U $POSTGRES_USER -d $POSTGRES_DB \
+                -f /seed/seed_dev.sql
+          envFrom:
+            - configMapRef:
+                name: atom-cluster-config
+          env:
+            - name: PGPASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: atom-credentials
+                  key: POSTGRES_PASSWORD
+          volumeMounts:
+            - name: seed
+              mountPath: /seed
+      volumes:
+        - name: seed
+          configMap:
+            name: atom-seed-data

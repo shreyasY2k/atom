@@ -84,10 +84,13 @@ spec:
               memory: 1Gi
           readinessProbe:
             exec:
-              command: [pg_isready, -U, atom, -d, atom]
+              command:
+                - /bin/sh
+                - -c
+                - "pg_isready -U atom -d atom && psql -U atom -d atom -tc \"SELECT 1 FROM pg_extension WHERE extname='vector'\" | grep -q 1"
             initialDelaySeconds: 10
             periodSeconds: 5
-            failureThreshold: 12
+            failureThreshold: 24
           livenessProbe:
             exec:
               command: [pg_isready, -U, atom, -d, atom]

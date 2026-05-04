@@ -244,12 +244,15 @@ seed-dev: ## Load development seed data into docker-compose postgres (admin@atom
 	@PGPASSWORD=$(POSTGRES_PASSWORD) psql -h localhost -U atom -d atom -f migrations/seed_dev.sql
 	@echo "✓ Seed data loaded. Login: admin@atom.local / admin123"
 
-seed-k8s: ## Load development seed data into k8s postgres (port-forward required or auto-creates one)
+seed-k8s: ## Load development seed data into k8s postgres via in-cluster Job
 	@echo "→ Seeding k8s postgres..."
-	@kubectl port-forward -n atom-infra svc/postgres-postgresql 5432:5432 &
-	@sleep 3
-	@PGPASSWORD=$(POSTGRES_PASSWORD) psql -h localhost -U atom -d atom -f migrations/seed_dev.sql
-	@pkill -f "kubectl port-forward.*postgres-postgresql.*5432:5432" 2>/dev/null || true
+	@kubectl create configmap atom-seed-data \
+	  --from-file=seed_dev.sql=migrations/seed_dev.sql \
+	  --namespace atom-system \
+	  --dry-run=client -o yaml | kubectl apply -f -
+	@kubectl delete job atom-seed -n atom-system --ignore-not-found
+	@kubectl apply -f infra/manifests/seed-job.yaml
+	@kubectl wait job/atom-seed -n atom-system --for=condition=complete --timeout=60s
 	@echo "✓ Seed data loaded. Login: admin@atom.local / admin123"
 
 # ── Build targets ──────────────────────────────────────────────────────────────
@@ -470,18 +473,22 @@ k8s-deploy: ## Build images → push to local registry → apply manifests → m
 	    $(GHCR_REGISTRY)/atom-llm:latest prisma db push --schema $$SCHEMA \
 	    --skip-generate --accept-data-loss 2>/dev/null || echo "(prisma skipped)"
 	@pkill -f "port-forward.*5433" 2>/dev/null || true
-	@echo "→ Running ATOM DB migrations (after Prisma so --accept-data-loss cannot drop ATOM tables)..."
-	@kubectl port-forward -n atom-infra svc/postgres-postgresql 5432:5432 & \
-	  sleep 4 && \
-	  $(MIGRATE) -database "postgresql://atom:$(POSTGRES_PASSWORD)@localhost:5432/atom?sslmode=disable" \
-	    -path migrations up 2>/dev/null || echo "(migrations up-to-date)"
-	@pkill -f "kubectl port-forward.*postgres-postgresql.*5432:5432" 2>/dev/null || true
+	@echo "→ Syncing migrations ConfigMap..."
+	@kubectl create configmap atom-migrations \
+	  --from-file=migrations/ --namespace atom-system \
+	  --dry-run=client -o yaml | kubectl apply -f -
+	@kubectl create configmap atom-seed-data \
+	  --from-file=seed_dev.sql=migrations/seed_dev.sql \
+	  --namespace atom-system \
+	  --dry-run=client -o yaml | kubectl apply -f -
+	@echo "→ Running ATOM DB migrations Job (after Prisma so --accept-data-loss cannot drop ATOM tables)..."
+	@kubectl delete job atom-migrate -n atom-system --ignore-not-found
+	@kubectl apply -f infra/manifests/migrate-job.yaml
+	@kubectl wait job/atom-migrate -n atom-system --for=condition=complete --timeout=120s
 	@echo "→ Seeding development data (admin@atom.local / admin123)..."
-	@kubectl port-forward -n atom-infra svc/postgres-postgresql 5432:5432 & \
-	  sleep 3 && \
-	  PGPASSWORD=$(POSTGRES_PASSWORD) psql -h localhost -U atom -d atom \
-	    -f migrations/seed_dev.sql 2>/dev/null || echo "(seed skipped)"
-	@pkill -f "kubectl port-forward.*postgres-postgresql.*5432:5432" 2>/dev/null || true
+	@kubectl delete job atom-seed -n atom-system --ignore-not-found
+	@kubectl apply -f infra/manifests/seed-job.yaml
+	@kubectl wait job/atom-seed -n atom-system --for=condition=complete --timeout=60s
 	@echo "→ Waiting for rollouts..."
 	@kubectl rollout status deployment/gate            -n atom-system --timeout=120s
 	@kubectl rollout status deployment/atom-llm        -n atom-system --timeout=180s

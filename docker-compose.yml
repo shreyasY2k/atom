@@ -33,10 +33,11 @@ services:
       - postgres_data:/var/lib/postgresql/data
       - ./infra/scripts/init-postgres.sql:/docker-entrypoint-initdb.d/init.sql:ro
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U atom"]
+      test: ["CMD-SHELL", "pg_isready -U atom -d atom && psql -U atom -d atom -tc \"SELECT 1 FROM pg_extension WHERE extname='vector'\" | grep -q 1"]
       interval: 5s
       timeout: 5s
-      retries: 10
+      retries: 20
+      start_period: 10s
 
   # ── DB migrations (auto-run on every start; idempotent) ──────────────────────
   migrate:
@@ -48,10 +49,17 @@ services:
         condition: service_healthy
     volumes:
       - ./migrations:/migrations:ro
-    command: >
-      -path=/migrations
-      -database postgresql://atom:${POSTGRES_PASSWORD:-changeme}@postgres:5432/atom?sslmode=disable
-      up
+    entrypoint: ["/bin/sh", "-c"]
+    command: |
+      n=0
+      until [ $$n -ge 10 ]; do
+        /migrate -path=/migrations -database "postgresql://atom:${POSTGRES_PASSWORD:-changeme}@postgres:5432/atom?sslmode=disable" up && exit 0
+        n=$$(($$n+1))
+        echo "Migration attempt $$n failed, retrying in 3s..."
+        sleep 3
+      done
+      echo "Migrations failed after 10 attempts"
+      exit 1
 
   # ── Dev seed (admin@atom.local / admin123) ────────────────────────────────────
   seed:
