@@ -111,6 +111,7 @@ infra-down: ## Tear down infra services (delete atom-infra / atom-system / atom-
 
 # ── Operator mode (docker-compose.yml — pulls pre-built GHCR images) ──────────
 up: ## Start stack in operator mode (pulls pre-built GHCR images)
+	@docker volume create atom-postgres-data 2>/dev/null || true
 	@docker compose up -d
 
 down: ## Stop operator-mode stack (keeps volumes)
@@ -118,6 +119,7 @@ down: ## Stop operator-mode stack (keeps volumes)
 
 # ── Local dev (docker-compose) ────────────────────────────────────────────────
 dev-up: ## Start full stack via docker-compose (first run may take a few minutes)
+	@docker volume create atom-postgres-data 2>/dev/null || true
 	@docker compose -f docker-compose.dev.yml up -d
 	@echo ""
 	@echo "✓ Dev stack up. Services:"
@@ -151,9 +153,12 @@ dev-down: ## Stop docker-compose dev stack (keeps volumes)
 	@docker compose -f docker-compose.dev.yml down
 	@echo "✓ Dev stack stopped."
 
-dev-down-clean: ## Stop docker-compose and remove all volumes (full reset)
+dev-down-clean: ## Stop stack and wipe ephemeral volumes (postgres data is KEPT — use dev-reset-db to also wipe it)
 	@docker compose -f docker-compose.dev.yml down -v
-	@echo "✓ Dev stack removed (volumes wiped)."
+	@echo "✓ Dev stack removed (postgres data kept in atom-postgres-data volume)."
+
+dev-reset-db: ## ⚠ DESTRUCTIVE — wipe all postgres data (run make dev-down first)
+	@docker volume rm atom-postgres-data 2>/dev/null && echo "✓ Postgres data volume deleted." || echo "(volume not found)"
 
 dev-rebuild: ## Rebuild and restart all services (after code changes)
 	@docker compose -f docker-compose.dev.yml build

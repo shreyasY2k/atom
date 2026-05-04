@@ -374,6 +374,8 @@ services:
 
 volumes:
   postgres_data:
+    external: true
+    name: atom-postgres-data
   redis_data:
   minio_data:
   redpanda_data:

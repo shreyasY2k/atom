@@ -34,9 +34,7 @@ make generate-keys
 #   openssl rand -hex 32   (run twice, one value per variable)
 
 # 3. Start everything
-make up                     # pulls pre-built images (~1 min)
-make migrate-dev            # apply DB schema
-make seed-dev               # create admin user
+make up                     # pulls images, runs migrations + seed automatically
 
 # 4. Open Studio
 open http://localhost:3000  # admin@atom.local / admin123
@@ -47,7 +45,7 @@ open http://localhost:3000  # admin@atom.local / admin123
 ```bash
 cp .env.example .env && make generate-keys   # then set GEMINI_API_KEY in .env
 make infra-up                                # kind cluster + infra (Postgres, Redis, etc.)
-make k8s-deploy                              # build + deploy all services
+make k8s-deploy                              # build + deploy all services (migrations auto-run)
 make monitoring-up                           # Grafana + Loki + Tempo
 sudo make ingress-hosts && make ingress-up   # *.atom.local on port 80
 

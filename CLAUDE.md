@@ -28,9 +28,9 @@ All top-level targets are in the root `Makefile`.
 ```bash
 cp .env.example .env                  # fill in secrets once
 make generate-keys                    # creates .keys/jwt_private.pem + jwt_public.pem
-make dev-up                           # docker compose up --build -d (all services)
-make migrate-dev                      # apply all DB migrations against docker postgres
-make seed-dev                         # load seed_dev.sql (admin@atom.local / admin123)
+make dev-up                           # docker compose up --build -d; auto-runs migrations + seed
+# make migrate-dev / make seed-dev are no longer needed — init containers handle them
+make dev-reset-db                     # ⚠ wipe postgres data (run make dev-down first)
 make dev-down                         # tear down
 ```
 

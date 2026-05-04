@@ -429,7 +429,11 @@ services:
       - ./infra/grafana/provisioning/dashboards:/etc/grafana/provisioning/dashboards:ro
 
 volumes:
+  # External volume — NOT deleted by `docker compose down -v` or `make dev-down-clean`.
+  # Created automatically by `make dev-up`. Use `make dev-reset-db` to wipe intentionally.
   postgres_data:
+    external: true
+    name: atom-postgres-data
   redis_data:
   minio_data:
   redpanda_data:
