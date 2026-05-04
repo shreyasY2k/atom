@@ -1,0 +1,243 @@
+# ── ATOM GitLab CI/CD ─────────────────────────────────────────────────────────
+#
+# Replaces .github/workflows/{ci,release,publish-sdk}.yml
+#
+# Required CI/CD variables (Settings → CI/CD → Variables):
+#   GITLAB_TOKEN   — Project/Personal Access Token with api + write_registry scope
+#                    (used by GoReleaser to create releases and upload assets)
+#
+# Registry:  registry.gitlab.com / $CI_REGISTRY_IMAGE  (e.g. .../atom/atom-gate)
+# Note:      .goreleaser.yaml also needs a gitlab_urls section + GITLAB_TOKEN env
+#            to publish CLI binaries to GitLab Releases instead of GitHub Releases:
+#
+#   gitlab_urls:
+#     api: https://gitlab.com/api/v4/
+#     download: https://gitlab.com
+
+stages:
+  - test
+  - lint
+  - build
+  - release
+
+# ── Global defaults ────────────────────────────────────────────────────────────
+
+default:
+  tags: []  # use shared runners; pin to a specific tag if needed
+
+variables:
+  DOCKER_DRIVER: overlay2
+  DOCKER_TLS_CERTDIR: ""
+  # Suppress go telemetry
+  GOTELEMETRY: "off"
+  UV_SYSTEM_PYTHON: "0"
+
+# ── Reusable rule sets ─────────────────────────────────────────────────────────
+
+.on-main-or-mr:
+  rules:
+    - if: '$CI_COMMIT_BRANCH == "main"'
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+
+.on-main-or-tag:
+  rules:
+    - if: '$CI_COMMIT_BRANCH == "main"'
+    - if: '$CI_COMMIT_TAG =~ /^v/'
+
+.on-tag-only:
+  rules:
+    - if: '$CI_COMMIT_TAG =~ /^v/'
+
+# ══════════════════════════════════════════════════════════════════════════════
+# STAGE: test
+# ══════════════════════════════════════════════════════════════════════════════
+
+test-go:
+  stage: test
+  image: golang:1.25-alpine
+  extends: .on-main-or-mr
+  cache:
+    key: go-$CI_COMMIT_REF_SLUG
+    paths: [/root/go/pkg/mod, /root/.cache/go-build]
+  before_script:
+    - apk add --no-cache git
+  script:
+    - cd gate && go test ./... -race -count=1
+    - cd ../atom-cli && go test ./... -race -count=1
+
+test-python-studio:
+  stage: test
+  image: python:3.11-slim
+  extends: .on-main-or-mr
+  cache:
+    key: uv-studio-$CI_COMMIT_REF_SLUG
+    paths: [.venv, ~/.cache/uv]
+  before_script:
+    - apt-get update -qq && apt-get install -y --no-install-recommends openssl
+    - pip install uv --quiet
+    - mkdir -p .keys
+    - openssl genrsa -out .keys/jwt_private.pem 2048 2>/dev/null
+    - openssl rsa -in .keys/jwt_private.pem -pubout -out .keys/jwt_public.pem 2>/dev/null
+  script:
+    - uv run --project atom-studio/backend
+        --with pytest-asyncio
+        python -m pytest atom-studio/backend/src/tests/ -q
+
+test-python-runtime:
+  stage: test
+  image: python:3.11-slim
+  extends: .on-main-or-mr
+  cache:
+    key: uv-runtime-$CI_COMMIT_REF_SLUG
+    paths: [.venv, ~/.cache/uv]
+  before_script:
+    - pip install uv --quiet
+  script:
+    - uv run --project atom-runtime/runtime
+        --with pytest-asyncio
+        python -m pytest atom-runtime/runtime/tests/ -q
+
+test-opa:
+  stage: test
+  image:
+    name: openpolicyagent/opa:latest-rootless
+    entrypoint: [""]
+  extends: .on-main-or-mr
+  script:
+    - /opa test policies/ -v
+
+# ══════════════════════════════════════════════════════════════════════════════
+# STAGE: lint
+# ══════════════════════════════════════════════════════════════════════════════
+
+lint:
+  stage: lint
+  image: golang:1.25-alpine
+  extends: .on-main-or-mr
+  cache:
+    key: go-$CI_COMMIT_REF_SLUG
+    paths: [/root/go/pkg/mod, /root/.cache/go-build]
+  before_script:
+    - apk add --no-cache git python3 py3-pip py3-virtualenv
+    - pip install uv --quiet --break-system-packages
+  script:
+    - cd gate    && go vet ./...
+    - cd ../atom-cli && go vet ./...
+    - uv run --with ruff ruff check atom-studio/ atom-runtime/runtime/ infra/log-archiver/
+
+# ══════════════════════════════════════════════════════════════════════════════
+# STAGE: build  (Docker images → GitLab Container Registry)
+# ══════════════════════════════════════════════════════════════════════════════
+#
+# Images are tagged:
+#   :latest  — always (main push and tag push)
+#   :main    — on main branch push
+#   :<tag>   — on version tag (e.g. v1.0.0)
+
+.docker-build:
+  stage: build
+  image: docker:latest
+  extends: .on-main-or-tag
+  services:
+    - docker:dind
+  before_script:
+    - docker login -u "$CI_REGISTRY_USER" -p "$CI_REGISTRY_PASSWORD" "$CI_REGISTRY"
+    - docker buildx create --use --name atom-builder 2>/dev/null || docker buildx use atom-builder
+    - |
+      if [ -n "$CI_COMMIT_TAG" ]; then
+        TAGS="-t $CI_REGISTRY_IMAGE/$IMAGE_NAME:latest -t $CI_REGISTRY_IMAGE/$IMAGE_NAME:$CI_COMMIT_TAG"
+      else
+        TAGS="-t $CI_REGISTRY_IMAGE/$IMAGE_NAME:latest -t $CI_REGISTRY_IMAGE/$IMAGE_NAME:main"
+      fi
+
+build-images:
+  extends: .docker-build
+  parallel:
+    matrix:
+      - IMAGE_NAME: atom-gate
+        BUILD_CONTEXT: gate
+        DOCKERFILE: gate/Dockerfile
+      - IMAGE_NAME: atom-llm
+        BUILD_CONTEXT: atom-llm
+        DOCKERFILE: atom-llm/Dockerfile.dev
+      - IMAGE_NAME: atom-studio-api
+        BUILD_CONTEXT: atom-studio/backend
+        DOCKERFILE: atom-studio/backend/Dockerfile
+      - IMAGE_NAME: atom-studio-ui
+        BUILD_CONTEXT: atom-studio/frontend
+        DOCKERFILE: atom-studio/frontend/Dockerfile
+      - IMAGE_NAME: atom-runtime
+        BUILD_CONTEXT: atom-runtime/runtime
+        DOCKERFILE: atom-runtime/runtime/Dockerfile
+      - IMAGE_NAME: atom-log-archiver
+        BUILD_CONTEXT: infra/log-archiver
+        DOCKERFILE: infra/log-archiver/Dockerfile
+  script:
+    - |
+      docker buildx build \
+        --platform linux/amd64 \
+        --cache-from type=registry,ref=$CI_REGISTRY_IMAGE/$IMAGE_NAME:latest \
+        --cache-to   type=inline \
+        $TAGS \
+        --push \
+        -f $DOCKERFILE \
+        $BUILD_CONTEXT
+
+# ══════════════════════════════════════════════════════════════════════════════
+# STAGE: release  (CLI binaries via GoReleaser + SDK wheel) — tags only
+# ══════════════════════════════════════════════════════════════════════════════
+
+release-cli:
+  stage: release
+  image: golang:1.25-alpine
+  extends: .on-tag-only
+  cache:
+    key: go-release
+    paths: [/root/go/pkg/mod, /root/.cache/go-build]
+  before_script:
+    - apk add --no-cache git bash curl
+    # Pin GoReleaser to same version used in GitHub CI
+    - |
+      curl -fsSL \
+        https://github.com/goreleaser/goreleaser/releases/download/v2.15.4/goreleaser_Linux_x86_64.tar.gz \
+        | tar -xz -C /usr/local/bin goreleaser
+    # Workspace prep (equivalent to the CI step that replaces before hooks)
+    - go work sync
+    - cd atom-cli && go mod tidy && cd ..
+  script:
+    # GITLAB_TOKEN must be set in CI/CD variables with api scope.
+    # .goreleaser.yaml also needs: gitlab_urls.api + gitlab_urls.download
+    - goreleaser release --clean --skip=before --skip=validate
+  variables:
+    GITLAB_TOKEN: $GITLAB_TOKEN
+
+release-sdk-wheel:
+  stage: release
+  image: python:3.11-slim
+  extends: .on-tag-only
+  before_script:
+    - pip install uv --quiet
+    - apt-get update -qq && apt-get install -y --no-install-recommends curl jq
+  script:
+    - cd atom-sdk/atom_platform_sdk
+    - uv build --wheel
+    - |
+      WHEEL=$(ls dist/*.whl | head -1)
+      echo "Uploading $WHEEL to GitLab release $CI_COMMIT_TAG …"
+      # Create or update the release via GitLab Releases API, then upload the wheel
+      curl --fail --silent \
+        --header "PRIVATE-TOKEN: $GITLAB_TOKEN" \
+        --request POST \
+        --form "name=atom_platform_sdk wheel" \
+        --form "file=@$WHEEL" \
+        "$CI_API_V4_URL/projects/$CI_PROJECT_ID/uploads" \
+        -o /tmp/upload.json
+      WHEEL_URL=$(jq -r .full_path /tmp/upload.json)
+      # Link the uploaded asset to the release
+      curl --fail --silent \
+        --header "PRIVATE-TOKEN: $GITLAB_TOKEN" \
+        --header "Content-Type: application/json" \
+        --request POST \
+        --data "{\"name\":\"$(basename $WHEEL)\",\"url\":\"$CI_SERVER_URL$WHEEL_URL\"}" \
+        "$CI_API_V4_URL/projects/$CI_PROJECT_ID/releases/$CI_COMMIT_TAG/assets/links"
+      echo "✓ SDK wheel attached to release $CI_COMMIT_TAG"
