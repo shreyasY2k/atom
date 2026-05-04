@@ -2,6 +2,12 @@ version: 2
 
 project_name: atom
 
+# GitLab release target — used when GITLAB_TOKEN is set (GitLab CI).
+# When running on GitHub Actions, GoReleaser falls back to the GitHub API automatically.
+gitlab_urls:
+  api: https://gitlab.com/api/v4/
+  download: https://gitlab.com
+
 builds:
   - id: atom-cli
     # No dir: — use full path from repo root so GoReleaser v2 does not
