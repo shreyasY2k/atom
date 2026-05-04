@@ -1,0 +1,26 @@
+stages:
+  - build
+
+build-agent:
+  stage: build
+  image: docker:latest
+  services:
+    - docker:dind
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "api"'
+    - if: '$CI_PIPELINE_SOURCE == "trigger"'
+    - if: '$CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH'
+  before_script:
+    - docker login -u "$CI_REGISTRY_USER" -p "$CI_REGISTRY_PASSWORD" $CI_REGISTRY
+  script:
+    - TAG="${IMAGE_TAG:-latest}"
+    - docker build
+        --cache-from "$CI_REGISTRY_IMAGE:latest"
+        --build-arg BUILDKIT_INLINE_CACHE=1
+        -t "$CI_REGISTRY_IMAGE:$TAG" .
+    - docker push "$CI_REGISTRY_IMAGE:$TAG"
+    - |
+      if [ "$TAG" != "latest" ]; then
+        docker tag "$CI_REGISTRY_IMAGE:$TAG" "$CI_REGISTRY_IMAGE:latest"
+        docker push "$CI_REGISTRY_IMAGE:latest"
+      fi

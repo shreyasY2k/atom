@@ -145,7 +145,7 @@ dev-up: ## Start full stack via docker-compose (first run may take a few minutes
 	@echo "  atom-studio tRPC:    http://localhost:3001  (agentscope.init studio_url)"
 	@echo ""
 	@echo "  Hot-reload frontend: cd atom-studio/frontend && npm run dev  → :5173"
-	@echo "  After first run:     make migrate-dev && make seed-dev"
+	@echo "  Migrations + seed run automatically on every start."
 
 dev-down: ## Stop docker-compose dev stack (keeps volumes)
 	@docker compose -f docker-compose.dev.yml down

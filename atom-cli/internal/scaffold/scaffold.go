@@ -45,14 +45,16 @@ func Generate(a *wizard.Answers) error {
 
 	// outFile → template path (relative to embedded FS root)
 	files := map[string]string{
-		"agent.py":         "agent/agent.py.tmpl",
-		"server.py":        "agent/server.py.tmpl",
-		"tools.py":         "agent/tools.py.tmpl",
-		"requirements.txt": "agent/requirements.txt.tmpl",
-		".env.example":     "agent/env.example.tmpl",
-		".gitignore":       "agent/gitignore.tmpl",
-		"README.md":        "agent/README.md.tmpl",
-		"Dockerfile":       "agent/Dockerfile.tmpl",
+		"agent.py":                         "agent/agent.py.tmpl",
+		"server.py":                        "agent/server.py.tmpl",
+		"tools.py":                         "agent/tools.py.tmpl",
+		"requirements.txt":                 "agent/requirements.txt.tmpl",
+		".env.example":                     "agent/env.example.tmpl",
+		".gitignore":                       "agent/gitignore.tmpl",
+		"README.md":                        "agent/README.md.tmpl",
+		"Dockerfile":                       "agent/Dockerfile.tmpl",
+		".github/workflows/atom-build.yml": "agent/github-workflow-build.yml.tmpl",
+		".gitlab-ci.yml":                   "agent/gitlab-ci.yml.tmpl",
 	}
 
 	for outFile, tmplPath := range files {
@@ -116,7 +118,11 @@ func renderTemplate(dir, outFile, tmplPath string, data TemplateData) error {
 		return fmt.Errorf("parse template %s: %w", tmplPath, err)
 	}
 
-	f, err := os.Create(filepath.Join(dir, outFile))
+	dest := filepath.Join(dir, outFile)
+	if err := os.MkdirAll(filepath.Dir(dest), 0o755); err != nil {
+		return fmt.Errorf("create dirs for %s: %w", outFile, err)
+	}
+	f, err := os.Create(dest)
 	if err != nil {
 		return err
 	}

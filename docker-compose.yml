@@ -38,6 +38,35 @@ services:
       timeout: 5s
       retries: 10
 
+  # ── DB migrations (auto-run on every start; idempotent) ──────────────────────
+  migrate:
+    image: migrate/migrate:v4.18.1
+    container_name: atom-migrate
+    restart: "no"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    volumes:
+      - ./migrations:/migrations:ro
+    command: >
+      -path=/migrations
+      -database postgresql://atom:${POSTGRES_PASSWORD:-changeme}@postgres:5432/atom?sslmode=disable
+      up
+
+  # ── Dev seed (admin@atom.local / admin123) ────────────────────────────────────
+  seed:
+    image: pgvector/pgvector:pg16
+    container_name: atom-seed
+    restart: "no"
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    volumes:
+      - ./migrations/seed_dev.sql:/seed_dev.sql:ro
+    environment:
+      PGPASSWORD: ${POSTGRES_PASSWORD:-changeme}
+    entrypoint: ["psql", "-h", "postgres", "-U", "atom", "-d", "atom", "-f", "/seed_dev.sql"]
+
   # ── Redis 7 ──────────────────────────────────────────────────────────────────
   redis:
     image: redis:7-alpine
@@ -146,6 +175,7 @@ services:
     depends_on:
       postgres: { condition: service_healthy }
       redis:    { condition: service_healthy }
+      migrate:  { condition: service_completed_successfully }
     env_file: .env
     environment:
       DATABASE_URL: postgresql://atom:${POSTGRES_PASSWORD:-changeme}@postgres:5432/atom?sslmode=disable
@@ -194,6 +224,7 @@ services:
     depends_on:
       postgres: { condition: service_healthy }
       redis:    { condition: service_healthy }
+      seed:     { condition: service_completed_successfully }
     env_file: .env
     environment:
       DATABASE_URL: postgresql://atom:${POSTGRES_PASSWORD:-changeme}@postgres:5432/atom?sslmode=disable

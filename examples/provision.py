@@ -197,6 +197,97 @@ def build_image(agent_key: str, image_tag: str):
     ok(f"Built {image_tag}")
 
 
+def trigger_ci_build(provider: str, repo_url: str, branch: str, token: str, agent_key: str) -> str:
+    """Trigger a GitHub Actions or GitLab CI build and return the pushed image reference."""
+    import urllib.request, urllib.error  # noqa: E401, PLC0415
+    import json as _json  # noqa: PLC0415
+
+    headers_base = {"Content-Type": "application/json"}
+
+    if provider == "github":
+        # Parse owner/repo from URL
+        path = repo_url.rstrip("/").removeprefix("https://github.com/").removesuffix(".git")
+        owner, repo = path.split("/", 1)
+        image_tag = "latest"
+        image_ref = f"ghcr.io/{owner.lower()}/{repo.lower()}:{image_tag}"
+
+        # Trigger workflow_dispatch
+        api_url = f"https://api.github.com/repos/{owner}/{repo}/actions/workflows/atom-build.yml/dispatches"
+        body = _json.dumps({"ref": branch, "inputs": {"image_tag": image_tag}}).encode()
+        req = urllib.request.Request(api_url, data=body, headers={
+            **headers_base,
+            "Authorization": f"Bearer {token}",
+            "Accept": "application/vnd.github+json",
+        })
+        try:
+            urllib.request.urlopen(req)
+        except urllib.error.HTTPError as e:
+            fail(f"GitHub API error {e.code}: {e.read().decode()}")
+
+        info(f"GitHub Actions triggered for {repo_url} — waiting up to 20 min…")
+        import time  # noqa: PLC0415
+        time.sleep(8)
+
+        for _ in range(80):
+            runs_url = f"https://api.github.com/repos/{owner}/{repo}/actions/workflows/atom-build.yml/runs?branch={branch}&per_page=1"
+            req = urllib.request.Request(runs_url, headers={
+                "Authorization": f"Bearer {token}",
+                "Accept": "application/vnd.github+json",
+            })
+            data = _json.loads(urllib.request.urlopen(req).read())
+            runs = data.get("workflow_runs", [])
+            if runs:
+                run_status = runs[0]["status"]
+                conclusion = runs[0].get("conclusion")
+                if run_status == "completed":
+                    if conclusion == "success":
+                        ok(f"GitHub Actions build succeeded → {image_ref}")
+                        return image_ref
+                    fail(f"GitHub Actions build finished with conclusion: {conclusion}")
+                info(f"  workflow {run_status}…")
+            time.sleep(15)
+        fail("Timed out waiting for GitHub Actions workflow")
+
+    elif provider == "gitlab":
+        from urllib.parse import quote  # noqa: PLC0415
+        # Parse host/project from URL
+        url_stripped = repo_url.rstrip("/").removesuffix(".git")
+        if url_stripped.startswith("https://"):
+            url_stripped = url_stripped[8:]
+        host, project_path = url_stripped.split("/", 1)
+        encoded = quote(project_path, safe="")
+        image_tag = "latest"
+        image_ref = f"registry.{host}/{project_path.lower()}:{image_tag}"
+
+        # Trigger pipeline
+        api_url = f"https://{host}/api/v4/projects/{encoded}/pipeline"
+        body = _json.dumps({"ref": branch, "variables": [{"key": "IMAGE_TAG", "value": image_tag}]}).encode()
+        req = urllib.request.Request(api_url, data=body, headers={
+            **headers_base,
+            "Authorization": f"Bearer {token}",
+        })
+        data = _json.loads(urllib.request.urlopen(req).read())
+        pipeline_id = data["id"]
+        info(f"GitLab pipeline {pipeline_id} triggered — waiting up to 20 min…")
+
+        import time  # noqa: PLC0415
+        for _ in range(80):
+            status_url = f"https://{host}/api/v4/projects/{encoded}/pipelines/{pipeline_id}"
+            req = urllib.request.Request(status_url, headers={"Authorization": f"Bearer {token}"})
+            status_data = _json.loads(urllib.request.urlopen(req).read())
+            pipeline_status = status_data["status"]
+            if pipeline_status == "success":
+                ok(f"GitLab pipeline succeeded → {image_ref}")
+                return image_ref
+            if pipeline_status in ("failed", "canceled", "skipped"):
+                fail(f"GitLab pipeline finished with status: {pipeline_status}")
+            info(f"  pipeline {pipeline_status}…")
+            time.sleep(15)
+        fail("Timed out waiting for GitLab CI pipeline")
+
+    return ""  # unreachable
+
+
 def load_image_k8s(image_tag: str, cluster: str = "atom"):
     info(f"Loading {image_tag} into kind cluster '{cluster}'...")
     run(["kind", "load", "docker-image", image_tag, "--name", cluster])
@@ -255,6 +346,14 @@ def main():
     parser.add_argument("--password", default=os.environ.get("ADMIN_PASSWORD", "admin123"))
     parser.add_argument("--cluster", default="atom", help="kind cluster name (k8s mode)")
     parser.add_argument("--skip-build", action="store_true", help="Skip docker build step")
+    parser.add_argument("--ci", choices=["local", "github", "gitlab"], default="local",
+                        help="CI provider for building images (default: local docker build)")
+    parser.add_argument("--repo", default=None,
+                        help="Repository URL for CI builds (required when --ci github|gitlab)")
+    parser.add_argument("--branch", default="main",
+                        help="Branch to build from in CI mode (default: main)")
+    parser.add_argument("--ci-token", default=os.environ.get("GITHUB_TOKEN") or os.environ.get("GITLAB_TOKEN"),
+                        help="CI API token (reads GITHUB_TOKEN or GITLAB_TOKEN from env)")
     args = parser.parse_args()
 
     print(f"""
@@ -294,11 +393,20 @@ def main():
 
     # ── Step 4: Build + load images ───────────────────────────────────────────
     if not args.skip_build:
-        banner("Step 4/5 — Building Docker images")
-        for p in provisioned:
-            build_image(p["key"], p["image"])
-            if args.mode == "k8s":
-                load_image_k8s(p["image"], args.cluster)
+        if args.ci == "local":
+            banner("Step 4/5 — Building Docker images (local)")
+            for p in provisioned:
+                build_image(p["key"], p["image"])
+                if args.mode == "k8s":
+                    load_image_k8s(p["image"], args.cluster)
+        elif args.ci in ("github", "gitlab"):
+            banner(f"Step 4/5 — Triggering {args.ci.title()} CI build")
+            if not args.repo:
+                fail(f"--repo is required when using --ci {args.ci}")
+            if not args.ci_token:
+                fail(f"CI token required: set {'GITHUB_TOKEN' if args.ci=='github' else 'GITLAB_TOKEN'} or pass --ci-token")
+            for p in provisioned:
+                p["image"] = trigger_ci_build(args.ci, args.repo, args.branch, args.ci_token, p["key"])
     else:
         banner("Step 4/5 — Skipping image build (--skip-build)")
 
