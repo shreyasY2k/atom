@@ -7,6 +7,11 @@ project_name: atom
 gitlab_urls:
   api: https://gitlab.com/api/v4/
   download: https://gitlab.com
+  # use_job_token makes GoReleaser send CI_JOB_TOKEN via JOB-TOKEN header (not
+  # PRIVATE-TOKEN). Without this, GitLab returns 404 on release artifact uploads
+  # because CI_JOB_TOKEN is not a valid PRIVATE-TOKEN value.
+  # GITLAB_TOKEN in the CI job is still required for GoReleaser's SCM detection.
+  use_job_token: true
 
 builds:
   - id: atom-cli
