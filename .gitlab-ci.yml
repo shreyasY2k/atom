@@ -62,8 +62,8 @@ test-go:
     key: go-$CI_COMMIT_REF_SLUG
     paths: [/root/go/pkg/mod, /root/.cache/go-build]
   script:
-    - cd gate && go test ./... -race -count=1
-    - cd ../atom-cli && go test ./... -race -count=1
+    - (cd gate && go test ./... -race -count=1)
+    - (cd atom-cli && go test ./... -race -count=1)
 
 test-python-studio:
   stage: test
@@ -126,8 +126,8 @@ lint:
     - apk add --no-cache git python3 py3-pip py3-virtualenv
     - pip install uv --quiet --break-system-packages
   script:
-    - cd gate    && go vet ./...
-    - cd ../atom-cli && go vet ./...
+    - (cd gate && go vet ./...)
+    - (cd atom-cli && go vet ./...)
     - uv run --with ruff ruff check atom-studio/ atom-runtime/runtime/ infra/log-archiver/
 
 # ══════════════════════════════════════════════════════════════════════════════
