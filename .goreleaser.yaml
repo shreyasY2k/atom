@@ -7,6 +7,9 @@ project_name: atom
 gitlab_urls:
   api: https://gitlab.com/api/v4/
   download: https://gitlab.com
+  # Use CI_JOB_TOKEN instead of a manually managed GITLAB_TOKEN PAT.
+  # This mirrors how docker login uses CI_REGISTRY_PASSWORD (also job-token backed).
+  use_job_token: true
 
 builds:
   - id: atom-cli

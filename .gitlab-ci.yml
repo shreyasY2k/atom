@@ -3,16 +3,12 @@
 # Replaces .github/workflows/{ci,release,publish-sdk}.yml
 #
 # Required CI/CD variables (Settings → CI/CD → Variables):
-#   GITLAB_TOKEN   — Project/Personal Access Token with api + write_registry scope
-#                    (used by GoReleaser to create releases and upload assets)
+#   None required for release — GoReleaser and the wheel upload both use CI_JOB_TOKEN
+#   (the same built-in token that powers docker login via CI_REGISTRY_PASSWORD).
 #
 # Registry:  registry.gitlab.com / $CI_REGISTRY_IMAGE  (e.g. .../atom/atom-gate)
-# Note:      .goreleaser.yaml also needs a gitlab_urls section + GITLAB_TOKEN env
-#            to publish CLI binaries to GitLab Releases instead of GitHub Releases:
-#
-#   gitlab_urls:
-#     api: https://gitlab.com/api/v4/
-#     download: https://gitlab.com
+# Note:      .goreleaser.yaml has gitlab_urls.use_job_token: true so no external
+#            GITLAB_TOKEN PAT is needed to publish CLI binaries to GitLab Releases.
 
 stages:
   - test
@@ -210,11 +206,9 @@ release-cli:
     - go work sync
     - cd atom-cli && go mod tidy && cd ..
   script:
-    # GITLAB_TOKEN must be set in CI/CD variables with api scope.
-    # .goreleaser.yaml also needs: gitlab_urls.api + gitlab_urls.download
+    # GoReleaser uses CI_JOB_TOKEN via use_job_token: true in .goreleaser.yaml —
+    # no external GITLAB_TOKEN PAT needed (same mechanism as docker login).
     - goreleaser release --clean --skip=before --skip=validate
-  variables:
-    GITLAB_TOKEN: $GITLAB_TOKEN
 
 release-sdk-wheel:
   stage: release
@@ -231,7 +225,7 @@ release-sdk-wheel:
       echo "Uploading $WHEEL to GitLab release $CI_COMMIT_TAG …"
       # Create or update the release via GitLab Releases API, then upload the wheel
       curl --fail --silent \
-        --header "PRIVATE-TOKEN: $GITLAB_TOKEN" \
+        --header "JOB-TOKEN: $CI_JOB_TOKEN" \
         --request POST \
         --form "name=atom_platform_sdk wheel" \
         --form "file=@$WHEEL" \
@@ -240,7 +234,7 @@ release-sdk-wheel:
       WHEEL_URL=$(jq -r .full_path /tmp/upload.json)
       # Link the uploaded asset to the release
       curl --fail --silent \
-        --header "PRIVATE-TOKEN: $GITLAB_TOKEN" \
+        --header "JOB-TOKEN: $CI_JOB_TOKEN" \
         --header "Content-Type: application/json" \
         --request POST \
         --data "{\"name\":\"$(basename $WHEEL)\",\"url\":\"$CI_SERVER_URL$WHEEL_URL\"}" \
