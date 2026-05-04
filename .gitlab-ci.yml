@@ -7,8 +7,8 @@
 #   (the same built-in token that powers docker login via CI_REGISTRY_PASSWORD).
 #
 # Registry:  registry.gitlab.com / $CI_REGISTRY_IMAGE  (e.g. .../atom/atom-gate)
-# Note:      .goreleaser.yaml has gitlab_urls.use_job_token: true so no external
-#            GITLAB_TOKEN PAT is needed to publish CLI binaries to GitLab Releases.
+# Note:      release-cli sets GITLAB_TOKEN=$CI_JOB_TOKEN so GoReleaser can detect GitLab
+#            as the SCM target. No external PAT is required (GitLab 15.7+).
 
 stages:
   - test
@@ -205,38 +205,43 @@ release-cli:
     # Workspace prep (equivalent to the CI step that replaces before hooks)
     - go work sync
     - cd atom-cli && go mod tidy && cd ..
+  variables:
+    # GoReleaser requires one of GITHUB_TOKEN / GITLAB_TOKEN / GITEA_TOKEN to detect
+    # the SCM. Point it at CI_JOB_TOKEN — no external PAT needed; GitLab 15.7+ grants
+    # CI_JOB_TOKEN permission to create releases in the same project.
+    GITLAB_TOKEN: $CI_JOB_TOKEN
   script:
-    # GoReleaser uses CI_JOB_TOKEN via use_job_token: true in .goreleaser.yaml —
-    # no external GITLAB_TOKEN PAT needed (same mechanism as docker login).
     - goreleaser release --clean --skip=before --skip=validate
 
 release-sdk-wheel:
   stage: release
   image: python:3.11-slim
   extends: .on-tag-only
+  # Wait for release-cli so the GitLab release exists before we attach assets.
+  needs: [release-cli]
   before_script:
     - pip install uv --quiet
-    - apt-get update -qq && apt-get install -y --no-install-recommends curl jq
+    - apt-get update -qq && apt-get install -y --no-install-recommends curl
   script:
     - cd atom-sdk/atom_platform_sdk
     - uv build --wheel
     - |
       WHEEL=$(ls dist/*.whl | head -1)
-      echo "Uploading $WHEEL to GitLab release $CI_COMMIT_TAG …"
-      # Create or update the release via GitLab Releases API, then upload the wheel
+      WHEEL_NAME=$(basename "$WHEEL")
+      # Strip leading 'v' so the package version is e.g. "1.0.0" not "v1.0.0"
+      PKG_VERSION="${CI_COMMIT_TAG#v}"
+      echo "Uploading $WHEEL_NAME to Generic Package Registry (version $PKG_VERSION) …"
+      # Generic Package Registry fully supports JOB-TOKEN; /uploads does not.
       curl --fail --silent \
         --header "JOB-TOKEN: $CI_JOB_TOKEN" \
-        --request POST \
-        --form "name=atom_platform_sdk wheel" \
-        --form "file=@$WHEEL" \
-        "$CI_API_V4_URL/projects/$CI_PROJECT_ID/uploads" \
-        -o /tmp/upload.json
-      WHEEL_URL=$(jq -r .full_path /tmp/upload.json)
-      # Link the uploaded asset to the release
+        --upload-file "$WHEEL" \
+        "$CI_API_V4_URL/projects/$CI_PROJECT_ID/packages/generic/atom-sdk/$PKG_VERSION/$WHEEL_NAME"
+      DOWNLOAD_URL="$CI_API_V4_URL/projects/$CI_PROJECT_ID/packages/generic/atom-sdk/$PKG_VERSION/$WHEEL_NAME"
+      # Attach the package as a release asset link
       curl --fail --silent \
         --header "JOB-TOKEN: $CI_JOB_TOKEN" \
         --header "Content-Type: application/json" \
         --request POST \
-        --data "{\"name\":\"$(basename $WHEEL)\",\"url\":\"$CI_SERVER_URL$WHEEL_URL\"}" \
+        --data "{\"name\":\"$WHEEL_NAME\",\"url\":\"$DOWNLOAD_URL\",\"link_type\":\"package\"}" \
         "$CI_API_V4_URL/projects/$CI_PROJECT_ID/releases/$CI_COMMIT_TAG/assets/links"
       echo "✓ SDK wheel attached to release $CI_COMMIT_TAG"
