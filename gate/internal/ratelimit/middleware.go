@@ -10,6 +10,7 @@ import (
 	"github.com/gofiber/fiber/v3"
 	"github.com/redis/go-redis/v9"
 
+	"github.com/your-org/atom/gate/internal/apierr"
 	"github.com/your-org/atom/gate/internal/auth"
 )
 
@@ -51,8 +52,13 @@ func Middleware(rdb *redis.Client) fiber.Handler {
 				"limit", limit,
 				"path", c.Path())
 			c.Set("Retry-After", strconv.Itoa(windowSeconds))
-			return c.Status(fiber.StatusTooManyRequests).
-				JSON(fiber.Map{"error": "rate_limit_exceeded"})
+			return c.Status(fiber.StatusTooManyRequests).JSON(
+				apierr.LiteLLM(
+					"Rate limit exceeded. Please retry after "+strconv.Itoa(windowSeconds)+" second.",
+					"RateLimitError",
+					"rate_limit_exceeded",
+				),
+			)
 		}
 		return c.Next()
 	}

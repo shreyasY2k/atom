@@ -8,12 +8,15 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 from httpx import ASGITransport, AsyncClient
 
-# Point settings at the real JWT keys before any module import resolves them.
+# Point settings at the repo-level .keys/ directory that CI generates and
+# local dev produces via `make generate-keys`.  We force-set the key paths
+# (not setdefault) so a .env or shell env pointing at /etc/atom/*.pem never
+# causes FileNotFoundError when those paths don't exist locally.
 KEYS_DIR = Path(__file__).parents[4] / ".keys"
 os.environ.setdefault("DATABASE_URL", "postgresql://test:test@localhost:5432/test")
 os.environ.setdefault("REDIS_URL", "redis://localhost:6379")
-os.environ.setdefault("JWT_PRIVATE_KEY_PATH", str(KEYS_DIR / "jwt_private.pem"))
-os.environ.setdefault("JWT_PUBLIC_KEY_PATH", str(KEYS_DIR / "jwt_public.pem"))
+os.environ["JWT_PRIVATE_KEY_PATH"] = str(KEYS_DIR / "jwt_private.pem")
+os.environ["JWT_PUBLIC_KEY_PATH"] = str(KEYS_DIR / "jwt_public.pem")
 os.environ.setdefault("ATOM_ENCRYPTION_KEY", "a" * 64)
 
 

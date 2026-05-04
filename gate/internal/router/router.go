@@ -16,6 +16,7 @@ import (
 	"github.com/redis/go-redis/v9"
 	"github.com/valyala/fasthttp"
 
+	"github.com/your-org/atom/gate/internal/apierr"
 	"github.com/your-org/atom/gate/internal/auth"
 	"github.com/your-org/atom/gate/internal/config"
 )
@@ -128,7 +129,9 @@ func llmProxy(client *fasthttp.Client, upstreamRoot, fallbackKey, encryptionKey 
 		if err != nil || llmKey == "" {
 			slog.Warn("llm proxy: no virtual key for agent",
 				"agent_id", agentID, "domain_id", domainID, "err", err)
-			return c.Status(fiber.StatusForbidden).JSON(fiber.Map{"error": "agent_not_provisioned"})
+			return c.Status(fiber.StatusForbidden).JSON(
+				apierr.LiteLLM("Agent is not provisioned for LLM access", "PermissionDeniedError", "agent_not_provisioned"),
+			)
 		}
 
 		slog.Info("llm proxy",
@@ -149,14 +152,18 @@ func agentProxy(client *fasthttp.Client, pool *pgxpool.Pool, rdb *redis.Client) 
 		if claims, ok := auth.GetClaims(c); ok && claims.Type == "agent" && claims.DomainID != domainID {
 			slog.Warn("agent proxy: cross-domain token rejected",
 				"token_domain", claims.DomainID, "request_domain", domainID, "agent_id", agentID)
-			return c.Status(fiber.StatusForbidden).JSON(fiber.Map{"error": "domain_mismatch"})
+			return c.Status(fiber.StatusForbidden).JSON(
+				apierr.LiteLLM("Agent token domain does not match the requested domain", "PermissionDeniedError", "domain_mismatch"),
+			)
 		}
 
 		svcName, err := resolveServiceName(c.Context(), agentID, pool, rdb)
 		if err != nil {
 			slog.Error("agent proxy: service name resolution failed",
 				"agent_id", agentID, "domain_id", domainID, "err", err)
-			return c.Status(fiber.StatusBadGateway).JSON(fiber.Map{"error": "agent_not_found"})
+			return c.Status(fiber.StatusBadGateway).JSON(
+				apierr.LiteLLM("Agent service not found or not deployed", "ServiceUnavailableError", "agent_not_found"),
+			)
 		}
 
 		splat := c.Params("*")
@@ -198,7 +205,9 @@ func forward(c fiber.Ctx, client *fasthttp.Client, targetURL, domainID, agentID,
 			"target", targetURL,
 			"method", string(req.Header.Method()),
 			"err", err)
-		return c.Status(fiber.StatusBadGateway).JSON(fiber.Map{"error": "upstream_unavailable"})
+		return c.Status(fiber.StatusBadGateway).JSON(
+			apierr.LiteLLM("Upstream service is unavailable", "ServiceUnavailableError", "upstream_unavailable"),
+		)
 	}
 
 	slog.Debug("upstream response",

@@ -11,6 +11,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/redis/go-redis/v9"
 
+	"github.com/your-org/atom/gate/internal/apierr"
 	"github.com/your-org/atom/gate/internal/auth"
 )
 
@@ -66,10 +67,13 @@ func Middleware(mgr *Manager, pool *pgxpool.Pool, rdb *redis.Client) fiber.Handl
 		})
 
 		if !decision.Allow {
-			return c.Status(fiber.StatusForbidden).JSON(fiber.Map{
-				"error":  "forbidden",
-				"reason": decision.Reason,
-			})
+			msg := "Request blocked by policy"
+			if decision.Reason != "" {
+				msg += ": " + decision.Reason
+			}
+			return c.Status(fiber.StatusForbidden).JSON(
+				apierr.LiteLLM(msg, "PermissionDeniedError", "policy_violation"),
+			)
 		}
 		return c.Next()
 	}

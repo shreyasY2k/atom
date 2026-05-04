@@ -14,6 +14,8 @@ import (
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/redis/go-redis/v9"
+
+	"github.com/your-org/atom/gate/internal/apierr"
 )
 
 const (
@@ -162,5 +164,15 @@ func tokenHash(raw string) string {
 }
 
 func unauthorized(c fiber.Ctx, reason string) error {
-	return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{"error": reason})
+	messages := map[string]string{
+		"missing_token": "No authentication token provided",
+		"invalid_token": "Authentication token is invalid",
+		"token_expired": "Authentication token has expired",
+		"token_revoked": "Authentication token has been revoked",
+	}
+	msg, ok := messages[reason]
+	if !ok {
+		msg = "Authentication failed"
+	}
+	return c.Status(fiber.StatusUnauthorized).JSON(apierr.LiteLLM(msg, "AuthenticationError", reason))
 }

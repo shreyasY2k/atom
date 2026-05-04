@@ -24,6 +24,7 @@ import (
 	semconv "go.opentelemetry.io/otel/semconv/v1.26.0"
 	"go.opentelemetry.io/otel/trace"
 
+	"github.com/your-org/atom/gate/internal/apierr"
 	"github.com/your-org/atom/gate/internal/audit"
 	"github.com/your-org/atom/gate/internal/auth"
 	"github.com/your-org/atom/gate/internal/config"
@@ -178,7 +179,7 @@ func errorHandler(c fiber.Ctx, err error) error {
 		"status", code,
 		"remote_ip", c.IP(),
 		"err", err)
-	return c.Status(code).JSON(fiber.Map{"error": err.Error()})
+	return c.Status(code).JSON(apierr.LiteLLM(err.Error(), "InternalServerError", "internal_error"))
 }
 
 // otelMiddleware adds a trace span per request when a TracerProvider is configured.
