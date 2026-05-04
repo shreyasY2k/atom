@@ -112,6 +112,7 @@ infra-down: ## Tear down infra services (delete atom-infra / atom-system / atom-
 # ── Operator mode (docker-compose.yml — pulls pre-built GHCR images) ──────────
 up: ## Start stack in operator mode (pulls pre-built GHCR images)
 	@docker volume create atom-postgres-data 2>/dev/null || true
+	@docker compose rm -fsv migrate seed 2>/dev/null || true
 	@docker compose up -d
 
 down: ## Stop operator-mode stack (keeps volumes)
@@ -120,6 +121,7 @@ down: ## Stop operator-mode stack (keeps volumes)
 # ── Local dev (docker-compose) ────────────────────────────────────────────────
 dev-up: ## Start full stack via docker-compose (first run may take a few minutes)
 	@docker volume create atom-postgres-data 2>/dev/null || true
+	@docker compose -f docker-compose.dev.yml rm -fsv migrate seed 2>/dev/null || true
 	@docker compose -f docker-compose.dev.yml up -d
 	@echo ""
 	@echo "✓ Dev stack up. Services:"

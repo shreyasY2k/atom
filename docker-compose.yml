@@ -49,17 +49,21 @@ services:
         condition: service_healthy
     volumes:
       - ./migrations:/migrations:ro
-    entrypoint: ["/bin/sh", "-c"]
-    command: |
-      n=0
-      until [ $$n -ge 10 ]; do
-        /migrate -path=/migrations -database "postgresql://atom:${POSTGRES_PASSWORD:-changeme}@postgres:5432/atom?sslmode=disable" up && exit 0
-        n=$$(($$n+1))
-        echo "Migration attempt $$n failed, retrying in 3s..."
-        sleep 3
-      done
-      echo "Migrations failed after 10 attempts"
-      exit 1
+    entrypoint: ["/bin/sh"]
+    command:
+      - "-c"
+      - |
+        n=0
+        until [ $$n -ge 10 ]; do
+          /usr/local/bin/migrate -path=/migrations \
+            -database "postgresql://atom:${POSTGRES_PASSWORD:-changeme}@postgres:5432/atom?sslmode=disable" \
+            up && exit 0
+          n=$$(($$n+1))
+          echo "Migration attempt $$n failed, retrying in 3s..."
+          sleep 3
+        done
+        echo "Migrations failed after 10 attempts"
+        exit 1
 
   # ── Dev seed (admin@atom.local / admin123) ────────────────────────────────────
   seed:
