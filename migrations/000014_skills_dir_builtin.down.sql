@@ -1,0 +1,3 @@
+ALTER TABLE skills
+    DROP COLUMN IF EXISTS dir,
+    DROP COLUMN IF EXISTS builtin;
