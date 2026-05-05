@@ -2,6 +2,7 @@ import asyncio
 import hashlib
 import json
 import logging
+import os
 from typing import AsyncGenerator
 
 import httpx
@@ -9,7 +10,7 @@ import httpx
 from ..config import get_settings
 from ..database import get_conn
 from ..services.builder_conversation import BuilderState, save_state
-from ..services.builder import build_agent_py_prompt
+from ..services.builder import build_agent_py_prompt, _formatter_for_model
 from ..services.gitlab_service import GitLabService
 from ..agents.service import AgentCreatePayload, create_agent, issue_agent_jwt
 from ..deployments.service import get_runtime_url
@@ -17,6 +18,10 @@ from ..deployments.service import get_runtime_url
 log = logging.getLogger(__name__)
 
 _CODEGEN_MODEL = "gemini-3.1-pro-preview"
+_HEAL_MAX_ATTEMPTS = 3  # max self-heal retries
+_HEALTH_POLL_INTERVAL = 5  # seconds between health checks
+_HEALTH_TIMEOUT = 120  # seconds to wait for container healthy
+
 
 # ── Helper ─────────────────────────────────────────────────────────────────────
 
@@ -44,6 +49,18 @@ FROM ${{SDK_IMAGE}} AS sdk
 FROM python:3.11-slim
 WORKDIR /app
 COPY --from=sdk /atom-sdk /atom-sdk
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+COPY . .
+ENV PYTHONUNBUFFERED=1
+CMD ["python", "agent.py"]
+"""
+
+
+def _build_local_dockerfile() -> str:
+    """Simpler Dockerfile for local builds using atom-sdk:local base image."""
+    return """FROM atom-sdk:local
+WORKDIR /app
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 COPY . .
@@ -83,73 +100,206 @@ def _build_readme(state: BuilderState) -> str:
     )
 
 
+# ── GitLab validation ──────────────────────────────────────────────────────────
+
+
+def _validate_gitlab_config() -> str | None:
+    """Return an error message if GitLab is not configured, else None."""
+    pat = os.environ.get("ATOM_GITLAB_PAT", "").strip()
+    group = os.environ.get("ATOM_GITLAB_GROUP", "").strip()
+    if not pat:
+        return (
+            "ATOM_GITLAB_PAT is not set. "
+            "Add your GitLab PAT (api + write_repository scopes) to .env and restart."
+        )
+    if not group:
+        return (
+            "ATOM_GITLAB_GROUP is not set. "
+            "Add the group/namespace where agent repos should be created (e.g. myorg/atom-agents)."
+        )
+    return None
+
+
 # ── Local Docker build ────────────────────────────────────────────────────────
 
 
 async def _build_local_image(state: BuilderState, agent_py: str) -> tuple[str, str]:
-    """
-    Write scaffold files to a temp directory, run `docker build`, return (image_tag, log).
-    Uses the host Docker socket (mounted at /var/run/docker.sock in dev).
-    """
+    """Build a Docker image locally and return (image_tag, build_log)."""
     import tempfile
-    import os
-    import docker as docker_sdk
+
+    import docker as docker_sdk  # noqa: PLC0415
 
     image_name = (state.agent_name or state.agent_id or "agent").lower().replace(" ", "-")
     image_tag = f"atom-agent/{image_name}:latest"
 
-    # Use atom-sdk:local as base — it has agentscope pre-installed.
-    # Fall back to python:3.11-slim if atom-sdk:local hasn't been built yet.
-    import docker as docker_sdk_check  # noqa: PLC0415
-
-    _client_check = docker_sdk_check.from_env()
+    # Use atom-sdk:local if available, else plain python
+    _cli = docker_sdk.from_env()
     try:
-        _client_check.images.get("atom-sdk:local")
-        base_image = "atom-sdk:local"
-    except docker_sdk_check.errors.ImageNotFound:
-        base_image = "python:3.11-slim"
-
-    dockerfile_content = f"""FROM {base_image}
-WORKDIR /app
-COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
-COPY . .
-ENV PYTHONUNBUFFERED=1
-CMD ["python", "agent.py"]
-"""
+        _cli.images.get("atom-sdk:local")
+        dockerfile_content = _build_local_dockerfile()
+    except docker_sdk.errors.ImageNotFound:
+        dockerfile_content = (
+            "FROM python:3.11-slim\nWORKDIR /app\n"
+            "COPY requirements.txt .\nRUN pip install --no-cache-dir -r requirements.txt\n"
+            'COPY . .\nENV PYTHONUNBUFFERED=1\nCMD ["python", "agent.py"]\n'
+        )
 
     with tempfile.TemporaryDirectory() as tmpdir:
-        files = {
+        for fname, content in {
             "agent.py": agent_py,
             "requirements.txt": _build_requirements(),
             "Dockerfile": dockerfile_content,
             "atom_agent.yaml": _build_atom_agent_yaml(state, ""),
             "README.md": _build_readme(state),
-        }
-        for name, content in files.items():
-            with open(os.path.join(tmpdir, name), "w") as f:
-                f.write(content)
+        }.items():
+            with open(os.path.join(tmpdir, fname), "w") as fh:
+                fh.write(content)
 
         loop = asyncio.get_event_loop()
 
         def _docker_build():
             client = docker_sdk.from_env()
-            _, log_output = client.images.build(
-                path=tmpdir,
-                tag=image_tag,
-                rm=True,
-                forcerm=True,
-            )
-            log_lines = [
+            _, log_output = client.images.build(path=tmpdir, tag=image_tag, rm=True, forcerm=True)
+            lines = [
                 chunk.get("stream", chunk.get("status", ""))
                 for chunk in log_output
                 if isinstance(chunk, dict)
             ]
-            return "\n".join(line for line in log_lines if line.strip())
+            return "\n".join(line for line in lines if line.strip())
 
         build_log = await loop.run_in_executor(None, _docker_build)
 
     return image_tag, build_log
+
+
+# ── Docker health / log helpers ───────────────────────────────────────────────
+
+
+async def _poll_container_health(container_name: str) -> tuple[str, str]:
+    """
+    Poll until the container is running+healthy or exits.
+
+    Returns (status, logs) where status is:
+      "healthy"  — container running without crash
+      "failed"   — container exited / unhealthy
+      "timeout"  — health poll timed out
+    """
+    import docker as docker_sdk  # noqa: PLC0415
+
+    loop = asyncio.get_event_loop()
+
+    def _check():
+        try:
+            client = docker_sdk.from_env()
+            c = client.containers.get(container_name)
+            status = c.status  # "running", "exited", "created", etc.
+            logs = c.logs(tail=80).decode("utf-8", errors="replace")
+            return status, logs
+        except docker_sdk.errors.NotFound:
+            return "not_found", ""
+        except Exception as exc:
+            return "error", str(exc)
+
+    elapsed = 0
+    while elapsed < _HEALTH_TIMEOUT:
+        status, logs = await loop.run_in_executor(None, _check)
+        if status == "running":
+            # Check if process has been up > 3 seconds without crash
+            if elapsed >= 6:
+                return "healthy", logs
+        elif status in ("exited", "dead"):
+            return "failed", logs
+        elif status == "not_found":
+            if elapsed > 30:
+                return "timeout", "Container not found after 30s"
+        await asyncio.sleep(_HEALTH_POLL_INTERVAL)
+        elapsed += _HEALTH_POLL_INTERVAL
+
+    _, logs = await loop.run_in_executor(None, _check)
+    return "timeout", logs
+
+
+async def _get_container_logs(container_name: str) -> str:
+    """Get recent Docker container logs."""
+    import docker as docker_sdk  # noqa: PLC0415
+
+    loop = asyncio.get_event_loop()
+
+    def _logs():
+        try:
+            client = docker_sdk.from_env()
+            c = client.containers.get(container_name)
+            return c.logs(tail=100).decode("utf-8", errors="replace")
+        except Exception as exc:
+            return f"Could not get logs: {exc}"
+
+    return await loop.run_in_executor(None, _logs)
+
+
+# ── Self-healing codegen ──────────────────────────────────────────────────────
+
+
+async def _generate_fix(
+    original_agent_py: str,
+    error_logs: str,
+    intent: str,
+    model_name: str,
+    atom_llm_url: str,
+    litellm_master_key: str,
+) -> str:
+    """Ask the LLM to fix agent.py given the container error logs."""
+    formatter_import, formatter_instance = _formatter_for_model(model_name)
+
+    fix_prompt = f"""You are fixing a broken ATOM agent.
+
+The agent.py below crashed when its Docker container started.
+The error logs from the container are shown. Fix ONLY the code issue — keep the agent's intent intact.
+
+## Broken agent.py
+```python
+{original_agent_py}
+```
+
+## Container error logs (last 100 lines)
+```
+{error_logs}
+```
+
+## Agent intent
+{intent}
+
+## Formatter to use
+Import: {formatter_import}
+Use: formatter={formatter_instance}
+
+## Fix rules
+- Keep the same agent intent and structure
+- Fix imports: use `agentscope.agent` (singular), `agentscope.model`, `agentscope.formatter`, `agentscope.tool`, `agentscope.memory`, `agentscope.message`
+- `ReActAgent` REQUIRES `formatter=` as a positional argument — never omit it
+- Tools are registered with `toolkit.register_tool_function(func)` — no `agent.use_tool()`
+- All async def functions, `await` the agent reply
+- Only output the fixed Python file content — no explanation, no markdown fences.
+"""
+
+    async with httpx.AsyncClient(timeout=120.0) as client:
+        resp = await client.post(
+            f"{atom_llm_url}/v1/chat/completions",
+            headers={"Authorization": f"Bearer {litellm_master_key}"},
+            json={
+                "model": _CODEGEN_MODEL,
+                "messages": [{"role": "user", "content": fix_prompt}],
+                "temperature": 0.1,
+            },
+        )
+        resp.raise_for_status()
+        fixed = resp.json()["choices"][0]["message"]["content"]
+
+    # Strip fences if present
+    if fixed.startswith("```"):
+        lines = fixed.splitlines()
+        fixed = "\n".join(line for line in lines[1:] if not line.strip().startswith("```"))
+
+    return fixed.strip()
 
 
 # ── Direct deploy (bypasses HITL — builder-only path) ─────────────────────────
@@ -163,14 +313,12 @@ async def _direct_deploy(
     owner_id: str,
 ) -> str:
     """
-    Insert deployment row, issue a pod JWT, and call atom-runtime directly.
-    Returns the deployment_id string.
-    This bypasses the HITL approval queue — only used by the builder flow.
+    Insert deployment row, issue a pod JWT, call atom-runtime directly.
+    Returns the deployment_id string.  Bypasses HITL — builder flow only.
     """
     manifest = json.dumps({"image": image, "git_sha": git_sha, "message": message})
 
     async with get_conn() as conn:
-        # Create deployment record
         deployment = await conn.fetchrow(
             """
             WITH v AS (
@@ -188,11 +336,11 @@ async def _direct_deploy(
         )
         deployment_id = str(deployment["id"])
 
-        # Issue fresh pod JWT, revoke old ones
         agent_jwt = issue_agent_jwt(state.agent_id, state.domain_id or "")
         token_hash = hashlib.sha256(agent_jwt.encode()).hexdigest()
         await conn.execute(
-            "UPDATE agent_tokens SET revoked_at=now() WHERE agent_id=$1 AND revoked_at IS NULL AND token_type='pod'",
+            "UPDATE agent_tokens SET revoked_at=now() "
+            "WHERE agent_id=$1 AND revoked_at IS NULL AND token_type='pod'",
             state.agent_id,
         )
         await conn.execute(
@@ -201,7 +349,6 @@ async def _direct_deploy(
             token_hash,
         )
 
-    # Call atom-runtime directly
     async with httpx.AsyncClient(timeout=30.0) as client:
         resp = await client.post(
             f"{get_runtime_url()}/runtime/deploy",
@@ -218,6 +365,110 @@ async def _direct_deploy(
     return deployment_id
 
 
+# ── Local deploy with health check + self-healing ─────────────────────────────
+
+
+async def _deploy_local_with_healing(
+    state: BuilderState,
+    agent_py: str,
+    owner_id: str,
+    redis,
+) -> AsyncGenerator[dict, None]:
+    """
+    Build image → deploy → poll health → self-heal up to _HEAL_MAX_ATTEMPTS times.
+    """
+    settings = get_settings()
+    container_name = f"agent-{state.agent_id}"
+
+    for attempt in range(1, _HEAL_MAX_ATTEMPTS + 1):
+        label = f"(attempt {attempt}/{_HEAL_MAX_ATTEMPTS})" if attempt > 1 else ""
+
+        # Build
+        step = "build_local"
+        try:
+            image_tag, _ = await _build_local_image(state, agent_py)
+            yield _progress(step, f"Docker image built: {image_tag} {label}")
+        except Exception as exc:
+            yield {"type": "error", "step": step, "message": str(exc), "retryable": False}
+            return
+
+        # Deploy
+        step = "deployed"
+        try:
+            deployment_id = await _direct_deploy(
+                state=state,
+                image=image_tag,
+                git_sha=None,
+                message=f"ATOM Builder local deploy {label}",
+                owner_id=owner_id,
+            )
+            yield _progress(step, f"Container starting… {label}", deployment_id=deployment_id)
+        except Exception as exc:
+            yield {"type": "error", "step": step, "message": str(exc), "retryable": False}
+            return
+
+        # Poll health
+        step = "health_check"
+        yield _progress(step, "Waiting for container to become healthy…")
+        health_status, logs = await _poll_container_health(container_name)
+
+        if health_status == "healthy":
+            state.chat_url = f"/domains/{state.domain_id}/agents/{state.agent_id}/conversations"
+            await save_state(redis, state)
+            yield _progress("live", "Agent is running and healthy")
+            yield {"type": "done", "chat_url": state.chat_url}
+            return
+
+        # Container failed — self-heal if attempts remain
+        error_snippet = logs[-2000:] if len(logs) > 2000 else logs
+        yield {
+            "type": "progress",
+            "step": "container_error",
+            "message": f"Container {'crashed' if health_status == 'failed' else 'timed out'}",
+            "logs": error_snippet,
+        }
+
+        if attempt >= _HEAL_MAX_ATTEMPTS:
+            yield {
+                "type": "error",
+                "step": "container_error",
+                "message": f"Container failed after {_HEAL_MAX_ATTEMPTS} attempts. Last error:\n{error_snippet[:500]}",
+                "retryable": False,
+                "logs": error_snippet,
+            }
+            return
+
+        # Analyse and fix
+        step = "healing"
+        yield _progress(step, f"Analysing error… (attempt {attempt}/{_HEAL_MAX_ATTEMPTS})")
+        try:
+            agent_py = await _generate_fix(
+                original_agent_py=agent_py,
+                error_logs=error_snippet,
+                intent=state.intent or "",
+                model_name=state.model or "gemini-2.5-flash",
+                atom_llm_url=settings.atom_llm_url,
+                litellm_master_key=settings.litellm_master_key,
+            )
+            yield _progress(step, "Code fix generated — rebuilding…")
+        except Exception as exc:
+            yield {
+                "type": "error",
+                "step": step,
+                "message": f"Failed to generate fix: {exc}",
+                "retryable": False,
+            }
+            return
+
+    # Should not reach here
+    yield {
+        "type": "error",
+        "step": "healing",
+        "message": "Max heal attempts exhausted",
+        "retryable": False,
+    }
+
+
 # ── Main deploy generator ──────────────────────────────────────────────────────
 
 
@@ -227,14 +478,13 @@ async def run_deploy(
     redis,
 ) -> AsyncGenerator[dict, None]:
     """
-    8-step deploy sequence yielding SSE-ready event dicts.
-
-    Yields _progress dicts for each step.
-    On error yields {"type": "error", ...} and returns.
+    Full deploy sequence with SSE events.
+    Local: provision → codegen → docker build → deploy → health check → self-heal
+    GitLab: provision → codegen → repo → permissions → push → CI pipeline → deploy → health
     """
     settings = get_settings()
 
-    # ── Step 1: Provision agent in DB + LiteLLM ────────────────────────────────
+    # ── Step 1: Provision ─────────────────────────────────────────────────────
     step = "provisioning"
     try:
         payload = AgentCreatePayload(
@@ -242,15 +492,10 @@ async def run_deploy(
             description=state.intent,
             allowed_models=[state.model] if state.model else ["gemini-2.5-flash"],
         )
-        agent_dict, _raw_jwt = await create_agent(
-            state.domain_id or "",
-            payload,
-            owner_id,
-        )
+        agent_dict, _raw_jwt = await create_agent(state.domain_id or "", payload, owner_id)
         state.agent_id = str(agent_dict["id"])
-        yield _progress(step, f"Agent provisioned: {state.agent_id}")
+        yield _progress(step, f"Provisioned: {state.agent_id}")
 
-        # Insert agent_tools and agent_skills associations
         if state.tools or state.skills:
             async with get_conn() as conn:
                 for tool_name in state.tools:
@@ -281,11 +526,10 @@ async def run_deploy(
         yield {"type": "error", "step": step, "message": str(exc), "retryable": False}
         return
 
-    # ── Step 2: Codegen ────────────────────────────────────────────────────────
+    # ── Step 2: Codegen ───────────────────────────────────────────────────────
     step = "codegen"
     agent_py = ""
     try:
-        # Fetch full tool objects from atom-llm
         tool_objects: list[dict] = []
         try:
             async with httpx.AsyncClient(timeout=15.0) as client:
@@ -301,21 +545,17 @@ async def run_deploy(
         except Exception as fetch_exc:
             log.warning("codegen: could not fetch tools — %s", fetch_exc)
 
-        # Fetch A2A agent details from DB
         a2a_details: list[dict] = []
         if state.a2a_targets:
-            try:
-                async with get_conn() as conn:
-                    for target_name in state.a2a_targets:
-                        row = await conn.fetchrow(
-                            "SELECT id, name, description FROM agents WHERE name=$1 AND domain_id=$2",
-                            target_name,
-                            state.domain_id,
-                        )
-                        if row:
-                            a2a_details.append(dict(row))
-            except Exception as a2a_exc:
-                log.warning("codegen: could not fetch A2A targets — %s", a2a_exc)
+            async with get_conn() as conn:
+                for target_name in state.a2a_targets:
+                    row = await conn.fetchrow(
+                        "SELECT id, name, description FROM agents WHERE name=$1 AND domain_id=$2",
+                        target_name,
+                        state.domain_id,
+                    )
+                    if row:
+                        a2a_details.append(dict(row))
 
         codegen_prompt = build_agent_py_prompt(
             intent=state.intent or "",
@@ -337,79 +577,66 @@ async def run_deploy(
             )
             resp.raise_for_status()
             agent_py = resp.json()["choices"][0]["message"]["content"]
-            # Strip markdown code fences if present
             if agent_py.startswith("```"):
                 lines = agent_py.splitlines()
-                # Remove first and last fence lines
                 agent_py = "\n".join(
                     line for line in lines[1:] if not line.strip().startswith("```")
                 )
 
-        yield _progress(step, "agent.py generated successfully")
+        yield _progress(step, "agent.py generated")
 
     except Exception as exc:
         log.exception("deploy step %s failed", step)
         yield {"type": "error", "step": step, "message": str(exc), "retryable": False}
         return
 
-    # ── Local CI shortcut ─────────────────────────────────────────────────────
-    # Local strategy: write scaffold files → docker build → deploy via runtime.
+    # ── Local CI path ─────────────────────────────────────────────────────────
     if state.ci_target == "local":
-        step = "build_local"
-        try:
-            image_tag, build_log = await _build_local_image(state, agent_py)
-            yield _progress(step, f"Docker image built: {image_tag}")
-        except Exception as exc:
-            log.exception("deploy step %s failed", step)
-            yield {"type": "error", "step": step, "message": str(exc), "retryable": False}
-            return
-
-        step = "deployed"
-        try:
-            deployment_id = await _direct_deploy(
-                state=state,
-                image=image_tag,
-                git_sha=None,
-                message="Local build via ATOM Builder",
-                owner_id=owner_id,
-            )
-            state.chat_url = f"/chat/{state.agent_id}"
-            await save_state(redis, state)
-            yield _progress(step, "Agent deployed to runtime", deployment_id=deployment_id)
-            yield {"type": "done", "chat_url": state.chat_url}
-        except Exception as exc:
-            log.exception("deploy step %s failed", step)
-            yield {"type": "error", "step": step, "message": str(exc), "retryable": False}
+        async for event in _deploy_local_with_healing(state, agent_py, owner_id, redis):
+            yield event
         return
 
-    # ── Step 3: Create GitLab repo ─────────────────────────────────────────────
-    step = "repo_created"
+    # ── GitLab CI path ────────────────────────────────────────────────────────
+
+    # Validate GitLab config before any API call
+    config_error = _validate_gitlab_config()
+    if config_error:
+        yield {
+            "type": "error",
+            "step": "gitlab_config",
+            "message": config_error,
+            "retryable": False,
+        }
+        return
+
     gitlab = GitLabService()
+
+    # Step 3: Create repo
+    step = "repo_created"
     try:
         repo_info = await gitlab.create_repo(state.agent_name or state.agent_id or "agent")
         state.gitlab_project_id = repo_info["id"]
         state.gitlab_repo_url = repo_info["web_url"]
         await save_state(redis, state)
-        yield _progress(step, "GitLab repo created", url=state.gitlab_repo_url)
-
+        yield _progress(step, f"Repo created: {state.gitlab_repo_url}", url=state.gitlab_repo_url)
     except Exception as exc:
         log.exception("deploy step %s failed", step)
         yield {"type": "error", "step": step, "message": str(exc), "retryable": False}
         return
 
-    # ── Step 4: Set permissions ────────────────────────────────────────────────
+    # Step 4: Permissions
     step = "permissions"
     try:
         await gitlab.set_permissions(state.gitlab_project_id)
-        yield _progress(step, "Runner permissions configured")
-
+        yield _progress(step, "CI bot permissions configured")
     except Exception as exc:
         log.exception("deploy step %s failed", step)
         yield {"type": "error", "step": step, "message": str(exc), "retryable": False}
         return
 
-    # ── Step 5: Push scaffold files ────────────────────────────────────────────
+    # Step 5: Push files
     step = "pushed"
+    commit_sha = ""
     try:
         files = {
             "agent.py": agent_py,
@@ -420,14 +647,13 @@ async def run_deploy(
             "README.md": _build_readme(state),
         }
         commit_sha = await gitlab.push_files(state.gitlab_project_id, files)
-        yield _progress(step, f"Files pushed — commit {commit_sha[:12]}", commit_sha=commit_sha)
-
+        yield _progress(step, f"Files pushed (commit {commit_sha[:12]})", commit_sha=commit_sha)
     except Exception as exc:
         log.exception("deploy step %s failed", step)
         yield {"type": "error", "step": step, "message": str(exc), "retryable": False}
         return
 
-    # ── Step 6: Trigger pipeline + poll ───────────────────────────────────────
+    # Step 6: Trigger pipeline + poll
     step = "pipeline_start"
     try:
         pipeline_info = await gitlab.trigger_pipeline(state.gitlab_project_id, commit_sha)
@@ -440,16 +666,14 @@ async def run_deploy(
             pipeline_id=state.pipeline_id,
             pipeline_url=state.pipeline_url,
         )
-
     except Exception as exc:
         log.exception("deploy step %s failed", step)
         yield {"type": "error", "step": step, "message": str(exc), "retryable": False}
         return
 
-    # Poll pipeline
     elapsed = 0
     poll_interval = 10
-    max_wait = 1800  # 30 minutes
+    max_wait = 1800
     final_status = "unknown"
     while elapsed < max_wait:
         await asyncio.sleep(poll_interval)
@@ -457,13 +681,13 @@ async def run_deploy(
         try:
             final_status = await gitlab.pipeline_status(state.gitlab_project_id, state.pipeline_id)
         except Exception as poll_exc:
-            log.warning("pipeline poll error (will retry): %s", poll_exc)
+            log.warning("pipeline poll: %s", poll_exc)
             continue
 
         yield {
             "type": "progress",
             "step": "pipeline_poll",
-            "message": f"Pipeline status: {final_status} ({elapsed}s elapsed)",
+            "message": f"Building image… {final_status} ({elapsed}s)",
             "status": final_status,
             "elapsed": elapsed,
         }
@@ -474,8 +698,9 @@ async def run_deploy(
             yield {
                 "type": "error",
                 "step": "pipeline_poll",
-                "message": f"CI pipeline {final_status}. See: {state.pipeline_url}",
+                "message": f"CI pipeline {final_status}. View: {state.pipeline_url}",
                 "retryable": False,
+                "pipeline_url": state.pipeline_url,
             }
             return
 
@@ -483,15 +708,17 @@ async def run_deploy(
         yield {
             "type": "error",
             "step": "pipeline_poll",
-            "message": f"Pipeline timed out after {elapsed}s with status: {final_status}",
+            "message": f"Pipeline timed out after {elapsed}s",
             "retryable": False,
         }
         return
 
-    # ── Step 7: Deploy to runtime ──────────────────────────────────────────────
+    yield _progress("pipeline_done", "Image built and pushed to registry")
+
+    # Step 7: Deploy to runtime
     step = "deployed"
+    image = f"registry.gitlab.com/{gitlab.group}/{state.agent_name}:{commit_sha[:12]}"
     try:
-        image = f"registry.gitlab.com/{gitlab.group}/{state.agent_name}:{commit_sha[:12]}"
         deployment_id = await _direct_deploy(
             state=state,
             image=image,
@@ -499,14 +726,28 @@ async def run_deploy(
             message=f"ATOM Builder — pipeline #{state.pipeline_id}",
             owner_id=owner_id,
         )
-        state.chat_url = f"/chat/{state.agent_id}"
+        state.chat_url = f"/domains/{state.domain_id}/agents/{state.agent_id}/conversations"
         await save_state(redis, state)
-        yield _progress(step, "Agent deployed to runtime", deployment_id=deployment_id, image=image)
-
+        yield _progress(step, "Deployed to runtime", deployment_id=deployment_id, image=image)
     except Exception as exc:
         log.exception("deploy step %s failed", step)
         yield {"type": "error", "step": step, "message": str(exc), "retryable": False}
         return
 
-    # ── Step 8: Done ───────────────────────────────────────────────────────────
-    yield {"type": "done", "chat_url": state.chat_url}
+    # Step 8: Health check
+    container_name = f"agent-{state.agent_id}"
+    yield _progress("health_check", "Waiting for agent to become healthy…")
+    health_status, logs = await _poll_container_health(container_name)
+
+    if health_status == "healthy":
+        yield _progress("live", "Agent is live and healthy")
+        yield {"type": "done", "chat_url": state.chat_url}
+    else:
+        error_snippet = logs[-2000:] if len(logs) > 2000 else logs
+        yield {
+            "type": "error",
+            "step": "health_check",
+            "message": f"Container {health_status} after deploy. Check logs:\n{error_snippet[:400]}",
+            "retryable": False,
+            "logs": error_snippet,
+        }

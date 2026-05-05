@@ -6,6 +6,9 @@ export interface DeployStep {
   message: string
   url?: string
   status?: string
+  logs?: string
+  isError?: boolean
+  isHealing?: boolean
 }
 
 export function useBuilderDeploy() {
@@ -61,11 +64,22 @@ export function useBuilderDeploy() {
           try {
             const evt = JSON.parse(raw)
             if (evt.type === 'progress' || evt.type === 'pipeline_poll') {
-              setSteps(prev => [...prev, { step: evt.step, message: evt.message, url: evt.url, status: evt.status }])
+              setSteps(prev => [...prev, {
+                step: evt.step,
+                message: evt.message,
+                url: evt.url,
+                status: evt.status,
+                isHealing: evt.step === 'healing',
+              }])
             }
             if (evt.type === 'error') {
               setError(evt.message)
-              setSteps(prev => [...prev, { step: evt.step, message: `✗ ${evt.message}` }])
+              setSteps(prev => [...prev, {
+                step: evt.step,
+                message: `✗ ${evt.message}`,
+                isError: true,
+                logs: evt.logs,
+              }])
             }
             if (evt.type === 'done') {
               setChatUrl(evt.chat_url ?? null)
