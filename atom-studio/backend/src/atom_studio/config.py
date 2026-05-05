@@ -19,6 +19,10 @@ class Settings(BaseSettings):
     refresh_token_expire_days: int = 7
     kafka_brokers: str = ""
     platform_hmac_secret: str = ""
+    atom_gitlab_url: str = "https://gitlab.com"
+    atom_gitlab_group: str = ""
+    atom_gitlab_pat: str = ""
+    atom_gitlab_runner_user: str = ""
 
     @property
     def jwt_private_key(self) -> str:

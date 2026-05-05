@@ -8,10 +8,11 @@ description: Use when generating agent.py for an ATOM agent. Provides the correc
 ## Correct imports
 
 ```python
-from agentscope.agents import ReActAgent
-from agentscope.models import AtomChatModel
+from agentscope.agent import ReActAgent
+from agentscope.model import AtomChatModel
 from agentscope.tool import Toolkit
 from agentscope.memory import InMemoryMemory
+from agentscope.message import Msg
 ```
 
 ## Correct agent construction
@@ -40,8 +41,8 @@ def build_agent(name: str, sys_prompt: str, model_name: str, toolkit: Toolkit) -
 ```python
 # agent.py
 import os
-from agentscope.agents import ReActAgent
-from agentscope.models import AtomChatModel
+from agentscope.agent import ReActAgent
+from agentscope.model import AtomChatModel
 from agentscope.tool import Toolkit
 from agentscope.memory import InMemoryMemory
 from agentscope.message import Msg
@@ -70,4 +71,5 @@ if __name__ == "__main__":
 - NEVER: `import openai` or direct OpenAI SDK usage
 - NEVER: `import litellm` directly in agent code
 - NEVER: hardcode `ATOM_GATE_URL`, `ATOM_AGENT_JWT` or any credential in agent.py
-- NEVER: use `agentscope.models.OpenAIChatModel` or `agentscope.models.LiteLLMModel`
+- NEVER: use `agentscope.model.OpenAIChatModel` or any model class other than `AtomChatModel`
+- NEVER: write `from agentscope.agents import ...` — the correct module is `agentscope.agent` (singular)

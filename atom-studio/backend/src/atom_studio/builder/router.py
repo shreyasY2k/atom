@@ -1,14 +1,19 @@
 import json
 import logging
+import uuid
 
 import httpx
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
 from ..auth.middleware import require_auth
 from ..config import settings
 from ..database import get_conn
+from ..redis_client import get_redis
 from ..services.ai import STUDIO_INTENT_MODEL
+from ..services.builder_conversation import BuilderState, load_state, process_turn, save_state
+from ..services.builder_deploy import run_deploy
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -95,3 +100,113 @@ Return valid JSON only, no markdown."""
             "tools": [],
             "reasoning": "Default suggestion (intent analysis unavailable)",
         }
+
+
+# ── Conversational Builder routes ──────────────────────────────────────────────
+
+
+class ChatRequest(BaseModel):
+    session_id: str | None = None
+    message: str
+    domain_id: str = ""
+    ci_target: str = "gitlab"
+
+
+@router.post("/chat")
+async def builder_chat(req: ChatRequest, claims: dict = Depends(require_auth)):
+    """
+    Conversational agent builder — SSE stream.
+
+    Each response event is a JSON object on a 'data:' line.
+    Event types: session_id | token | spec_update | stage_change | done
+    """
+    redis = await get_redis()
+    is_new_session = req.session_id is None
+
+    if req.session_id:
+        state = await load_state(redis, req.session_id)
+        if state is None:
+            # Treat missing session as a new one
+            is_new_session = True
+            state = BuilderState(session_id=str(uuid.uuid4()))
+    else:
+        state = BuilderState(session_id=str(uuid.uuid4()))
+
+    if is_new_session:
+        state.domain_id = req.domain_id
+        state.ci_target = req.ci_target
+
+    prev_stage = state.stage
+
+    ai_message, updates, new_stage = await process_turn(
+        state=state,
+        user_message=req.message,
+        atom_llm_url=settings.atom_llm_url,
+        litellm_master_key=settings.litellm_master_key,
+        studio_intent_model=STUDIO_INTENT_MODEL,
+    )
+
+    await save_state(redis, state)
+
+    async def event_stream():
+        if is_new_session:
+            yield f"data: {json.dumps({'type': 'session_id', 'session_id': state.session_id})}\n\n"
+        yield f"data: {json.dumps({'type': 'token', 'content': ai_message})}\n\n"
+        if updates:
+            yield f"data: {json.dumps({'type': 'spec_update', 'updates': updates})}\n\n"
+        if new_stage != prev_stage:
+            yield f"data: {json.dumps({'type': 'stage_change', 'stage': new_stage})}\n\n"
+        yield f"data: {json.dumps({'type': 'done'})}\n\n"
+
+    return StreamingResponse(
+        event_stream(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
+
+
+class DeployRequest(BaseModel):
+    session_id: str
+
+
+@router.post("/deploy")
+async def builder_deploy(req: DeployRequest, claims: dict = Depends(require_auth)):
+    """
+    Deploy the agent described in the builder session — SSE stream.
+
+    Event types: progress | pipeline_poll | error | done
+    """
+    redis = await get_redis()
+    state = await load_state(redis, req.session_id)
+    if state is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, detail="Builder session not found")
+    if state.stage not in ("confirming", "confirmed"):
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            detail=f"Session is not ready to deploy (stage={state.stage!r}). Complete the interview first.",
+        )
+
+    owner_id: str = claims["sub"]
+
+    async def event_stream():
+        async for event in run_deploy(state, owner_id, redis):
+            yield f"data: {json.dumps(event)}\n\n"
+        await save_state(redis, state)
+
+    return StreamingResponse(
+        event_stream(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
+
+
+@router.get("/session/{session_id}")
+async def get_builder_session(session_id: str, _: dict = Depends(require_auth)):
+    """Return full BuilderState JSON for the given session."""
+    redis = await get_redis()
+    state = await load_state(redis, session_id)
+    if state is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, detail="Builder session not found")
+    from dataclasses import asdict
+
+    return asdict(state)

@@ -13,7 +13,7 @@ import { Layout } from '@/components/app/Layout'
 import { Login } from '@/pages/Login'
 import { Domains } from '@/pages/Domains'
 import { Agents } from '@/pages/Agents'
-import { AgentWizard } from '@/pages/AgentWizard'
+import { AgentBuilderChat } from '@/pages/AgentBuilderChat'
 import { AgentDetail } from '@/pages/AgentDetail'
 import { AgentConversations } from '@/pages/AgentConversations'
 import { AgentLogs } from '@/pages/AgentLogs'
@@ -75,7 +75,7 @@ const agentNewRoute = createRoute({
   component: () => (
     <RequireAuth>
       <Layout>
-        <AgentWizard />
+        <AgentBuilderChat />
       </Layout>
     </RequireAuth>
   ),
