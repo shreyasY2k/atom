@@ -1,18 +1,22 @@
 name: atom
 
 # ── Operator-mode docker-compose ────────────────────────────────────────────────
-# Pulls pre-built images from GHCR. No local build required.
+# Pulls pre-built images from a container registry. No local build required.
 #
 # Quick start:
 #   cp .env.example .env          # fill in GEMINI_API_KEY at minimum
 #   make generate-keys            # create .keys/ JWT key pair (once)
 #   docker compose up -d
-#   docker compose exec atom-studio-api migrate up   # first run only
 #
 # Access:
 #   atom-studio:  http://localhost:3000   (admin@atom.local / admin123)
 #   Grafana:      http://localhost:3005   (admin / atom-grafana-dev)
 #   MinIO:        http://localhost:9001   (minioadmin / changeme)
+#
+# Registry:
+#   Default:  ghcr.io/shreyasy2k  (GitHub Container Registry — no login needed)
+#   GitLab:   set ATOM_IMAGE_REGISTRY=registry.gitlab.com/shreyasy2k/atom in .env
+#             and docker login registry.gitlab.com first
 #
 # To build from source instead, use docker-compose.dev.yml.
 
@@ -142,8 +146,8 @@ services:
       - --memory 512M
       - --reserve-memory 0M
       - --node-id 0
-      - --kafka-addr PLAINTEXT://0.0.0.0:9092,EXTERNAL://0.0.0.0:19092
-      - --advertise-kafka-addr PLAINTEXT://redpanda:9092,EXTERNAL://localhost:19092
+      - --kafka-addr INTERNAL://0.0.0.0:9092,EXTERNAL://0.0.0.0:19092
+      - --advertise-kafka-addr INTERNAL://redpanda:9092,EXTERNAL://localhost:19092
     ports:
       - "9092:9092"
       - "19092:19092"
@@ -174,13 +178,21 @@ services:
     image: openpolicyagent/opa:latest-rootless
     container_name: atom-opa
     restart: unless-stopped
-    command: run --server --addr 0.0.0.0:8181
+    command:
+      - run
+      - --server
+      - --watch
+      - --log-format=json
+      - --ignore=..*
+      - /policies/base
     ports:
       - "8181:8181"
+    volumes:
+      - ./policies:/policies:ro
 
   # ── GATE ─────────────────────────────────────────────────────────────────────
   gate:
-    image: ghcr.io/shreyasy2k/atom-gate:latest
+    image: ${ATOM_IMAGE_REGISTRY:-ghcr.io/shreyasy2k}/atom-gate:${ATOM_IMAGE_TAG:-latest}
     platform: linux/amd64
     container_name: atom-gate
     restart: unless-stopped
@@ -202,6 +214,7 @@ services:
       GATE_ENV: production
       # GATE's Go OTEL SDK expects host:port (no scheme); override .env which has http:// prefix
       OTEL_EXPORTER_OTLP_ENDPOINT: alloy:4318
+      OTEL_SERVICE_NAME: gate
     volumes:
       - ./.keys:/etc/atom:ro
       - ./policies:/policies:ro
@@ -210,7 +223,7 @@ services:
 
   # ── atom-llm (LiteLLM gateway) ────────────────────────────────────────────────
   atom-llm:
-    image: ghcr.io/shreyasy2k/atom-llm:latest
+    image: ${ATOM_IMAGE_REGISTRY:-ghcr.io/shreyasy2k}/atom-llm:${ATOM_IMAGE_TAG:-latest}
     platform: linux/amd64
     container_name: atom-llm
     restart: unless-stopped
@@ -222,14 +235,19 @@ services:
       KAFKA_BROKERS: redpanda:9092
       STORE_MODEL_IN_DB: "False"
       DISABLE_SPEND_LOGS: "True"
-      # Override .env so Python OTEL exporter reaches alloy inside Docker (not localhost)
       OTEL_EXPORTER_OTLP_ENDPOINT: http://alloy:4318
+      OTEL_SERVICE_NAME: atom-llm
     ports:
       - "4000:4000"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:4000/health/liveliness"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
 
   # ── atom-studio API ───────────────────────────────────────────────────────────
   atom-studio-api:
-    image: ghcr.io/shreyasy2k/atom-studio-api:latest
+    image: ${ATOM_IMAGE_REGISTRY:-ghcr.io/shreyasy2k}/atom-studio-api:${ATOM_IMAGE_TAG:-latest}
     platform: linux/amd64
     container_name: atom-studio-api
     restart: unless-stopped
@@ -246,8 +264,8 @@ services:
       KAFKA_BROKERS: redpanda:9092
       JWT_PRIVATE_KEY_PATH: /etc/atom/jwt_private.pem
       JWT_PUBLIC_KEY_PATH: /etc/atom/jwt_public.pem
-      # Override .env so Python OTEL exporter reaches alloy inside Docker (not localhost)
       OTEL_EXPORTER_OTLP_ENDPOINT: http://alloy:4318
+      OTEL_SERVICE_NAME: atom-studio
     volumes:
       - ./.keys:/etc/atom:ro
     ports:
@@ -255,7 +273,7 @@ services:
 
   # ── atom-studio UI ────────────────────────────────────────────────────────────
   atom-studio-ui:
-    image: ghcr.io/shreyasy2k/atom-studio-ui:latest
+    image: ${ATOM_IMAGE_REGISTRY:-ghcr.io/shreyasy2k}/atom-studio-ui:${ATOM_IMAGE_TAG:-latest}
     platform: linux/amd64
     container_name: atom-studio-ui
     restart: unless-stopped
@@ -266,26 +284,29 @@ services:
 
   # ── atom-runtime ──────────────────────────────────────────────────────────────
   atom-runtime:
-    image: ghcr.io/shreyasy2k/atom-runtime:latest
+    image: ${ATOM_IMAGE_REGISTRY:-ghcr.io/shreyasy2k}/atom-runtime:${ATOM_IMAGE_TAG:-latest}
     platform: linux/amd64
     container_name: atom-runtime
     restart: unless-stopped
     depends_on:
       postgres: { condition: service_healthy }
+      atom-studio-api: { condition: service_started }
     env_file: .env
     environment:
       DATABASE_URL: postgresql://atom:${POSTGRES_PASSWORD:-changeme}@postgres:5432/atom?sslmode=disable
       ATOM_STUDIO_API_URL: http://atom-studio-api:3001
-      # Self-URL used when registering with atom-studio; must be the docker service name.
-      # Without this the default is http://localhost:8090 which resolves inside atom-studio's
-      # own container (wrong host) and trigger_deployment silently fails.
       ATOM_RUNTIME_SELF_URL: http://atom-runtime:8090
+      ATOM_GATE_CLUSTER_URL: http://gate:8080
       RUNTIME_BACKEND: docker
       DOCKER_NETWORK: atom_default
       DOCKER_AGENT_GATE_URL: http://gate:8080
-      # Override .env so Python OTEL exporter reaches alloy inside Docker (not localhost)
+      KAFKA_BROKERS: redpanda:9092
       OTEL_EXPORTER_OTLP_ENDPOINT: http://alloy:4318
       OTEL_SERVICE_NAME: atom-runtime
+      # GitLab registry credentials — allows atom-runtime to pull private agent images.
+      # Set GITLAB_REGISTRY_TOKEN in .env to your PAT (scope: read_registry).
+      GITLAB_REGISTRY_TOKEN: ${GITLAB_REGISTRY_TOKEN:-}
+      GITLAB_REGISTRY_USER: ${GITLAB_REGISTRY_USER:-oauth2}
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
     ports:
@@ -293,7 +314,7 @@ services:
 
   # ── log-archiver (Kafka → MinIO) ──────────────────────────────────────────────
   log-archiver:
-    image: ghcr.io/shreyasy2k/atom-log-archiver:latest
+    image: ${ATOM_IMAGE_REGISTRY:-ghcr.io/shreyasy2k}/atom-log-archiver:${ATOM_IMAGE_TAG:-latest}
     platform: linux/amd64
     container_name: atom-log-archiver
     restart: unless-stopped
@@ -331,8 +352,7 @@ services:
       - tempo_data:/var/tempo
     ports:
       - "3200:3200"
-      - "4317:4317"
-      - "4318:4318"
+      - "4319:4317"   # OTLP gRPC (external — internal services use alloy:4317)
 
   alloy:
     image: grafana/alloy:latest
@@ -346,9 +366,9 @@ services:
       - ./infra/alloy:/etc/alloy:ro
       - /var/run/docker.sock:/var/run/docker.sock
     ports:
-      - "4319:4317"
-      - "4320:4318"
-      - "12345:12345"
+      - "4317:4317"   # OTLP gRPC (← services send traces here via alloy:4317)
+      - "4318:4318"   # OTLP HTTP  (← services send traces here via alloy:4318)
+      - "12345:12345" # Alloy UI
 
   prometheus:
     image: prom/prometheus:latest
