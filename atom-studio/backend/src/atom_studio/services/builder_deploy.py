@@ -91,7 +91,168 @@ atom-build:
 
 
 def _build_requirements() -> str:
-    return "agentscope>=0.1.0\nfastapi>=0.110.0\nuvicorn[standard]>=0.29.0\nhttpx>=0.27.0\naiokafka>=0.11.0\npython-dotenv>=1.0.0\n"
+    return (
+        "agentscope>=0.1.0\n"
+        "fastapi>=0.110.0\n"
+        "uvicorn[standard]>=0.29.0\n"
+        "httpx>=0.27.0\n"
+        "aiokafka>=0.11.0\n"
+        "python-dotenv>=1.0.0\n"
+    )
+
+
+def _build_server_py() -> str:
+    """Fixed server.py boilerplate — identical for every agent. Never changes."""
+    return '''"""
+server.py — ATOM agent HTTP server (auto-generated boilerplate, do not modify)
+Agent logic lives in agent.py — edit that file to change agent behaviour.
+
+Endpoints:
+    GET  /healthz  — liveness probe (atom-runtime polls this)
+    POST /run      — {"message": "..."} → {"reply": "...", "run_id": "..."}
+"""
+import json
+import logging
+import os
+import time
+import uuid
+from contextlib import asynccontextmanager
+from datetime import datetime, timezone
+
+import agentscope
+import httpx
+from agentscope.message import Msg
+from fastapi import FastAPI
+from pydantic import BaseModel
+
+from agent import build_agent  # noqa: E402 — agent.py in same directory
+
+log = logging.getLogger(__name__)
+logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
+
+AGENT_ID = os.environ.get("ATOM_AGENT_ID", "")
+STUDIO_URL = os.environ.get("ATOM_STUDIO_URL", "http://atom-studio-api:3001")
+KAFKA_BROKERS = os.environ.get("KAFKA_BROKERS", "")
+KAFKA_TOPIC = "atom.agent.logs"
+
+_kafka_producer = None
+
+
+async def _init_kafka() -> None:
+    global _kafka_producer
+    if not KAFKA_BROKERS:
+        log.info("KAFKA_BROKERS not set — log streaming disabled")
+        return
+    try:
+        from aiokafka import AIOKafkaProducer  # noqa: PLC0415
+
+        _kafka_producer = AIOKafkaProducer(
+            bootstrap_servers=KAFKA_BROKERS,
+            value_serializer=lambda v: json.dumps(v).encode(),
+        )
+        await _kafka_producer.start()
+        log.info("Kafka producer connected → %s", KAFKA_BROKERS)
+    except Exception as exc:
+        log.warning("Kafka producer init failed: %s", exc)
+
+
+async def _stop_kafka() -> None:
+    if _kafka_producer:
+        await _kafka_producer.stop()
+
+
+async def _emit_log(message: str, source: str = "stdout") -> None:
+    if not _kafka_producer:
+        return
+    try:
+        await _kafka_producer.send(
+            KAFKA_TOPIC,
+            {
+                "agent_id": AGENT_ID,
+                "message": message,
+                "source": source,
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+            },
+        )
+    except Exception:
+        pass
+
+
+async def _record_run(
+    run_id: str,
+    user_msg: str,
+    reply: str,
+    steps: list,
+    latency_ms: int,
+) -> None:
+    if not AGENT_ID or not STUDIO_URL:
+        return
+    try:
+        async with httpx.AsyncClient(timeout=5) as client:
+            await client.post(
+                f"{STUDIO_URL}/api/agents/{AGENT_ID}/runs/",
+                json={
+                    "run_id": run_id,
+                    "user_msg": user_msg,
+                    "reply": reply,
+                    "steps": steps,
+                    "latency_ms": latency_ms,
+                },
+            )
+    except Exception as exc:
+        log.warning("record_run failed: %s", exc)
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    await _init_kafka()
+    yield
+    await _stop_kafka()
+
+
+# ── Agent init ─────────────────────────────────────────────────────────────────
+
+agentscope.init()   # no studio_url — ATOM handles its own tracing
+_agent = build_agent()
+
+app = FastAPI(title="ATOM Agent", lifespan=lifespan)
+
+
+# ── Endpoints ──────────────────────────────────────────────────────────────────
+
+
+class RunRequest(BaseModel):
+    message: str
+
+
+class RunResponse(BaseModel):
+    reply: str
+    run_id: str
+
+
+@app.get("/healthz")
+async def healthz():
+    return {"status": "ok"}
+
+
+@app.post("/run", response_model=RunResponse)
+async def run(req: RunRequest):
+    run_id = str(uuid.uuid4())
+    t0 = time.monotonic()
+
+    await _emit_log(f"[request] {req.message}")
+
+    response = await _agent(Msg(name="user", content=req.message, role="user"))
+
+    blocks = response.get_content_blocks("text")
+    reply = " ".join(b.get("text", "") for b in blocks) if blocks else str(response.content)
+    latency_ms = int((time.monotonic() - t0) * 1000)
+
+    await _emit_log(f"[reply] ({latency_ms}ms) {reply}")
+    await _record_run(run_id, req.message, reply, [], latency_ms)
+
+    return RunResponse(reply=reply, run_id=run_id)
+'''
 
 
 def _build_readme(state: BuilderState) -> str:
@@ -141,12 +302,14 @@ async def _build_local_image(state: BuilderState, agent_py: str) -> tuple[str, s
         dockerfile_content = (
             "FROM python:3.11-slim\nWORKDIR /app\n"
             "COPY requirements.txt .\nRUN pip install --no-cache-dir -r requirements.txt\n"
-            'COPY . .\nENV PYTHONUNBUFFERED=1\nCMD ["python", "agent.py"]\n'
+            "COPY . .\nENV PYTHONUNBUFFERED=1\n"
+            'CMD ["uvicorn", "server:app", "--host", "0.0.0.0", "--port", "8080"]\n'
         )
 
     with tempfile.TemporaryDirectory() as tmpdir:
         for fname, content in {
             "agent.py": agent_py,
+            "server.py": _build_server_py(),
             "requirements.txt": _build_requirements(),
             "Dockerfile": dockerfile_content,
             "atom_agent.yaml": _build_atom_agent_yaml(state, ""),
@@ -250,38 +413,31 @@ async def _generate_fix(
     """Ask the LLM to fix agent.py given the container error logs."""
     formatter_import, formatter_instance = _formatter_for_model(model_name)
 
-    fix_prompt = f"""You are fixing a broken ATOM agent.
+    fix_prompt = f"""Fix the agent.py below. The container crashed — error logs are shown.
 
-The agent.py below crashed when its Docker container started.
-The error logs from the container are shown. Fix ONLY the code issue — keep the agent's intent intact.
+agent.py contains ONE function: `build_agent() -> ReActAgent`.
+The surrounding server (FastAPI, Kafka, /run, /healthz) is in a fixed server.py — do not reproduce it.
 
 ## Broken agent.py
 ```python
 {original_agent_py}
 ```
 
-## Container error logs (last 100 lines)
+## Container error logs
 ```
 {error_logs}
 ```
 
-## Agent intent
-{intent}
-
-## Formatter to use
-Import: {formatter_import}
-Use: formatter={formatter_instance}
+## Intent: {intent}
 
 ## Fix rules
-- This is a FastAPI server (server.py), NOT a script — keep `app = FastAPI()`, `/healthz`, `/run`
-- Keep the same agent intent and structure
-- Fix imports: use `agentscope.agent`, `agentscope.model`, `agentscope.formatter`, `agentscope.tool`, `agentscope.memory`, `agentscope.message`
-- `agentscope.init()` must have NO ARGUMENTS — never pass studio_url (causes Socket.IO failure)
-- ALWAYS use `OpenAIChatFormatter()` — never `GeminiChatFormatter` or `AnthropicChatFormatter`
-- `ReActAgent` REQUIRES `formatter=OpenAIChatFormatter()` — never omit it
+- Output ONLY agent.py with only `build_agent() -> ReActAgent` — no server, no FastAPI, no Kafka
+- Imports: `agentscope.agent` (singular), `agentscope.model` (singular), `agentscope.formatter`, `agentscope.tool`
+- `formatter=OpenAIChatFormatter()` always — never any other formatter
+- `ReActAgent` requires `formatter=` positional arg — never omit
 - Tools registered via `toolkit.register_tool_function(func)` — no `agent.use_tool()`
-- CMD is `uvicorn server:app --host 0.0.0.0 --port 8080` — not `python agent.py`
-- Only output the fixed Python file content — no explanation, no markdown fences.
+- No `agentscope.init()` in agent.py — server.py handles that
+- No markdown fences, pure Python only
 """
 
     async with httpx.AsyncClient(timeout=120.0) as client:
@@ -643,6 +799,7 @@ async def run_deploy(
     try:
         files = {
             "agent.py": agent_py,
+            "server.py": _build_server_py(),
             "atom_agent.yaml": _build_atom_agent_yaml(state, gitlab.group),
             "Dockerfile": _build_dockerfile(gitlab.group),
             ".gitlab-ci.yml": _build_gitlab_ci(),
