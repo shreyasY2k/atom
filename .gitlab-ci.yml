@@ -209,6 +209,8 @@ release-cli:
     # GoReleaser requires one of GITHUB_TOKEN / GITLAB_TOKEN / GITEA_TOKEN to detect
     # the SCM. Point it at CI_JOB_TOKEN — no external PAT needed; GitLab 15.7+ grants
     # CI_JOB_TOKEN permission to create releases in the same project.
+    # use_job_token: true in .goreleaser.yml makes GoReleaser send this via JOB-TOKEN
+    # header instead of PRIVATE-TOKEN, which is what GitLab accepts for job tokens.
     GITLAB_TOKEN: $CI_JOB_TOKEN
   script:
     - goreleaser release --clean --skip=before --skip=validate

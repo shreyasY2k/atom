@@ -2,15 +2,23 @@ version: 2
 
 project_name: atom
 
-before:
-  hooks:
-    - go work sync
-    - cd atom-cli && go mod tidy
+# GitLab release target — used when GITLAB_TOKEN is set (GitLab CI).
+# When running on GitHub Actions, GoReleaser falls back to the GitHub API automatically.
+gitlab_urls:
+  api: https://gitlab.com/api/v4/
+  download: https://gitlab.com
+  # use_job_token makes GoReleaser send CI_JOB_TOKEN via JOB-TOKEN header (not
+  # PRIVATE-TOKEN). Without this, GitLab returns 404 on release artifact uploads
+  # because CI_JOB_TOKEN is not a valid PRIVATE-TOKEN value.
+  # GITLAB_TOKEN in the CI job is still required for GoReleaser's SCM detection.
+  use_job_token: true
 
 builds:
   - id: atom-cli
-    dir: atom-cli
-    main: ./cmd/atom
+    # No dir: — use full path from repo root so GoReleaser v2 does not
+    # auto-generate "cd atom-cli && go mod tidy" (which fails because
+    # `cd` is not a standalone executable on Linux).
+    main: ./atom-cli/cmd/atom
     binary: atom
     env:
       - CGO_ENABLED=0
@@ -32,22 +40,19 @@ builds:
 
 archives:
   - id: atom-cli
-    builds: [atom-cli]
+    ids: [atom-cli]
     name_template: "atom_{{ .Os }}_{{ .Arch }}"
     format_overrides:
       - goos: windows
-        format: zip
+        formats: [zip]
     files:
       - README.md
       - docs/DEVELOPER_GUIDE.md
 
 checksum:
-  name_template: "checksums.txt"
+  name_template: "atom_{{ .Version }}_checksums.txt"
 
 release:
-  # No explicit github/gitlab block — GoReleaser auto-detects the SCM:
-  #   GitHub:  GITHUB_TOKEN set + GitHub Actions env  → GitHub Release
-  #   GitLab:  GITLAB_TOKEN set + GitLab CI env       → GitLab Release
   name_template: "ATOM v{{.Version}}"
   header: |
     ## ATOM v{{.Version}}
