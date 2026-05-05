@@ -27,7 +27,9 @@ from .domains.router import router as domains_router
 from .hitl.router import router as hitl_router
 from .hitl.service import expire_stale_hitl
 from .kafka_producer import init_producer, stop_producer
+from .builder.router import router as builder_router
 from .skills.router import router as skills_router
+from .skills.router import seed_skills
 from .tools.router import router as tools_router
 from .ws.log_broadcaster import broadcaster
 from .ws.router import ws_router
@@ -120,6 +122,7 @@ def _run_migrations() -> None:
 async def lifespan(app: FastAPI):
     _run_migrations()
     await init_pool()
+    await seed_skills()
     await init_producer()
     await broadcaster.start()
     task = asyncio.create_task(expire_stale_hitl())
@@ -148,6 +151,7 @@ app.include_router(agents_global_router, prefix="/api/agents", tags=["agents"])
 app.include_router(agents_router, prefix="/api/domains/{domain_id}/agents", tags=["agents"])
 app.include_router(tools_router, prefix="/api/tools", tags=["tools"])
 app.include_router(skills_router, prefix="/api/skills", tags=["skills"])
+app.include_router(builder_router, prefix="/api/builder", tags=["builder"])
 app.include_router(hitl_router, prefix="/api/hitl", tags=["hitl"])
 app.include_router(deployments_router, prefix="/api/deployments", tags=["deployments"])
 app.include_router(runtime_router, prefix="/api/runtime", tags=["runtime"])

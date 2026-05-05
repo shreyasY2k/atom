@@ -1,0 +1,18 @@
+# atom-studio Helm values for k8s deployment
+api:
+  image: atom-studio-api:latest
+  port: 3001
+  env:
+    ATOM_SKILLS_DIR: /atom-sdk/skills
+  volumeMounts:
+    - name: skills
+      mountPath: /atom-sdk/skills
+      readOnly: true
+  volumes:
+    - name: skills
+      configMap:
+        name: atom-sdk-skills
+
+ui:
+  image: atom-studio-ui:latest
+  port: 5173

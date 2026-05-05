@@ -1,5 +1,5 @@
 import { Link, useRouterState } from '@tanstack/react-router'
-import { Globe, Bot, UserCheck, BookOpen, LogOut } from 'lucide-react'
+import { Globe, Bot, UserCheck, BookOpen, Wrench, LogOut } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -9,6 +9,7 @@ import { usePendingCount } from '@/lib/hitlStore'
 const navItems = [
   { label: 'Domains', href: '/domains', icon: Globe, enabled: true },
   { label: 'Agents', href: '/agents', icon: Bot, enabled: true },
+  { label: 'Tools & Skills', href: '/tools-skills', icon: Wrench, enabled: true },
   { label: 'HITL Queue', href: '/hitl', icon: UserCheck, enabled: true },
   { label: 'Audit Log', href: '/audit', icon: BookOpen, enabled: true },
 ]

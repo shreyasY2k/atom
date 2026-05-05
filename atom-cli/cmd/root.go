@@ -27,4 +27,7 @@ func init() {
 	rootCmd.AddCommand(deployCmd)
 	rootCmd.AddCommand(logsCmd)
 	rootCmd.AddCommand(sdkCmd)
+	rootCmd.AddCommand(buildCmd)
+	rootCmd.AddCommand(skillsCmd)
+	rootCmd.AddCommand(toolsCmd)
 }

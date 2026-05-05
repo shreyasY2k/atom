@@ -19,6 +19,8 @@ import { AgentConversations } from '@/pages/AgentConversations'
 import { AgentLogs } from '@/pages/AgentLogs'
 import { Audit } from '@/pages/Audit'
 import { HitlQueue } from '@/pages/HitlQueue'
+import { ToolsSkills } from '@/pages/ToolsSkills'
+import { AgentBuilder } from '@/pages/AgentBuilder'
 
 const queryClient = new QueryClient()
 
@@ -74,6 +76,30 @@ const agentNewRoute = createRoute({
     <RequireAuth>
       <Layout>
         <AgentWizard />
+      </Layout>
+    </RequireAuth>
+  ),
+})
+
+const agentBuildRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: '/agents/build',
+  component: () => (
+    <RequireAuth>
+      <Layout>
+        <AgentBuilder />
+      </Layout>
+    </RequireAuth>
+  ),
+})
+
+const toolsSkillsRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: '/tools-skills',
+  component: () => (
+    <RequireAuth>
+      <Layout>
+        <ToolsSkills />
       </Layout>
     </RequireAuth>
   ),
@@ -154,6 +180,8 @@ const routeTree = rootRoute.addChildren([
   domainsRoute,
   agentsRoute,
   agentNewRoute,
+  agentBuildRoute,
+  toolsSkillsRoute,
   agentDetailRoute,
   agentLogsRoute,
   agentConversationsRoute,

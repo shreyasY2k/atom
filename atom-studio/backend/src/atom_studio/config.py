@@ -13,6 +13,7 @@ class Settings(BaseSettings):
     jwt_public_key_path: str
     atom_encryption_key: str
     atom_llm_url: str = "http://atom-llm:4000"
+    litellm_master_key: str = ""
     atom_runtime_url: str = "http://atom-runtime:8090"
     access_token_expire_minutes: int = 15
     refresh_token_expire_days: int = 7
@@ -31,3 +32,6 @@ class Settings(BaseSettings):
 @lru_cache
 def get_settings() -> Settings:
     return Settings()
+
+
+settings = get_settings()

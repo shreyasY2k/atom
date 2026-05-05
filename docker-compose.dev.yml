@@ -284,6 +284,7 @@ services:
     volumes:
       - ./.keys:/etc/atom:ro
       - ./migrations:/migrations:ro
+      - ./atom-sdk/skills:/atom-sdk/skills:ro
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:3001/healthz"]
       interval: 10s
