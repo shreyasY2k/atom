@@ -1,11 +1,18 @@
 import { useNavigate } from '@tanstack/react-router'
 import { useQuery } from '@tanstack/react-query'
 import { format } from 'date-fns'
-import { Plus } from 'lucide-react'
+import Box from '@mui/material/Box'
+import Button from '@mui/material/Button'
+import Typography from '@mui/material/Typography'
+import Table from '@mui/material/Table'
+import TableBody from '@mui/material/TableBody'
+import TableCell from '@mui/material/TableCell'
+import TableHead from '@mui/material/TableHead'
+import TableRow from '@mui/material/TableRow'
+import Chip from '@mui/material/Chip'
+import CircularProgress from '@mui/material/CircularProgress'
+import AddIcon from '@mui/icons-material/Add'
 import api from '@/lib/api'
-import { Button } from '@/components/ui/button'
-import { Badge } from '@/components/ui/badge'
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 
 interface Agent {
   id: string
@@ -19,11 +26,11 @@ interface Agent {
   created_at: string
 }
 
-const STATUS_VARIANT: Record<Agent['status'], 'default' | 'secondary' | 'outline' | 'destructive'> = {
-  draft: 'secondary',
-  pending_approval: 'outline',
-  deployed: 'default',
-  suspended: 'destructive',
+const STATUS_COLOR: Record<Agent['status'], 'default' | 'primary' | 'warning' | 'error'> = {
+  draft: 'default',
+  pending_approval: 'warning',
+  deployed: 'primary',
+  suspended: 'error',
 }
 
 export function Agents() {
@@ -35,41 +42,43 @@ export function Agents() {
   })
 
   return (
-    <div className="space-y-6">
-      <div className="flex items-center justify-between">
-        <h2 className="text-2xl font-bold tracking-tight">Agents</h2>
-        <Button onClick={() => navigate({ to: '/agents/new' })}>
-          <Plus className="mr-2 h-4 w-4" />
+    <Box sx={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
+      <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+        <Typography variant="h5" sx={{ fontWeight: 700 }}>Agents</Typography>
+        <Button variant="contained" startIcon={<AddIcon />} onClick={() => navigate({ to: '/agents/new' })}>
           New Agent
         </Button>
-      </div>
+      </Box>
 
       {isLoading ? (
-        <p className="text-sm text-muted-foreground">Loading…</p>
+        <CircularProgress size={24} />
       ) : (
-        <Table>
-          <TableHeader>
+        <Table size="small">
+          <TableHead>
             <TableRow>
-              <TableHead>Name</TableHead>
-              <TableHead>Domain</TableHead>
-              <TableHead>Status</TableHead>
-              <TableHead>Models</TableHead>
-              <TableHead>Tools</TableHead>
-              <TableHead>Created</TableHead>
+              <TableCell>Name</TableCell>
+              <TableCell>Domain</TableCell>
+              <TableCell>Status</TableCell>
+              <TableCell>Models</TableCell>
+              <TableCell>Tools</TableCell>
+              <TableCell>Created</TableCell>
             </TableRow>
-          </TableHeader>
+          </TableHead>
           <TableBody>
             {agents.length === 0 ? (
               <TableRow>
-                <TableCell colSpan={6} className="text-center text-muted-foreground">
-                  No agents yet. Create one to get started.
+                <TableCell colSpan={6} align="center">
+                  <Typography variant="body2" color="text.secondary">
+                    No agents yet. Create one to get started.
+                  </Typography>
                 </TableCell>
               </TableRow>
             ) : (
               agents.map(a => (
                 <TableRow
                   key={a.id}
-                  className="cursor-pointer"
+                  hover
+                  sx={{ cursor: 'pointer' }}
                   onClick={() =>
                     navigate({
                       to: '/domains/$domainId/agents/$agentId',
@@ -77,27 +86,33 @@ export function Agents() {
                     })
                   }
                 >
-                  <TableCell className="font-medium">{a.name}</TableCell>
-                  <TableCell className="text-muted-foreground text-sm">{a.domain_name}</TableCell>
+                  <TableCell><strong>{a.name}</strong></TableCell>
+                  <TableCell sx={{ color: 'text.secondary', fontSize: 13 }}>{a.domain_name}</TableCell>
                   <TableCell>
-                    <Badge variant={STATUS_VARIANT[a.status]}>{a.status}</Badge>
+                    <Chip
+                      label={a.status.replace('_', ' ')}
+                      size="small"
+                      color={STATUS_COLOR[a.status]}
+                      sx={{ textTransform: 'capitalize' }}
+                    />
                   </TableCell>
                   <TableCell>
-                    <div className="flex flex-wrap gap-1">
+                    <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.5 }}>
                       {(a.allowed_models ?? []).slice(0, 2).map(m => (
-                        <Badge key={m} variant="outline" className="text-xs">
-                          {m}
-                        </Badge>
+                        <Chip key={m} label={m} size="small" variant="outlined" sx={{ fontSize: 11 }} />
                       ))}
                       {(a.allowed_models ?? []).length > 2 && (
-                        <Badge variant="outline" className="text-xs">
-                          +{a.allowed_models.length - 2}
-                        </Badge>
+                        <Chip
+                          label={`+${a.allowed_models.length - 2}`}
+                          size="small"
+                          variant="outlined"
+                          sx={{ fontSize: 11 }}
+                        />
                       )}
-                    </div>
+                    </Box>
                   </TableCell>
-                  <TableCell className="text-sm">{a.tool_count}</TableCell>
-                  <TableCell className="text-muted-foreground text-xs">
+                  <TableCell sx={{ fontSize: 13 }}>{a.tool_count}</TableCell>
+                  <TableCell sx={{ color: 'text.secondary', fontSize: 12 }}>
                     {format(new Date(a.created_at), 'MMM d, yyyy')}
                   </TableCell>
                 </TableRow>
@@ -106,6 +121,6 @@ export function Agents() {
           </TableBody>
         </Table>
       )}
-    </div>
+    </Box>
   )
 }

@@ -1,30 +1,28 @@
 import { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { useForm } from 'react-hook-form'
+import { useForm, Controller } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { z } from 'zod'
 import { format } from 'date-fns'
-import { Plus } from 'lucide-react'
+import Box from '@mui/material/Box'
+import Button from '@mui/material/Button'
+import Typography from '@mui/material/Typography'
+import Dialog from '@mui/material/Dialog'
+import DialogTitle from '@mui/material/DialogTitle'
+import DialogContent from '@mui/material/DialogContent'
+import DialogActions from '@mui/material/DialogActions'
+import TextField from '@mui/material/TextField'
+import Table from '@mui/material/Table'
+import TableBody from '@mui/material/TableBody'
+import TableCell from '@mui/material/TableCell'
+import TableHead from '@mui/material/TableHead'
+import TableRow from '@mui/material/TableRow'
+import Snackbar from '@mui/material/Snackbar'
+import Alert from '@mui/material/Alert'
+import CircularProgress from '@mui/material/CircularProgress'
+import AddIcon from '@mui/icons-material/Add'
 import api from '@/lib/api'
-import { toast } from '@/hooks/use-toast'
-import { Button } from '@/components/ui/button'
-import { Input } from '@/components/ui/input'
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
-import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-  DialogDescription,
-} from '@/components/ui/dialog'
-import {
-  Form,
-  FormControl,
-  FormField,
-  FormItem,
-  FormLabel,
-  FormMessage,
-} from '@/components/ui/form'
+import { useSnackbar } from '@/hooks/use-snackbar'
 
 interface Domain {
   id: string
@@ -56,13 +54,14 @@ async function createDomain(values: FormValues): Promise<Domain> {
 export function Domains() {
   const [open, setOpen] = useState(false)
   const queryClient = useQueryClient()
+  const { state: snack, show: showSnack, hide: hideSnack } = useSnackbar()
 
   const { data: domains = [], isLoading } = useQuery({
     queryKey: ['domains'],
     queryFn: fetchDomains,
   })
 
-  const form = useForm<FormValues>({
+  const { control, handleSubmit, reset, formState } = useForm<FormValues>({
     resolver: zodResolver(schema),
     defaultValues: { name: '', description: '' },
   })
@@ -72,53 +71,54 @@ export function Domains() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['domains'] })
       setOpen(false)
-      form.reset()
-      toast({ title: 'Domain created', description: 'LiteLLM team provisioned.' })
+      reset()
+      showSnack('Domain created — LiteLLM team provisioned.', 'success')
     },
     onError: (err: unknown) => {
       const msg = err instanceof Error ? err.message : 'Failed to create domain.'
-      toast({ title: 'Error', description: msg, variant: 'destructive' })
+      showSnack(msg, 'error')
     },
   })
 
   const onSubmit = (values: FormValues) => mutation.mutate(values)
 
   return (
-    <div className="space-y-6">
-      <div className="flex items-center justify-between">
-        <h2 className="text-2xl font-bold tracking-tight">Domains</h2>
-        <Button onClick={() => setOpen(true)}>
-          <Plus className="mr-2 h-4 w-4" />
+    <Box sx={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
+      <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+        <Typography variant="h5" sx={{ fontWeight: 700 }}>Domains</Typography>
+        <Button variant="contained" startIcon={<AddIcon />} onClick={() => setOpen(true)}>
           New Domain
         </Button>
-      </div>
+      </Box>
 
       {isLoading ? (
-        <p className="text-sm text-muted-foreground">Loading…</p>
+        <CircularProgress size={24} />
       ) : (
-        <Table>
-          <TableHeader>
+        <Table size="small">
+          <TableHead>
             <TableRow>
-              <TableHead>Name</TableHead>
-              <TableHead>Description</TableHead>
-              <TableHead>Agents</TableHead>
-              <TableHead>Created</TableHead>
+              <TableCell>Name</TableCell>
+              <TableCell>Description</TableCell>
+              <TableCell>Agents</TableCell>
+              <TableCell>Created</TableCell>
             </TableRow>
-          </TableHeader>
+          </TableHead>
           <TableBody>
             {domains.length === 0 ? (
               <TableRow>
-                <TableCell colSpan={4} className="text-center text-muted-foreground">
-                  No domains yet. Create one to get started.
+                <TableCell colSpan={4} align="center">
+                  <Typography variant="body2" color="text.secondary">
+                    No domains yet. Create one to get started.
+                  </Typography>
                 </TableCell>
               </TableRow>
             ) : (
               domains.map(d => (
                 <TableRow key={d.id}>
-                  <TableCell className="font-medium">{d.name}</TableCell>
-                  <TableCell className="text-muted-foreground">{d.description ?? '—'}</TableCell>
+                  <TableCell><strong>{d.name}</strong></TableCell>
+                  <TableCell sx={{ color: 'text.secondary' }}>{d.description ?? '—'}</TableCell>
                   <TableCell>{d.agent_count}</TableCell>
-                  <TableCell className="text-muted-foreground text-xs">
+                  <TableCell sx={{ color: 'text.secondary', fontSize: 12 }}>
                     {format(new Date(d.created_at), 'MMM d, yyyy')}
                   </TableCell>
                 </TableRow>
@@ -128,54 +128,67 @@ export function Domains() {
         </Table>
       )}
 
-      <Dialog open={open} onOpenChange={setOpen}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>New Domain</DialogTitle>
-            <DialogDescription>
+      <Dialog open={open} onClose={() => setOpen(false)} fullWidth maxWidth="xs">
+        <DialogTitle>New Domain</DialogTitle>
+        <Box component="form" onSubmit={handleSubmit(onSubmit)}>
+          <DialogContent sx={{ display: 'flex', flexDirection: 'column', gap: 2, pt: 1 }}>
+            <Typography variant="body2" color="text.secondary">
               Creates a domain and provisions a LiteLLM team for it.
-            </DialogDescription>
-          </DialogHeader>
-          <Form {...form}>
-            <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4">
-              <FormField
-                control={form.control}
-                name="name"
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>Name</FormLabel>
-                    <FormControl>
-                      <Input placeholder="acme-corp" {...field} />
-                    </FormControl>
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
-              <FormField
-                control={form.control}
-                name="description"
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>Description</FormLabel>
-                    <FormControl>
-                      <Input placeholder="Optional description" {...field} />
-                    </FormControl>
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
-              <div className="flex justify-end gap-2">
-                <Button type="button" variant="outline" onClick={() => setOpen(false)}>
-                  Cancel
-                </Button>
-                <Button type="submit" disabled={mutation.isPending}>
-                  {mutation.isPending ? 'Creating…' : 'Create'}
-                </Button>
-              </div>
-            </form>
-          </Form>
-        </DialogContent>
+            </Typography>
+            <Controller
+              name="name"
+              control={control}
+              render={({ field, fieldState }) => (
+                <TextField
+                  {...field}
+                  label="Name"
+                  placeholder="acme-corp"
+                  size="small"
+                  fullWidth
+                  error={!!fieldState.error}
+                  helperText={fieldState.error?.message}
+                />
+              )}
+            />
+            <Controller
+              name="description"
+              control={control}
+              render={({ field, fieldState }) => (
+                <TextField
+                  {...field}
+                  label="Description"
+                  placeholder="Optional description"
+                  size="small"
+                  fullWidth
+                  error={!!fieldState.error}
+                  helperText={fieldState.error?.message}
+                />
+              )}
+            />
+          </DialogContent>
+          <DialogActions sx={{ px: 3, pb: 2 }}>
+            <Button onClick={() => setOpen(false)}>Cancel</Button>
+            <Button
+              type="submit"
+              variant="contained"
+              disabled={mutation.isPending || formState.isSubmitting}
+            >
+              {mutation.isPending ? 'Creating…' : 'Create'}
+            </Button>
+          </DialogActions>
+        </Box>
       </Dialog>
-    </div>
+
+      <Snackbar
+        open={snack.open}
+        autoHideDuration={4000}
+        onClose={hideSnack}
+        anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }}
+      >
+        <Alert onClose={hideSnack} severity={snack.severity} variant="filled">
+          {snack.message}
+        </Alert>
+      </Snackbar>
+    </Box>
   )
 }

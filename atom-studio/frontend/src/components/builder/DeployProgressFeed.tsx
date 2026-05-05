@@ -1,4 +1,7 @@
-import { CheckCircle, XCircle, Loader2 } from 'lucide-react'
+import { CheckCircle, XCircle } from 'lucide-react'
+import Box from '@mui/material/Box'
+import Typography from '@mui/material/Typography'
+import CircularProgress from '@mui/material/CircularProgress'
 import type { DeployStep } from '@/hooks/useBuilderDeploy'
 
 interface Props {
@@ -7,34 +10,34 @@ interface Props {
   error: string | null
 }
 
-
 export function DeployProgressFeed({ steps, deploying, error }: Props) {
   if (steps.length === 0 && !deploying) return null
 
   return (
-    <div className="space-y-1.5 text-sm">
+    <Box sx={{ display: 'flex', flexDirection: 'column', gap: 0.75 }}>
       {steps.map((s, i) => {
         const isError = s.message.startsWith('✗')
         return (
-          <div key={i} className={`flex items-start gap-2 ${isError ? 'text-destructive' : 'text-foreground'}`}>
+          <Box key={i} sx={{ display: 'flex', alignItems: 'flex-start', gap: 1, color: isError ? 'error.main' : 'text.primary' }}>
             {isError
-              ? <XCircle className="h-4 w-4 shrink-0 mt-0.5 text-destructive" />
-              : <CheckCircle className="h-4 w-4 shrink-0 mt-0.5 text-green-500" />}
-            <span>{s.message}</span>
+              ? <XCircle size={16} style={{ flexShrink: 0, marginTop: 2, color: 'inherit' }} />
+              : <CheckCircle size={16} style={{ flexShrink: 0, marginTop: 2, color: '#22c55e' }} />
+            }
+            <Typography variant="body2" sx={{ color: 'inherit' }}>{s.message}</Typography>
             {s.url && (
-              <a href={s.url} target="_blank" rel="noreferrer" className="text-primary underline text-xs ml-1">
+              <a href={s.url} target="_blank" rel="noreferrer" style={{ color: '#1976d2', fontSize: 12, marginLeft: 4 }}>
                 view
               </a>
             )}
-          </div>
+          </Box>
         )
       })}
       {deploying && !error && (
-        <div className="flex items-center gap-2 text-muted-foreground">
-          <Loader2 className="h-4 w-4 animate-spin shrink-0" />
-          <span>Working…</span>
-        </div>
+        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, color: 'text.secondary' }}>
+          <CircularProgress size={16} />
+          <Typography variant="body2" color="text.secondary">Working…</Typography>
+        </Box>
       )}
-    </div>
+    </Box>
   )
 }

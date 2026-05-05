@@ -1,14 +1,21 @@
 import { useState } from 'react'
 import { useNavigate } from '@tanstack/react-router'
 import { useQuery } from '@tanstack/react-query'
-import { ChevronLeft, ChevronRight } from 'lucide-react'
+import Box from '@mui/material/Box'
+import Button from '@mui/material/Button'
+import Typography from '@mui/material/Typography'
+import TextField from '@mui/material/TextField'
+import FormLabel from '@mui/material/FormLabel'
+import Card from '@mui/material/Card'
+import CardContent from '@mui/material/CardContent'
+import Chip from '@mui/material/Chip'
+import LinearProgress from '@mui/material/LinearProgress'
+import Snackbar from '@mui/material/Snackbar'
+import Alert from '@mui/material/Alert'
+import ChevronLeftIcon from '@mui/icons-material/ChevronLeft'
+import ChevronRightIcon from '@mui/icons-material/ChevronRight'
 import api from '@/lib/api'
-import { toast } from '@/hooks/use-toast'
-import { Button } from '@/components/ui/button'
-import { Input } from '@/components/ui/input'
-import { Label } from '@/components/ui/label'
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
-import { Badge } from '@/components/ui/badge'
+import { useSnackbar } from '@/hooks/use-snackbar'
 import { TokenRevealModal } from '@/components/app/TokenRevealModal'
 
 const TOTAL_STEPS = 7
@@ -49,24 +56,6 @@ const initial: WizardData = {
   hitlFallback: 'ABORT',
 }
 
-function StepIndicator({ current, total }: { current: number; total: number }) {
-  return (
-    <div className="flex items-center gap-1 mb-6">
-      {Array.from({ length: total }, (_, i) => (
-        <div
-          key={i}
-          className={`h-2 flex-1 rounded-full transition-colors ${
-            i < current ? 'bg-primary' : i === current ? 'bg-primary/60' : 'bg-muted'
-          }`}
-        />
-      ))}
-      <span className="ml-2 text-xs text-muted-foreground whitespace-nowrap">
-        {current + 1} / {total}
-      </span>
-    </div>
-  )
-}
-
 function toggle<T>(arr: T[], val: T): T[] {
   return arr.includes(val) ? arr.filter(v => v !== val) : [...arr, val]
 }
@@ -77,6 +66,7 @@ export function AgentWizard() {
   const [data, setData] = useState<WizardData>(initial)
   const [submitting, setSubmitting] = useState(false)
   const [revealToken, setRevealToken] = useState<{ token: string; agentId: string; domainId: string } | null>(null)
+  const { state: snack, show: showSnack, hide: hideSnack } = useSnackbar()
 
   const up = (patch: Partial<WizardData>) => setData(d => ({ ...d, ...patch }))
 
@@ -134,7 +124,7 @@ export function AgentWizard() {
       })
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : 'Agent creation failed.'
-      toast({ title: 'Error', description: msg, variant: 'destructive' })
+      showSnack(msg, 'error')
     } finally {
       setSubmitting(false)
     }
@@ -154,153 +144,174 @@ export function AgentWizard() {
     switch (step) {
       case 0:
         return (
-          <div className="space-y-4">
-            <div className="space-y-2">
-              <Label htmlFor="name">Agent name *</Label>
-              <Input
-                id="name"
-                value={data.name}
-                onChange={e => up({ name: e.target.value })}
-                placeholder="my-agent"
-              />
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="desc">Description</Label>
-              <Input
-                id="desc"
-                value={data.description}
-                onChange={e => up({ description: e.target.value })}
-                placeholder="Optional description"
-              />
-            </div>
-          </div>
+          <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+            <TextField
+              label="Agent name *"
+              value={data.name}
+              onChange={e => up({ name: e.target.value })}
+              placeholder="my-agent"
+              size="small"
+              fullWidth
+            />
+            <TextField
+              label="Description"
+              value={data.description}
+              onChange={e => up({ description: e.target.value })}
+              placeholder="Optional description"
+              size="small"
+              fullWidth
+            />
+          </Box>
         )
 
       case 1:
         return (
-          <div className="space-y-2">
-            <Label>Domain</Label>
+          <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
+            <FormLabel>Domain</FormLabel>
             {domains.length === 0 ? (
-              <p className="text-sm text-muted-foreground">No domains yet. Create one first.</p>
+              <Typography variant="body2" color="text.secondary">No domains yet. Create one first.</Typography>
             ) : (
-              <div className="space-y-2">
-                {domains.map(d => (
-                  <label
-                    key={d.id}
-                    className={`flex items-center gap-3 rounded-md border p-3 cursor-pointer transition-colors ${
-                      data.domainId === d.id ? 'border-primary bg-primary/5' : 'hover:bg-muted/50'
-                    }`}
-                  >
-                    <input
-                      type="radio"
-                      name="domain"
-                      value={d.id}
-                      checked={data.domainId === d.id}
-                      onChange={() => up({ domainId: d.id })}
-                      className="accent-primary"
-                    />
-                    <span className="font-medium text-sm">{d.name}</span>
-                  </label>
-                ))}
-              </div>
+              domains.map(d => (
+                <Box
+                  key={d.id}
+                  component="label"
+                  sx={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 1.5,
+                    border: 1,
+                    borderColor: data.domainId === d.id ? 'primary.main' : 'divider',
+                    borderRadius: 1,
+                    p: 1.5,
+                    cursor: 'pointer',
+                    bgcolor: data.domainId === d.id ? 'primary.50' : 'transparent',
+                  }}
+                >
+                  <input
+                    type="radio"
+                    name="domain"
+                    value={d.id}
+                    checked={data.domainId === d.id}
+                    onChange={() => up({ domainId: d.id })}
+                  />
+                  <Typography variant="body2" sx={{ fontWeight: 500 }}>{d.name}</Typography>
+                </Box>
+              ))
             )}
-          </div>
+          </Box>
         )
 
       case 2:
         return (
-          <div className="space-y-2">
-            <Label>Allowed models</Label>
-            <p className="text-xs text-muted-foreground">Select at least one.</p>
-            <div className="space-y-2">
-              {ALLOWED_MODEL_OPTIONS.map(m => (
-                <label
-                  key={m.id}
-                  className={`flex items-center gap-3 rounded-md border p-3 cursor-pointer transition-colors ${
-                    data.allowedModels.includes(m.id) ? 'border-primary bg-primary/5' : 'hover:bg-muted/50'
-                  }`}
-                >
-                  <input
-                    type="checkbox"
-                    checked={data.allowedModels.includes(m.id)}
-                    onChange={() => up({ allowedModels: toggle(data.allowedModels, m.id) })}
-                    className="accent-primary"
-                  />
-                  <span className="text-sm">{m.label}</span>
-                  <code className="ml-auto text-xs text-muted-foreground">{m.id}</code>
-                </label>
-              ))}
-            </div>
-          </div>
+          <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
+            <FormLabel>Allowed models</FormLabel>
+            <Typography variant="caption" color="text.secondary">Select at least one.</Typography>
+            {ALLOWED_MODEL_OPTIONS.map(m => (
+              <Box
+                key={m.id}
+                component="label"
+                sx={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 1.5,
+                  border: 1,
+                  borderColor: data.allowedModels.includes(m.id) ? 'primary.main' : 'divider',
+                  borderRadius: 1,
+                  p: 1.5,
+                  cursor: 'pointer',
+                }}
+              >
+                <input
+                  type="checkbox"
+                  checked={data.allowedModels.includes(m.id)}
+                  onChange={() => up({ allowedModels: toggle(data.allowedModels, m.id) })}
+                />
+                <Typography variant="body2">{m.label}</Typography>
+                <Typography variant="caption" color="text.secondary" sx={{ ml: 'auto' }}>
+                  <code>{m.id}</code>
+                </Typography>
+              </Box>
+            ))}
+          </Box>
         )
 
       case 3:
         return (
-          <div className="space-y-2">
-            <Label>Tools</Label>
-            <p className="text-xs text-muted-foreground">
+          <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
+            <FormLabel>Tools</FormLabel>
+            <Typography variant="caption" color="text.secondary">
               {tools.length === 0 ? 'No tools registered yet.' : 'Select tools to attach.'}
-            </p>
+            </Typography>
             {tools.map(t => (
-              <label
+              <Box
                 key={t.id}
-                className={`flex items-center gap-3 rounded-md border p-3 cursor-pointer ${
-                  data.toolIds.includes(t.id) ? 'border-primary bg-primary/5' : 'hover:bg-muted/50'
-                }`}
+                component="label"
+                sx={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 1.5,
+                  border: 1,
+                  borderColor: data.toolIds.includes(t.id) ? 'primary.main' : 'divider',
+                  borderRadius: 1,
+                  p: 1.5,
+                  cursor: 'pointer',
+                }}
               >
                 <input
                   type="checkbox"
                   checked={data.toolIds.includes(t.id)}
                   onChange={() => up({ toolIds: toggle(data.toolIds, t.id) })}
-                  className="accent-primary"
                 />
-                <div>
-                  <p className="text-sm font-medium">{t.name}</p>
-                  {t.description && (
-                    <p className="text-xs text-muted-foreground">{t.description}</p>
-                  )}
-                </div>
-              </label>
+                <Box>
+                  <Typography variant="body2" sx={{ fontWeight: 500 }}>{t.name}</Typography>
+                  {t.description && <Typography variant="caption" color="text.secondary">{t.description}</Typography>}
+                </Box>
+              </Box>
             ))}
-          </div>
+          </Box>
         )
 
       case 4:
         return (
-          <div className="space-y-2">
-            <Label>Skills</Label>
-            <p className="text-xs text-muted-foreground">
+          <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
+            <FormLabel>Skills</FormLabel>
+            <Typography variant="caption" color="text.secondary">
               {skills.length === 0 ? 'No skills registered yet.' : 'Select skills to attach.'}
-            </p>
+            </Typography>
             {skills.map(s => (
-              <label
+              <Box
                 key={s.id}
-                className={`flex items-center gap-3 rounded-md border p-3 cursor-pointer ${
-                  data.skillIds.includes(s.id) ? 'border-primary bg-primary/5' : 'hover:bg-muted/50'
-                }`}
+                component="label"
+                sx={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 1.5,
+                  border: 1,
+                  borderColor: data.skillIds.includes(s.id) ? 'primary.main' : 'divider',
+                  borderRadius: 1,
+                  p: 1.5,
+                  cursor: 'pointer',
+                }}
               >
                 <input
                   type="checkbox"
                   checked={data.skillIds.includes(s.id)}
                   onChange={() => up({ skillIds: toggle(data.skillIds, s.id) })}
-                  className="accent-primary"
                 />
-                <div>
-                  <p className="text-sm font-medium">{s.name}</p>
-                  {s.description && (
-                    <p className="text-xs text-muted-foreground">{s.description}</p>
-                  )}
-                </div>
-              </label>
+                <Box>
+                  <Typography variant="body2" sx={{ fontWeight: 500 }}>{s.name}</Typography>
+                  {s.description && <Typography variant="caption" color="text.secondary">{s.description}</Typography>}
+                </Box>
+              </Box>
             ))}
-          </div>
+          </Box>
         )
 
       case 5:
         return (
-          <div className="space-y-4">
-            <div className="space-y-2">
-              <Label>Short-term TTL: {data.shortTermTtlS}s</Label>
+          <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+            <Box>
+              <FormLabel>Short-term TTL: {data.shortTermTtlS}s</FormLabel>
               <input
                 type="range"
                 min={60}
@@ -308,96 +319,82 @@ export function AgentWizard() {
                 step={60}
                 value={data.shortTermTtlS}
                 onChange={e => up({ shortTermTtlS: Number(e.target.value) })}
-                className="w-full accent-primary"
+                style={{ width: '100%' }}
               />
-              <div className="flex justify-between text-xs text-muted-foreground">
-                <span>1 min</span>
-                <span>24 hrs</span>
-              </div>
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="vectors">Max vectors</Label>
-              <Input
-                id="vectors"
-                type="number"
-                min={1000}
-                max={10000000}
-                value={data.maxVectors}
-                onChange={e => up({ maxVectors: Number(e.target.value) })}
-              />
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="embed">Embedding model</Label>
-              <Input
-                id="embed"
-                value={data.embeddingModel}
-                onChange={e => up({ embeddingModel: e.target.value })}
-                placeholder="text-embedding-3-small"
-              />
-            </div>
-          </div>
+              <Box sx={{ display: 'flex', justifyContent: 'space-between' }}>
+                <Typography variant="caption" color="text.secondary">1 min</Typography>
+                <Typography variant="caption" color="text.secondary">24 hrs</Typography>
+              </Box>
+            </Box>
+            <TextField
+              label="Max vectors"
+              type="number"
+              slotProps={{ htmlInput: { min: 1000, max: 10000000 } }}
+              value={data.maxVectors}
+              onChange={e => up({ maxVectors: Number(e.target.value) })}
+              size="small"
+              fullWidth
+            />
+            <TextField
+              label="Embedding model"
+              value={data.embeddingModel}
+              onChange={e => up({ embeddingModel: e.target.value })}
+              placeholder="text-embedding-3-small"
+              size="small"
+              fullWidth
+            />
+          </Box>
         )
 
       case 6: {
         const domainName = domains.find(d => d.id === data.domainId)?.name ?? data.domainId
         return (
-          <div className="space-y-4">
-            <div className="space-y-4">
-              <div className="space-y-2">
-                <Label htmlFor="hitl-timeout">HITL timeout (seconds)</Label>
-                <Input
-                  id="hitl-timeout"
-                  type="number"
-                  min={30}
-                  max={3600}
-                  value={data.hitlTimeoutSeconds}
-                  onChange={e => up({ hitlTimeoutSeconds: Number(e.target.value) })}
-                />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="hitl-fallback">HITL fallback</Label>
-                <select
-                  id="hitl-fallback"
-                  value={data.hitlFallback}
-                  onChange={e =>
-                    up({ hitlFallback: e.target.value as WizardData['hitlFallback'] })
-                  }
-                  className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
-                >
-                  <option value="ABORT">ABORT</option>
-                  <option value="CONTINUE">CONTINUE</option>
-                  <option value="ESCALATE">ESCALATE</option>
-                </select>
-              </div>
-            </div>
+          <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+            <TextField
+              label="HITL timeout (seconds)"
+              type="number"
+              slotProps={{ htmlInput: { min: 30, max: 3600 } }}
+              value={data.hitlTimeoutSeconds}
+              onChange={e => up({ hitlTimeoutSeconds: Number(e.target.value) })}
+              size="small"
+              fullWidth
+            />
+            <Box>
+              <FormLabel sx={{ mb: 0.5, display: 'block' }}>HITL fallback</FormLabel>
+              <select
+                value={data.hitlFallback}
+                onChange={e => up({ hitlFallback: e.target.value as WizardData['hitlFallback'] })}
+                style={{ width: '100%', padding: '8px 12px', borderRadius: 8, border: '1px solid #ccc', fontSize: 14 }}
+              >
+                <option value="ABORT">ABORT</option>
+                <option value="CONTINUE">CONTINUE</option>
+                <option value="ESCALATE">ESCALATE</option>
+              </select>
+            </Box>
 
             {/* Review summary */}
-            <div className="rounded-md border p-4 space-y-2 text-sm">
-              <p className="font-semibold text-base">Review</p>
-              <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-sm">
-                <span className="text-muted-foreground">Name</span>
-                <span className="font-medium">{data.name}</span>
-                <span className="text-muted-foreground">Domain</span>
-                <span className="font-medium">{domainName}</span>
-                <span className="text-muted-foreground">Models</span>
-                <span className="flex flex-wrap gap-1">
+            <Box sx={{ border: 1, borderColor: 'divider', borderRadius: 1, p: 2 }}>
+              <Typography variant="subtitle2" gutterBottom>Review</Typography>
+              <Box sx={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 0.5, fontSize: 13 }}>
+                <Typography variant="caption" color="text.secondary">Name</Typography>
+                <Typography variant="caption" sx={{ fontWeight: 500 }}>{data.name}</Typography>
+                <Typography variant="caption" color="text.secondary">Domain</Typography>
+                <Typography variant="caption" sx={{ fontWeight: 500 }}>{domainName}</Typography>
+                <Typography variant="caption" color="text.secondary">Models</Typography>
+                <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.5 }}>
                   {data.allowedModels.map(m => (
-                    <Badge key={m} variant="secondary" className="text-xs">
-                      {m}
-                    </Badge>
+                    <Chip key={m} label={m} size="small" sx={{ fontSize: 10 }} />
                   ))}
-                </span>
-                <span className="text-muted-foreground">Tools</span>
-                <span>{data.toolIds.length} selected</span>
-                <span className="text-muted-foreground">Skills</span>
-                <span>{data.skillIds.length} selected</span>
-                <span className="text-muted-foreground">HITL</span>
-                <span>
-                  {data.hitlTimeoutSeconds}s / {data.hitlFallback}
-                </span>
-              </div>
-            </div>
-          </div>
+                </Box>
+                <Typography variant="caption" color="text.secondary">Tools</Typography>
+                <Typography variant="caption">{data.toolIds.length} selected</Typography>
+                <Typography variant="caption" color="text.secondary">Skills</Typography>
+                <Typography variant="caption">{data.skillIds.length} selected</Typography>
+                <Typography variant="caption" color="text.secondary">HITL</Typography>
+                <Typography variant="caption">{data.hitlTimeoutSeconds}s / {data.hitlFallback}</Typography>
+              </Box>
+            </Box>
+          </Box>
         )
       }
 
@@ -407,44 +404,57 @@ export function AgentWizard() {
   }
 
   return (
-    <div className="max-w-xl mx-auto">
-      <div className="mb-6">
-        <h2 className="text-2xl font-bold">New Agent</h2>
-        <p className="text-muted-foreground text-sm mt-1">
+    <Box sx={{ maxWidth: 560, mx: 'auto' }}>
+      <Box sx={{ mb: 3 }}>
+        <Typography variant="h5" sx={{ fontWeight: 700 }}>New Agent</Typography>
+        <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>
           Configure and provision a new ATOM agent.
-        </p>
-      </div>
+        </Typography>
+      </Box>
 
-      <Card>
-        <CardHeader className="pb-2">
-          <CardTitle className="text-base">{stepTitles[step]}</CardTitle>
-          <CardDescription>
-            <StepIndicator current={step} total={TOTAL_STEPS} />
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-4">
+      <Card variant="outlined">
+        <CardContent>
+          <Typography variant="subtitle1" sx={{ fontWeight: 600 }}>{stepTitles[step]}</Typography>
+          <Box sx={{ mt: 1, mb: 2 }}>
+            <LinearProgress
+              variant="determinate"
+              value={((step + 1) / TOTAL_STEPS) * 100}
+            />
+            <Typography variant="caption" color="text.secondary">
+              {step + 1} / {TOTAL_STEPS}
+            </Typography>
+          </Box>
+
           {renderStep()}
 
-          <div className="flex justify-between pt-4">
+          <Box sx={{ display: 'flex', justifyContent: 'space-between', mt: 3 }}>
             <Button
-              variant="outline"
+              variant="outlined"
+              startIcon={<ChevronLeftIcon />}
               onClick={() => (step === 0 ? navigate({ to: '/agents' }) : setStep(s => s - 1))}
             >
-              <ChevronLeft className="mr-1 h-4 w-4" />
               {step === 0 ? 'Cancel' : 'Back'}
             </Button>
 
             {step < TOTAL_STEPS - 1 ? (
-              <Button onClick={() => setStep(s => s + 1)} disabled={!canNext()}>
+              <Button
+                variant="contained"
+                endIcon={<ChevronRightIcon />}
+                onClick={() => setStep(s => s + 1)}
+                disabled={!canNext()}
+              >
                 Next
-                <ChevronRight className="ml-1 h-4 w-4" />
               </Button>
             ) : (
-              <Button onClick={handleSubmit} disabled={submitting}>
+              <Button
+                variant="contained"
+                onClick={handleSubmit}
+                disabled={submitting}
+              >
                 {submitting ? 'Creating…' : 'Create Agent'}
               </Button>
             )}
-          </div>
+          </Box>
         </CardContent>
       </Card>
 
@@ -456,6 +466,17 @@ export function AgentWizard() {
           domainId={revealToken.domainId}
         />
       )}
-    </div>
+
+      <Snackbar
+        open={snack.open}
+        autoHideDuration={4000}
+        onClose={hideSnack}
+        anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }}
+      >
+        <Alert onClose={hideSnack} severity={snack.severity} variant="filled">
+          {snack.message}
+        </Alert>
+      </Snackbar>
+    </Box>
   )
 }

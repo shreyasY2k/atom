@@ -1,32 +1,32 @@
 import { useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { formatDistanceToNow } from 'date-fns'
+import Box from '@mui/material/Box'
+import Typography from '@mui/material/Typography'
+import Button from '@mui/material/Button'
+import Table from '@mui/material/Table'
+import TableBody from '@mui/material/TableBody'
+import TableCell from '@mui/material/TableCell'
+import TableHead from '@mui/material/TableHead'
+import TableRow from '@mui/material/TableRow'
+import Chip from '@mui/material/Chip'
 import api from '@/lib/api'
 import { useHitlWebSocket } from '@/hooks/useHitlWebSocket'
 import { useHitlStore, HitlItem } from '@/lib/hitlStore'
 import { HitlDecisionDrawer } from '@/components/app/HitlDecisionDrawer'
-import { Badge } from '@/components/ui/badge'
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from '@/components/ui/table'
 
 type FilterType = 'ALL' | 'BUSINESS_DECISION' | 'DEPLOYMENT_APPROVAL'
 
 function Countdown({ expiresAt }: { expiresAt: string | null }) {
-  if (!expiresAt) return <span className="text-muted-foreground">—</span>
+  if (!expiresAt) return <Typography variant="caption" color="text.secondary">—</Typography>
   const diff = new Date(expiresAt).getTime() - Date.now()
-  if (diff <= 0) return <span className="text-destructive text-xs">Expired</span>
+  if (diff <= 0) return <Typography variant="caption" color="error.main">Expired</Typography>
   const s = Math.floor(diff / 1000)
   const h = Math.floor(s / 3600)
   const m = Math.floor((s % 3600) / 60)
   const sec = s % 60
   const label = h > 0 ? `${h}h ${m}m` : m > 0 ? `${m}m ${sec}s` : `${sec}s`
-  return <span className="font-mono text-xs text-amber-600">{label} ↓</span>
+  return <Typography variant="caption" sx={{ fontFamily: 'monospace', color: 'warning.main' }}>{label} ↓</Typography>
 }
 
 export function HitlQueue() {
@@ -50,63 +50,61 @@ export function HitlQueue() {
     filter === 'ALL' ? pending : pending.filter(i => i.workflow_type === filter)
 
   return (
-    <div className="space-y-4">
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-2">
-          <h2 className="text-xl font-bold">HITL Queue</h2>
+    <Box sx={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
+      <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5 }}>
+          <Typography variant="h5" sx={{ fontWeight: 700 }}>HITL Queue</Typography>
           {pending.length > 0 && (
-            <Badge>{pending.length} pending</Badge>
+            <Chip label={`${pending.length} pending`} size="small" color="primary" />
           )}
-        </div>
-        <div className="flex gap-1 text-sm">
+        </Box>
+        <Box sx={{ display: 'flex', gap: 0.5 }}>
           {(['ALL', 'BUSINESS_DECISION', 'DEPLOYMENT_APPROVAL'] as const).map(f => (
-            <button
+            <Button
               key={f}
+              size="small"
+              variant={filter === f ? 'contained' : 'outlined'}
               onClick={() => setFilter(f)}
-              className={`px-3 py-1 rounded-md border transition-colors ${
-                filter === f
-                  ? 'bg-primary text-primary-foreground border-primary'
-                  : 'border-border text-muted-foreground hover:bg-accent'
-              }`}
+              sx={{ fontSize: 12 }}
             >
               {f === 'ALL' ? 'All' : f === 'BUSINESS_DECISION' ? 'Business' : 'Deployment'}
-            </button>
+            </Button>
           ))}
-        </div>
-      </div>
+        </Box>
+      </Box>
 
       {filtered.length === 0 ? (
-        <p className="text-sm text-muted-foreground py-8 text-center">
+        <Typography variant="body2" color="text.secondary" align="center" sx={{ py: 6 }}>
           No pending decisions
-        </p>
+        </Typography>
       ) : (
-        <Table>
-          <TableHeader>
+        <Table size="small">
+          <TableHead>
             <TableRow>
-              <TableHead>Agent</TableHead>
-              <TableHead>Type</TableHead>
-              <TableHead>Submitted</TableHead>
-              <TableHead>Expires in</TableHead>
+              <TableCell>Agent</TableCell>
+              <TableCell>Type</TableCell>
+              <TableCell>Submitted</TableCell>
+              <TableCell>Expires in</TableCell>
             </TableRow>
-          </TableHeader>
+          </TableHead>
           <TableBody>
             {filtered.map(item => (
               <TableRow
                 key={item.id}
-                className="cursor-pointer hover:bg-muted/50"
+                hover
+                sx={{ cursor: 'pointer' }}
                 onClick={() => setSelected(item)}
               >
-                <TableCell className="font-medium">{item.agent_name}</TableCell>
+                <TableCell><strong>{item.agent_name}</strong></TableCell>
                 <TableCell>
-                  <Badge
-                    variant={
-                      item.workflow_type === 'BUSINESS_DECISION' ? 'secondary' : 'outline'
-                    }
-                  >
-                    {item.workflow_type === 'BUSINESS_DECISION' ? 'Business' : 'Deployment'}
-                  </Badge>
+                  <Chip
+                    label={item.workflow_type === 'BUSINESS_DECISION' ? 'Business' : 'Deployment'}
+                    size="small"
+                    variant={item.workflow_type === 'BUSINESS_DECISION' ? 'filled' : 'outlined'}
+                    color="default"
+                  />
                 </TableCell>
-                <TableCell className="text-sm text-muted-foreground">
+                <TableCell sx={{ fontSize: 13, color: 'text.secondary' }}>
                   {formatDistanceToNow(new Date(item.created_at), { addSuffix: true })}
                 </TableCell>
                 <TableCell>
@@ -123,6 +121,6 @@ export function HitlQueue() {
         open={!!selected}
         onClose={() => setSelected(null)}
       />
-    </div>
+    </Box>
   )
 }

@@ -1,10 +1,14 @@
 import { useState } from 'react'
 import { BookOpen, X } from 'lucide-react'
 import { useQuery } from '@tanstack/react-query'
+import Box from '@mui/material/Box'
+import Card from '@mui/material/Card'
+import CardContent from '@mui/material/CardContent'
+import Typography from '@mui/material/Typography'
+import Chip from '@mui/material/Chip'
+import IconButton from '@mui/material/IconButton'
+import Button from '@mui/material/Button'
 import api from '@/lib/api'
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
-import { Badge } from '@/components/ui/badge'
-import { Button } from '@/components/ui/button'
 
 interface Skill {
   id: string
@@ -28,21 +32,21 @@ function SkillDrawer({ skillName, onClose }: { skillName: string; onClose: () =>
   })
 
   return (
-    <div className="fixed inset-y-0 right-0 w-[520px] bg-background border-l shadow-xl z-50 flex flex-col">
-      <div className="flex items-center justify-between p-4 border-b">
-        <h3 className="font-semibold">{skillName}</h3>
-        <Button variant="ghost" size="icon" onClick={onClose}>
-          <X className="h-4 w-4" />
-        </Button>
-      </div>
-      <div className="flex-1 overflow-auto p-4">
+    <Box sx={{ position: 'fixed', inset: '0 0 0 auto', width: 520, bgcolor: 'background.paper', borderLeft: 1, borderColor: 'divider', boxShadow: 8, zIndex: 1400, display: 'flex', flexDirection: 'column' }}>
+      <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', p: 2, borderBottom: 1, borderColor: 'divider' }}>
+        <Typography variant="subtitle1" sx={{ fontWeight: 600 }}>{skillName}</Typography>
+        <IconButton size="small" onClick={onClose}>
+          <X size={16} />
+        </IconButton>
+      </Box>
+      <Box sx={{ flex: 1, overflow: 'auto', p: 2 }}>
         {isLoading ? (
-          <p className="text-sm text-muted-foreground">Loading…</p>
+          <Typography variant="body2" color="text.secondary">Loading…</Typography>
         ) : (
-          <pre className="text-xs whitespace-pre-wrap font-mono">{content}</pre>
+          <pre style={{ fontSize: 12, whiteSpace: 'pre-wrap', fontFamily: 'monospace', margin: 0 }}>{content}</pre>
         )}
-      </div>
-    </div>
+      </Box>
+    </Box>
   )
 }
 
@@ -52,38 +56,52 @@ export function SkillCard({ skill, selected, onToggle }: SkillCardProps) {
   return (
     <>
       <Card
-        className={`cursor-default transition-colors ${selected !== undefined ? 'cursor-pointer' : ''} ${selected ? 'border-primary bg-primary/5' : ''}`}
+        variant="outlined"
+        sx={{
+          cursor: onToggle ? 'pointer' : 'default',
+          transition: 'border-color 0.2s',
+          borderColor: selected ? 'primary.main' : undefined,
+          bgcolor: selected ? 'primary.50' : undefined,
+        }}
         onClick={() => onToggle?.(skill.name)}
       >
-        <CardHeader className="pb-2">
-          <div className="flex items-start justify-between gap-2">
-            <CardTitle className="text-sm font-medium">{skill.name}</CardTitle>
-            <div className="flex gap-1 shrink-0">
-              {skill.builtin && <Badge variant="secondary" className="text-xs">built-in</Badge>}
+        <CardContent sx={{ pb: '8px !important' }}>
+          <Box sx={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 1, mb: 0.5 }}>
+            <Typography variant="body2" sx={{ fontWeight: 500 }}>{skill.name}</Typography>
+            <Box sx={{ display: 'flex', gap: 0.5, flexShrink: 0 }}>
+              {skill.builtin && <Chip label="built-in" size="small" sx={{ fontSize: 10, height: 18 }} />}
               {selected !== undefined && (
-                <Badge variant={selected ? 'default' : 'outline'} className="text-xs">
-                  {selected ? 'selected' : 'add'}
-                </Badge>
+                <Chip
+                  label={selected ? 'selected' : 'add'}
+                  size="small"
+                  color={selected ? 'primary' : 'default'}
+                  variant={selected ? 'filled' : 'outlined'}
+                  sx={{ fontSize: 10, height: 18 }}
+                />
               )}
-            </div>
-          </div>
-        </CardHeader>
-        <CardContent>
-          <p className="text-xs text-muted-foreground line-clamp-2">{skill.description ?? 'No description'}</p>
+            </Box>
+          </Box>
+          <Typography variant="caption" color="text.secondary" sx={{ display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>
+            {skill.description ?? 'No description'}
+          </Typography>
           <Button
-            variant="ghost"
-            size="sm"
-            className="mt-2 h-7 px-2 text-xs"
+            size="small"
+            variant="text"
+            startIcon={<BookOpen size={12} />}
+            sx={{ mt: 0.5, px: 0.5, fontSize: 11 }}
             onClick={e => { e.stopPropagation(); setDrawerOpen(true) }}
           >
-            <BookOpen className="h-3 w-3 mr-1" />
             View SKILL.md
           </Button>
         </CardContent>
       </Card>
+
       {drawerOpen && (
         <>
-          <div className="fixed inset-0 bg-black/30 z-40" onClick={() => setDrawerOpen(false)} />
+          <Box
+            sx={{ position: 'fixed', inset: 0, bgcolor: 'rgba(0,0,0,0.3)', zIndex: 1300 }}
+            onClick={() => setDrawerOpen(false)}
+          />
           <SkillDrawer skillName={skill.name} onClose={() => setDrawerOpen(false)} />
         </>
       )}

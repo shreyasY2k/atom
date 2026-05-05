@@ -1,8 +1,9 @@
 import { useEffect, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { Rocket, Loader2 } from 'lucide-react'
+import Button from '@mui/material/Button'
+import CircularProgress from '@mui/material/CircularProgress'
+import RocketLaunchIcon from '@mui/icons-material/RocketLaunch'
 import api from '@/lib/api'
-import { Button } from '@/components/ui/button'
 import { ConversationPanel } from '@/components/builder/ConversationPanel'
 import { AgentSpecPanel } from '@/components/builder/AgentSpecPanel'
 import { DeployProgressFeed } from '@/components/builder/DeployProgressFeed'
@@ -72,7 +73,7 @@ export function AgentBuilderChat() {
         {/* Left — conversation */}
         <div className="border rounded-lg overflow-hidden flex flex-col">
           <div className="px-4 py-2 border-b bg-muted/40 text-xs font-medium text-muted-foreground">
-            💬 Builder
+            Builder
           </div>
           <div className="flex-1 min-h-0 flex flex-col">
             <ConversationPanel messages={messages} loading={loading} onSend={sendMessage} />
@@ -98,10 +99,12 @@ export function AgentBuilderChat() {
               <span className="text-xs text-muted-foreground">
                 Ready to build and deploy?
               </span>
-              <Button size="sm" onClick={handleDeploy} disabled={deploying}>
-                {deploying
-                  ? <><Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />Deploying…</>
-                  : <><Rocket className="mr-1.5 h-3.5 w-3.5" />Build & Deploy</>}
+              <Button size="small" variant="contained" onClick={handleDeploy} disabled={deploying}>
+                {deploying ? (
+                  <><CircularProgress size={14} color="inherit" sx={{ mr: 0.5 }} />Deploying…</>
+                ) : (
+                  <><RocketLaunchIcon sx={{ fontSize: 14, mr: 0.5 }} />Build & Deploy</>
+                )}
               </Button>
             </div>
           )}
@@ -110,7 +113,7 @@ export function AgentBuilderChat() {
         {/* Right — spec */}
         <div className="border rounded-lg overflow-y-auto">
           <div className="px-4 py-2 border-b bg-muted/40 text-xs font-medium text-muted-foreground">
-            📋 Agent Spec
+            Agent Spec
           </div>
           <div className="p-4 space-y-4">
             <AgentSpecPanel spec={spec} stage={stage} ciTarget={ciTarget} />

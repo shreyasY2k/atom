@@ -2,27 +2,34 @@ import { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { useNavigate, Link } from '@tanstack/react-router'
 import { format } from 'date-fns'
-import { RefreshCw, Trash2, ChevronLeft, Terminal, MessageSquare, Copy, Check } from 'lucide-react'
+import Box from '@mui/material/Box'
+import Button from '@mui/material/Button'
+import Typography from '@mui/material/Typography'
+import Card from '@mui/material/Card'
+import CardContent from '@mui/material/CardContent'
+import Chip from '@mui/material/Chip'
+import Dialog from '@mui/material/Dialog'
+import DialogTitle from '@mui/material/DialogTitle'
+import DialogContent from '@mui/material/DialogContent'
+import DialogContentText from '@mui/material/DialogContentText'
+import DialogActions from '@mui/material/DialogActions'
+import Table from '@mui/material/Table'
+import TableBody from '@mui/material/TableBody'
+import TableCell from '@mui/material/TableCell'
+import TableHead from '@mui/material/TableHead'
+import TableRow from '@mui/material/TableRow'
+import Snackbar from '@mui/material/Snackbar'
+import Alert from '@mui/material/Alert'
+import IconButton from '@mui/material/IconButton'
+import RefreshIcon from '@mui/icons-material/Refresh'
+import DeleteIcon from '@mui/icons-material/Delete'
+import ChevronLeftIcon from '@mui/icons-material/ChevronLeft'
+import TerminalIcon from '@mui/icons-material/Terminal'
+import MessageIcon from '@mui/icons-material/Message'
+import ContentCopyIcon from '@mui/icons-material/ContentCopy'
+import CheckIcon from '@mui/icons-material/Check'
 import api from '@/lib/api'
-import { toast } from '@/hooks/use-toast'
-import { Badge } from '@/components/ui/badge'
-import { Button } from '@/components/ui/button'
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
-import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-  DialogDescription,
-} from '@/components/ui/dialog'
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from '@/components/ui/table'
+import { useSnackbar } from '@/hooks/use-snackbar'
 import { TokenRevealModal } from '@/components/app/TokenRevealModal'
 
 interface AgentDetailProps {
@@ -42,13 +49,13 @@ interface Deployment {
   created_at: string
 }
 
-const DEPLOY_VARIANT: Record<DeploymentStatus, 'default' | 'secondary' | 'outline' | 'destructive'> = {
-  pending: 'secondary',
-  approved: 'outline',
-  rejected: 'destructive',
-  deployed: 'default',
-  failed: 'destructive',
-  rolled_back: 'secondary',
+const DEPLOY_COLOR: Record<DeploymentStatus, 'default' | 'primary' | 'warning' | 'error' | 'success'> = {
+  pending: 'default',
+  approved: 'warning',
+  rejected: 'error',
+  deployed: 'success',
+  failed: 'error',
+  rolled_back: 'default',
 }
 
 interface Agent {
@@ -69,11 +76,11 @@ interface Agent {
   skills: { id: string; name: string; description: string | null }[]
 }
 
-const STATUS_VARIANT: Record<AgentStatus, 'default' | 'secondary' | 'outline' | 'destructive'> = {
-  draft: 'secondary',
-  pending_approval: 'outline',
-  deployed: 'default',
-  suspended: 'destructive',
+const STATUS_COLOR: Record<AgentStatus, 'default' | 'primary' | 'warning' | 'error'> = {
+  draft: 'default',
+  pending_approval: 'warning',
+  deployed: 'primary',
+  suspended: 'error',
 }
 
 export function AgentDetail({ domainId, agentId }: AgentDetailProps) {
@@ -83,6 +90,7 @@ export function AgentDetail({ domainId, agentId }: AgentDetailProps) {
   const [confirmRegen, setConfirmRegen] = useState(false)
   const [newToken, setNewToken] = useState<string | null>(null)
   const [copiedId, setCopiedId] = useState<string | null>(null)
+  const { state: snack, show: showSnack, hide: hideSnack } = useSnackbar()
 
   function copyToClipboard(value: string, label: string) {
     navigator.clipboard.writeText(value).then(() => {
@@ -108,181 +116,164 @@ export function AgentDetail({ domainId, agentId }: AgentDetailProps) {
       queryClient.invalidateQueries({ queryKey: ['agents'] })
       navigate({ to: '/agents' })
     },
-    onError: () => toast({ title: 'Error', description: 'Failed to suspend agent.', variant: 'destructive' }),
+    onError: () => showSnack('Failed to suspend agent.', 'error'),
   })
 
   const regenMutation = useMutation({
     mutationFn: async () => {
-      const { data } = await api.post(
-        `/api/domains/${domainId}/agents/${agentId}/regenerate-token`,
-      )
+      const { data } = await api.post(`/api/domains/${domainId}/agents/${agentId}/regenerate-token`)
       return data.token as string
     },
     onSuccess: token => {
       setConfirmRegen(false)
       setNewToken(token)
     },
-    onError: () => toast({ title: 'Error', description: 'Failed to regenerate token.', variant: 'destructive' }),
+    onError: () => showSnack('Failed to regenerate token.', 'error'),
   })
 
-  if (isLoading) return <p className="text-sm text-muted-foreground">Loading…</p>
-  if (!agent) return <p className="text-sm text-destructive">Agent not found.</p>
+  if (isLoading) return <Typography variant="body2" color="text.secondary">Loading…</Typography>
+  if (!agent) return <Typography variant="body2" color="error">Agent not found.</Typography>
 
   return (
-    <div className="space-y-6 max-w-2xl">
+    <Box sx={{ display: 'flex', flexDirection: 'column', gap: 3, maxWidth: 680 }}>
       {/* Back link */}
-      <Link to="/agents" className="flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground">
-        <ChevronLeft className="h-4 w-4" /> Agents
-      </Link>
+      <Box
+        component={Link}
+        to="/agents"
+        sx={{ display: 'flex', alignItems: 'center', gap: 0.5, color: 'text.secondary', textDecoration: 'none', fontSize: 14, '&:hover': { color: 'text.primary' } }}
+      >
+        <ChevronLeftIcon fontSize="small" /> Agents
+      </Box>
 
       {/* Header */}
-      <div className="flex items-start justify-between">
-        <div>
-          <h2 className="text-2xl font-bold">{agent.name}</h2>
+      <Box sx={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between' }}>
+        <Box>
+          <Typography variant="h5" sx={{ fontWeight: 700 }}>{agent.name}</Typography>
           {agent.description && (
-            <p className="text-muted-foreground text-sm mt-1">{agent.description}</p>
+            <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>{agent.description}</Typography>
           )}
-        </div>
-        <Badge variant={STATUS_VARIANT[agent.status]} className="capitalize">
-          {agent.status.replace('_', ' ')}
-        </Badge>
-      </div>
+        </Box>
+        <Chip
+          label={agent.status.replace('_', ' ')}
+          color={STATUS_COLOR[agent.status]}
+          size="small"
+          sx={{ textTransform: 'capitalize' }}
+        />
+      </Box>
 
       {/* Config cards */}
-      <div className="grid gap-4">
-        <Card>
-          <CardHeader className="pb-2">
-            <CardTitle className="text-sm font-medium text-muted-foreground">
+      <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+        <Card variant="outlined">
+          <CardContent>
+            <Typography variant="caption" color="text.secondary" sx={{ display: 'block' }} gutterBottom>
               Allowed Models
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="flex flex-wrap gap-1">
-            {(agent.allowed_models ?? []).map(m => (
-              <Badge key={m} variant="secondary">
-                {m}
-              </Badge>
-            ))}
+            </Typography>
+            <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.5 }}>
+              {(agent.allowed_models ?? []).map(m => (
+                <Chip key={m} label={m} size="small" />
+              ))}
+            </Box>
           </CardContent>
         </Card>
 
-        <div className="grid grid-cols-2 gap-4">
-          <Card>
-            <CardHeader className="pb-2">
-              <CardTitle className="text-sm font-medium text-muted-foreground">Rate Limits</CardTitle>
-            </CardHeader>
-            <CardContent className="text-sm space-y-1">
-              <p>RPM: <span className="font-medium">{agent.rpm_limit}</span></p>
-              <p>TPM: <span className="font-medium">{agent.tpm_limit.toLocaleString()}</span></p>
+        <Box sx={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 2 }}>
+          <Card variant="outlined">
+            <CardContent>
+              <Typography variant="caption" color="text.secondary" sx={{ display: 'block' }} gutterBottom>Rate Limits</Typography>
+              <Typography variant="body2">RPM: <strong>{agent.rpm_limit}</strong></Typography>
+              <Typography variant="body2">TPM: <strong>{agent.tpm_limit.toLocaleString()}</strong></Typography>
             </CardContent>
           </Card>
-
-          <Card>
-            <CardHeader className="pb-2">
-              <CardTitle className="text-sm font-medium text-muted-foreground">HITL</CardTitle>
-            </CardHeader>
-            <CardContent className="text-sm space-y-1">
-              <p>Timeout: <span className="font-medium">{agent.hitl_timeout_seconds}s</span></p>
-              <p>Fallback: <span className="font-medium">{agent.hitl_fallback}</span></p>
+          <Card variant="outlined">
+            <CardContent>
+              <Typography variant="caption" color="text.secondary" sx={{ display: 'block' }} gutterBottom>HITL</Typography>
+              <Typography variant="body2">Timeout: <strong>{agent.hitl_timeout_seconds}s</strong></Typography>
+              <Typography variant="body2">Fallback: <strong>{agent.hitl_fallback}</strong></Typography>
             </CardContent>
           </Card>
-        </div>
+        </Box>
 
         {agent.tools.length > 0 && (
-          <Card>
-            <CardHeader className="pb-2">
-              <CardTitle className="text-sm font-medium text-muted-foreground">Tools</CardTitle>
-            </CardHeader>
-            <CardContent className="flex flex-wrap gap-1">
-              {agent.tools.map(t => (
-                <Badge key={t.id} variant="outline">
-                  {t.name}
-                </Badge>
-              ))}
+          <Card variant="outlined">
+            <CardContent>
+              <Typography variant="caption" color="text.secondary" sx={{ display: 'block' }} gutterBottom>Tools</Typography>
+              <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.5 }}>
+                {agent.tools.map(t => <Chip key={t.id} label={t.name} size="small" variant="outlined" />)}
+              </Box>
             </CardContent>
           </Card>
         )}
 
         {agent.skills.length > 0 && (
-          <Card>
-            <CardHeader className="pb-2">
-              <CardTitle className="text-sm font-medium text-muted-foreground">Skills</CardTitle>
-            </CardHeader>
-            <CardContent className="flex flex-wrap gap-1">
-              {agent.skills.map(s => (
-                <Badge key={s.id} variant="outline">
-                  {s.name}
-                </Badge>
-              ))}
+          <Card variant="outlined">
+            <CardContent>
+              <Typography variant="caption" color="text.secondary" sx={{ display: 'block' }} gutterBottom>Skills</Typography>
+              <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.5 }}>
+                {agent.skills.map(s => <Chip key={s.id} label={s.name} size="small" variant="outlined" />)}
+              </Box>
             </CardContent>
           </Card>
         )}
 
-        <Card>
-          <CardHeader className="pb-2">
-            <CardTitle className="text-sm font-medium text-muted-foreground">Metadata</CardTitle>
-          </CardHeader>
-          <CardContent className="text-sm space-y-2">
-            <div className="flex items-center gap-2">
-              <span className="text-muted-foreground w-24 shrink-0">Domain ID:</span>
-              <code className="font-mono text-xs truncate">{domainId}</code>
-              <button
-                onClick={() => copyToClipboard(domainId, 'domain')}
-                className="ml-auto text-muted-foreground hover:text-foreground shrink-0"
-                title="Copy Domain ID"
-              >
-                {copiedId === 'domain' ? <Check className="h-3.5 w-3.5 text-green-500" /> : <Copy className="h-3.5 w-3.5" />}
-              </button>
-            </div>
-            <div className="flex items-center gap-2">
-              <span className="text-muted-foreground w-24 shrink-0">Agent ID:</span>
-              <code className="font-mono text-xs truncate">{agentId}</code>
-              <button
-                onClick={() => copyToClipboard(agentId, 'agent')}
-                className="ml-auto text-muted-foreground hover:text-foreground shrink-0"
-                title="Copy Agent ID"
-              >
-                {copiedId === 'agent' ? <Check className="h-3.5 w-3.5 text-green-500" /> : <Copy className="h-3.5 w-3.5" />}
-              </button>
-            </div>
-            <p className="text-muted-foreground">LiteLLM ID: <code className="font-mono text-xs">{agent.litellm_agent_id ?? '—'}</code></p>
-            <p>Created: {format(new Date(agent.created_at), 'MMM d, yyyy HH:mm')}</p>
-            <p>Updated: {format(new Date(agent.updated_at), 'MMM d, yyyy HH:mm')}</p>
+        <Card variant="outlined">
+          <CardContent>
+            <Typography variant="caption" color="text.secondary" sx={{ display: 'block' }} gutterBottom>Metadata</Typography>
+            <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1, fontSize: 13 }}>
+              <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                <Typography variant="caption" color="text.secondary" sx={{ width: 80 }}>Domain ID:</Typography>
+                <Typography variant="caption" sx={{ fontFamily: 'monospace', overflow: 'hidden', textOverflow: 'ellipsis' }}>{domainId}</Typography>
+                <IconButton size="small" onClick={() => copyToClipboard(domainId, 'domain')}>
+                  {copiedId === 'domain' ? <CheckIcon sx={{ fontSize: 14, color: 'success.main' }} /> : <ContentCopyIcon sx={{ fontSize: 14 }} />}
+                </IconButton>
+              </Box>
+              <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                <Typography variant="caption" color="text.secondary" sx={{ width: 80 }}>Agent ID:</Typography>
+                <Typography variant="caption" sx={{ fontFamily: 'monospace', overflow: 'hidden', textOverflow: 'ellipsis' }}>{agentId}</Typography>
+                <IconButton size="small" onClick={() => copyToClipboard(agentId, 'agent')}>
+                  {copiedId === 'agent' ? <CheckIcon sx={{ fontSize: 14, color: 'success.main' }} /> : <ContentCopyIcon sx={{ fontSize: 14 }} />}
+                </IconButton>
+              </Box>
+              <Typography variant="caption" color="text.secondary">
+                LiteLLM ID: <code>{agent.litellm_agent_id ?? '—'}</code>
+              </Typography>
+              <Typography variant="caption">Created: {format(new Date(agent.created_at), 'MMM d, yyyy HH:mm')}</Typography>
+              <Typography variant="caption">Updated: {format(new Date(agent.updated_at), 'MMM d, yyyy HH:mm')}</Typography>
+            </Box>
           </CardContent>
         </Card>
 
         {deployments.length > 0 && (
-          <Card>
-            <CardHeader className="pb-2">
-              <CardTitle className="text-sm font-medium text-muted-foreground">
+          <Card variant="outlined">
+            <CardContent sx={{ p: 0, '&:last-child': { pb: 0 } }}>
+              <Typography variant="caption" color="text.secondary" sx={{ p: 2, display: 'block' }}>
                 Deployment History
-              </CardTitle>
-            </CardHeader>
-            <CardContent className="p-0">
-              <Table>
-                <TableHeader>
+              </Typography>
+              <Table size="small">
+                <TableHead>
                   <TableRow>
-                    <TableHead className="w-12">#</TableHead>
-                    <TableHead>Image</TableHead>
-                    <TableHead>Status</TableHead>
-                    <TableHead>Deployed at</TableHead>
+                    <TableCell sx={{ width: 48 }}>#</TableCell>
+                    <TableCell>Image</TableCell>
+                    <TableCell>Status</TableCell>
+                    <TableCell>Deployed at</TableCell>
                   </TableRow>
-                </TableHeader>
+                </TableHead>
                 <TableBody>
                   {deployments.map(d => (
                     <TableRow key={d.id}>
-                      <TableCell className="font-mono text-xs">{d.version}</TableCell>
-                      <TableCell className="font-mono text-xs truncate max-w-xs">
+                      <TableCell sx={{ fontFamily: 'monospace', fontSize: 12 }}>{d.version}</TableCell>
+                      <TableCell sx={{ fontFamily: 'monospace', fontSize: 12, maxWidth: 240, overflow: 'hidden', textOverflow: 'ellipsis' }}>
                         {d.manifest_json?.image ?? '—'}
                       </TableCell>
                       <TableCell>
-                        <Badge variant={DEPLOY_VARIANT[d.status]} className="capitalize">
-                          {d.status.replace('_', ' ')}
-                        </Badge>
+                        <Chip
+                          label={d.status.replace('_', ' ')}
+                          color={DEPLOY_COLOR[d.status]}
+                          size="small"
+                          sx={{ textTransform: 'capitalize' }}
+                        />
                       </TableCell>
-                      <TableCell className="text-sm text-muted-foreground">
-                        {d.deployed_at
-                          ? format(new Date(d.deployed_at), 'MMM d, yyyy HH:mm')
-                          : '—'}
+                      <TableCell sx={{ fontSize: 12, color: 'text.secondary' }}>
+                        {d.deployed_at ? format(new Date(d.deployed_at), 'MMM d, yyyy HH:mm') : '—'}
                       </TableCell>
                     </TableRow>
                   ))}
@@ -291,95 +282,105 @@ export function AgentDetail({ domainId, agentId }: AgentDetailProps) {
             </CardContent>
           </Card>
         )}
-      </div>
+      </Box>
 
       {/* Actions */}
-      <div className="flex gap-2 pt-2">
-        <Button variant="outline" asChild>
-          <Link to="/domains/$domainId/agents/$agentId/conversations" params={{ domainId, agentId }}>
-            <MessageSquare className="mr-2 h-4 w-4" />
-            Conversations
-          </Link>
-        </Button>
-        <Button variant="outline" asChild>
-          <Link to="/domains/$domainId/agents/$agentId/logs" params={{ domainId, agentId }}>
-            <Terminal className="mr-2 h-4 w-4" />
-            Live Logs
-          </Link>
+      <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap', pt: 1 }}>
+        <Button
+          variant="outlined"
+          component={Link}
+          to="/domains/$domainId/agents/$agentId/conversations"
+          params={{ domainId, agentId } as never}
+          startIcon={<MessageIcon />}
+        >
+          Conversations
         </Button>
         <Button
-          variant="outline"
+          variant="outlined"
+          component={Link}
+          to="/domains/$domainId/agents/$agentId/logs"
+          params={{ domainId, agentId } as never}
+          startIcon={<TerminalIcon />}
+        >
+          Live Logs
+        </Button>
+        <Button
+          variant="outlined"
+          startIcon={<RefreshIcon />}
           onClick={() => setConfirmRegen(true)}
           disabled={agent.status === 'suspended'}
         >
-          <RefreshCw className="mr-2 h-4 w-4" />
           Regenerate Token
         </Button>
         <Button
-          variant="destructive"
+          variant="contained"
+          color="error"
+          startIcon={<DeleteIcon />}
           onClick={() => setConfirmDelete(true)}
           disabled={agent.status === 'suspended'}
         >
-          <Trash2 className="mr-2 h-4 w-4" />
           Suspend
         </Button>
-      </div>
+      </Box>
 
       {/* Confirm suspend dialog */}
-      <Dialog open={confirmDelete} onOpenChange={setConfirmDelete}>
+      <Dialog open={confirmDelete} onClose={() => setConfirmDelete(false)}>
+        <DialogTitle>Suspend agent?</DialogTitle>
         <DialogContent>
-          <DialogHeader>
-            <DialogTitle>Suspend agent?</DialogTitle>
-            <DialogDescription>
-              This will revoke the LiteLLM virtual key and set status to suspended. The agent JWT
-              will stop working immediately.
-            </DialogDescription>
-          </DialogHeader>
-          <div className="flex justify-end gap-2 pt-2">
-            <Button variant="outline" onClick={() => setConfirmDelete(false)}>
-              Cancel
-            </Button>
-            <Button
-              variant="destructive"
-              onClick={() => deleteMutation.mutate()}
-              disabled={deleteMutation.isPending}
-            >
-              {deleteMutation.isPending ? 'Suspending…' : 'Suspend'}
-            </Button>
-          </div>
+          <DialogContentText>
+            This will revoke the LiteLLM virtual key and set status to suspended. The agent JWT
+            will stop working immediately.
+          </DialogContentText>
         </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setConfirmDelete(false)}>Cancel</Button>
+          <Button
+            color="error"
+            variant="contained"
+            onClick={() => deleteMutation.mutate()}
+            disabled={deleteMutation.isPending}
+          >
+            {deleteMutation.isPending ? 'Suspending…' : 'Suspend'}
+          </Button>
+        </DialogActions>
       </Dialog>
 
       {/* Confirm regen dialog */}
-      <Dialog open={confirmRegen} onOpenChange={setConfirmRegen}>
+      <Dialog open={confirmRegen} onClose={() => setConfirmRegen(false)}>
+        <DialogTitle>Regenerate token?</DialogTitle>
         <DialogContent>
-          <DialogHeader>
-            <DialogTitle>Regenerate token?</DialogTitle>
-            <DialogDescription>
-              The current token will be revoked immediately and will stop working within seconds.
-              You will receive a new token shown once.
-            </DialogDescription>
-          </DialogHeader>
-          <div className="flex justify-end gap-2 pt-2">
-            <Button variant="outline" onClick={() => setConfirmRegen(false)}>
-              Cancel
-            </Button>
-            <Button onClick={() => regenMutation.mutate()} disabled={regenMutation.isPending}>
-              {regenMutation.isPending ? 'Regenerating…' : 'Regenerate'}
-            </Button>
-          </div>
+          <DialogContentText>
+            The current token will be revoked immediately and will stop working within seconds.
+            You will receive a new token shown once.
+          </DialogContentText>
         </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setConfirmRegen(false)}>Cancel</Button>
+          <Button
+            variant="contained"
+            onClick={() => regenMutation.mutate()}
+            disabled={regenMutation.isPending}
+          >
+            {regenMutation.isPending ? 'Regenerating…' : 'Regenerate'}
+          </Button>
+        </DialogActions>
       </Dialog>
 
       {/* New token reveal */}
       {newToken && (
-        <TokenRevealModal
-          open={true}
-          token={newToken}
-          agentId={agentId}
-          domainId={domainId}
-        />
+        <TokenRevealModal open={true} token={newToken} agentId={agentId} domainId={domainId} />
       )}
-    </div>
+
+      <Snackbar
+        open={snack.open}
+        autoHideDuration={4000}
+        onClose={hideSnack}
+        anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }}
+      >
+        <Alert onClose={hideSnack} severity={snack.severity} variant="filled">
+          {snack.message}
+        </Alert>
+      </Snackbar>
+    </Box>
   )
 }

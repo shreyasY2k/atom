@@ -1,8 +1,12 @@
 import { useState } from 'react'
 import { Code, X } from 'lucide-react'
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
-import { Badge } from '@/components/ui/badge'
-import { Button } from '@/components/ui/button'
+import Box from '@mui/material/Box'
+import Card from '@mui/material/Card'
+import CardContent from '@mui/material/CardContent'
+import Typography from '@mui/material/Typography'
+import Chip from '@mui/material/Chip'
+import IconButton from '@mui/material/IconButton'
+import Button from '@mui/material/Button'
 
 interface Tool {
   name: string
@@ -20,17 +24,19 @@ interface ToolCardProps {
 function SchemaDrawer({ tool, onClose }: { tool: Tool; onClose: () => void }) {
   const schema = tool.inputSchema ?? tool.input_schema ?? {}
   return (
-    <div className="fixed inset-y-0 right-0 w-[520px] bg-background border-l shadow-xl z-50 flex flex-col">
-      <div className="flex items-center justify-between p-4 border-b">
-        <h3 className="font-semibold">{tool.name} — Input Schema</h3>
-        <Button variant="ghost" size="icon" onClick={onClose}>
-          <X className="h-3 w-3" />
-        </Button>
-      </div>
-      <div className="flex-1 overflow-auto p-4">
-        <pre className="text-xs whitespace-pre-wrap font-mono">{JSON.stringify(schema, null, 2)}</pre>
-      </div>
-    </div>
+    <Box sx={{ position: 'fixed', inset: '0 0 0 auto', width: 520, bgcolor: 'background.paper', borderLeft: 1, borderColor: 'divider', boxShadow: 8, zIndex: 1400, display: 'flex', flexDirection: 'column' }}>
+      <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', p: 2, borderBottom: 1, borderColor: 'divider' }}>
+        <Typography variant="subtitle1" sx={{ fontWeight: 600 }}>{tool.name} — Input Schema</Typography>
+        <IconButton size="small" onClick={onClose}>
+          <X size={12} />
+        </IconButton>
+      </Box>
+      <Box sx={{ flex: 1, overflow: 'auto', p: 2 }}>
+        <pre style={{ fontSize: 12, whiteSpace: 'pre-wrap', fontFamily: 'monospace', margin: 0 }}>
+          {JSON.stringify(schema, null, 2)}
+        </pre>
+      </Box>
+    </Box>
   )
 }
 
@@ -40,35 +46,49 @@ export function ToolCard({ tool, selected, onToggle }: ToolCardProps) {
   return (
     <>
       <Card
-        className={`cursor-default transition-colors ${selected !== undefined ? 'cursor-pointer' : ''} ${selected ? 'border-primary bg-primary/5' : ''}`}
+        variant="outlined"
+        sx={{
+          cursor: onToggle ? 'pointer' : 'default',
+          transition: 'border-color 0.2s',
+          borderColor: selected ? 'primary.main' : undefined,
+          bgcolor: selected ? 'primary.50' : undefined,
+        }}
         onClick={() => onToggle?.(tool.name)}
       >
-        <CardHeader className="pb-2">
-          <div className="flex items-start justify-between gap-2">
-            <CardTitle className="text-sm font-medium">{tool.name}</CardTitle>
+        <CardContent sx={{ pb: '8px !important' }}>
+          <Box sx={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 1, mb: 0.5 }}>
+            <Typography variant="body2" sx={{ fontWeight: 500 }}>{tool.name}</Typography>
             {selected !== undefined && (
-              <Badge variant={selected ? 'default' : 'outline'} className="text-xs">
-                {selected ? 'selected' : 'add'}
-              </Badge>
+              <Chip
+                label={selected ? 'selected' : 'add'}
+                size="small"
+                color={selected ? 'primary' : 'default'}
+                variant={selected ? 'filled' : 'outlined'}
+                sx={{ fontSize: 10, height: 18, flexShrink: 0 }}
+              />
             )}
-          </div>
-        </CardHeader>
-        <CardContent>
-          <p className="text-xs text-muted-foreground line-clamp-2">{tool.description ?? 'No description'}</p>
+          </Box>
+          <Typography variant="caption" color="text.secondary" sx={{ display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>
+            {tool.description ?? 'No description'}
+          </Typography>
           <Button
-            variant="ghost"
-            size="sm"
-            className="mt-2 h-7 px-2 text-xs"
+            size="small"
+            variant="text"
+            startIcon={<Code size={12} />}
+            sx={{ mt: 0.5, px: 0.5, fontSize: 11 }}
             onClick={e => { e.stopPropagation(); setDrawerOpen(true) }}
           >
-            <Code className="h-3 w-3 mr-1" />
             View schema
           </Button>
         </CardContent>
       </Card>
+
       {drawerOpen && (
         <>
-          <div className="fixed inset-0 bg-black/30 z-40" onClick={() => setDrawerOpen(false)} />
+          <Box
+            sx={{ position: 'fixed', inset: 0, bgcolor: 'rgba(0,0,0,0.3)', zIndex: 1300 }}
+            onClick={() => setDrawerOpen(false)}
+          />
           <SchemaDrawer tool={tool} onClose={() => setDrawerOpen(false)} />
         </>
       )}

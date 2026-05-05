@@ -1,13 +1,22 @@
 import { useState } from 'react'
 import { useNavigate } from '@tanstack/react-router'
 import { useQuery, useMutation } from '@tanstack/react-query'
-import { Loader2, Shield, ClipboardList, ChevronLeft, ChevronRight, Rocket } from 'lucide-react'
+import Box from '@mui/material/Box'
+import Button from '@mui/material/Button'
+import Typography from '@mui/material/Typography'
+import TextField from '@mui/material/TextField'
+import Card from '@mui/material/Card'
+import CardContent from '@mui/material/CardContent'
+import Snackbar from '@mui/material/Snackbar'
+import Alert from '@mui/material/Alert'
+import CircularProgress from '@mui/material/CircularProgress'
+import ShieldIcon from '@mui/icons-material/Shield'
+import ListAltIcon from '@mui/icons-material/ListAlt'
+import ChevronLeftIcon from '@mui/icons-material/ChevronLeft'
+import ChevronRightIcon from '@mui/icons-material/ChevronRight'
+import RocketLaunchIcon from '@mui/icons-material/RocketLaunch'
 import api from '@/lib/api'
-import { toast } from '@/hooks/use-toast'
-import { Button } from '@/components/ui/button'
-import { Textarea } from '@/components/ui/textarea'
-import { Label } from '@/components/ui/label'
-import { Card, CardContent } from '@/components/ui/card'
+import { useSnackbar } from '@/hooks/use-snackbar'
 import { ModelPicker } from '@/components/ModelPicker'
 import { SkillCard } from '@/components/SkillCard'
 import { ToolCard } from '@/components/ToolCard'
@@ -64,6 +73,7 @@ export function AgentBuilder() {
   const [step, setStep] = useState(0)
   const [data, setData] = useState<BuilderState>(initial)
   const [analysing, setAnalysing] = useState(false)
+  const { state: snack, show: showSnack, hide: hideSnack } = useSnackbar()
 
   const { data: skills = [] } = useQuery<Skill[]>({
     queryKey: ['skills'],
@@ -98,11 +108,12 @@ export function AgentBuilder() {
     mutationFn: async (payload: object) =>
       (await api.post('/api/agents/build-and-deploy', payload)).data,
     onSuccess: () => {
-      toast({ title: 'Agent provisioning started', description: 'Check Agents for status updates.' })
+      showSnack('Agent provisioning started — check Agents for status updates.', 'success')
       navigate({ to: '/agents' })
     },
-    onError: (e: any) => {
-      toast({ title: 'Build failed', description: e.response?.data?.detail ?? 'Unknown error', variant: 'destructive' })
+    onError: (e: unknown) => {
+      const msg = (e as { response?: { data?: { detail?: string } } })?.response?.data?.detail ?? 'Unknown error'
+      showSnack(`Build failed: ${msg}`, 'error')
     },
   })
 
@@ -142,65 +153,81 @@ export function AgentBuilder() {
   }
 
   return (
-    <div className="max-w-2xl mx-auto space-y-6">
-      <div className="flex items-center justify-between">
-        <h2 className="text-2xl font-bold tracking-tight">Agent Builder</h2>
-        <div className="flex gap-1">
+    <Box sx={{ maxWidth: 680, mx: 'auto', display: 'flex', flexDirection: 'column', gap: 3 }}>
+      <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+        <Typography variant="h5" sx={{ fontWeight: 700 }}>Agent Builder</Typography>
+        <Box sx={{ display: 'flex', gap: 0.5 }}>
           {[0, 1, 2].map(i => (
-            <div key={i} className={`h-2 w-12 rounded-full transition-colors ${i <= step ? 'bg-primary' : 'bg-muted'}`} />
+            <Box
+              key={i}
+              sx={{
+                height: 8,
+                width: 48,
+                borderRadius: 4,
+                bgcolor: i <= step ? 'primary.main' : 'grey.300',
+                transition: 'background-color 0.2s',
+              }}
+            />
           ))}
-        </div>
-      </div>
+        </Box>
+      </Box>
 
       {/* Step 0: Intent */}
       {step === 0 && (
-        <div className="space-y-4">
-          <div>
-            <Label className="text-base font-semibold">Step 1 — What should this agent do?</Label>
-            <p className="text-sm text-muted-foreground mt-1">Describe the agent's purpose in plain language.</p>
-          </div>
+        <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+          <Box>
+            <Typography variant="subtitle1" sx={{ fontWeight: 600 }}>Step 1 — What should this agent do?</Typography>
+            <Typography variant="body2" color="text.secondary">Describe the agent's purpose in plain language.</Typography>
+          </Box>
 
           {domains.length > 1 && (
-            <div className="space-y-1.5">
-              <Label>Domain</Label>
+            <Box>
+              <Typography variant="body2" sx={{ mb: 0.5 }}>Domain</Typography>
               <select
-                className="w-full border rounded-md px-3 py-2 text-sm bg-background"
+                style={{ width: '100%', border: '1px solid #ccc', borderRadius: 8, padding: '8px 12px', fontSize: 14 }}
                 value={data.domainId || selectedDomainId}
                 onChange={e => setData(d => ({ ...d, domainId: e.target.value }))}
               >
                 {domains.map(d => <option key={d.id} value={d.id}>{d.name}</option>)}
               </select>
-            </div>
+            </Box>
           )}
 
-          <Textarea
+          <TextField
             placeholder="Monitor credit applications, flag high-risk ones and escalate to a human reviewer…"
+            multiline
             rows={5}
             value={data.intent}
             onChange={e => setData(d => ({ ...d, intent: e.target.value }))}
+            fullWidth
           />
-          <Button onClick={analyseIntent} disabled={!data.intent.trim() || analysing}>
-            {analysing ? <><Loader2 className="mr-2 h-4 w-4 animate-spin" /> Analysing…</> : 'Analyse Intent →'}
+          <Button
+            variant="contained"
+            onClick={analyseIntent}
+            disabled={!data.intent.trim() || analysing}
+            startIcon={analysing ? <CircularProgress size={16} color="inherit" /> : undefined}
+          >
+            {analysing ? 'Analysing…' : 'Analyse Intent →'}
           </Button>
-        </div>
+        </Box>
       )}
 
       {/* Step 1: Capabilities */}
       {step === 1 && (
-        <div className="space-y-6">
-          <div>
-            <Label className="text-base font-semibold">Step 2 — Suggested Capabilities</Label>
-            <p className="text-sm text-muted-foreground mt-1">Review and edit the AI-generated suggestions.</p>
-          </div>
+        <Box sx={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
+          <Box>
+            <Typography variant="subtitle1" sx={{ fontWeight: 600 }}>Step 2 — Suggested Capabilities</Typography>
+            <Typography variant="body2" color="text.secondary">Review and edit the AI-generated suggestions.</Typography>
+          </Box>
 
-          <div className="space-y-2">
-            <Label className="flex items-center gap-1.5">LLM Model</Label>
+          <Box>
+            <Typography variant="body2" sx={{ fontWeight: 500, mb: 1 }}>LLM Model</Typography>
             <ModelPicker value={data.model} onChange={m => setData(d => ({ ...d, model: m }))} />
-          </div>
+          </Box>
 
-          <div className="space-y-2">
-            <Label className="flex items-center gap-1.5">Skills</Label>
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+          <Box>
+            <Typography variant="body2" sx={{ fontWeight: 500, mb: 1 }}>Skills</Typography>
+            <Box sx={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 1 }}>
               {skills.map(s => (
                 <SkillCard
                   key={s.id}
@@ -212,16 +239,16 @@ export function AgentBuilder() {
                   }}
                 />
               ))}
-            </div>
-            <p className="text-xs text-muted-foreground">
+            </Box>
+            <Typography variant="caption" color="text.secondary">
               atom-gate-calls and atom-audit are always active.
-            </p>
-          </div>
+            </Typography>
+          </Box>
 
           {tools.length > 0 && (
-            <div className="space-y-2">
-              <Label className="flex items-center gap-1.5">MCP Tools</Label>
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+            <Box>
+              <Typography variant="body2" sx={{ fontWeight: 500, mb: 1 }}>MCP Tools</Typography>
+              <Box sx={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 1 }}>
                 {tools.map(t => (
                   <ToolCard
                     key={t.name}
@@ -230,99 +257,115 @@ export function AgentBuilder() {
                     onToggle={name => setData(d => ({ ...d, tools: toggle(d.tools, name) }))}
                   />
                 ))}
-              </div>
-            </div>
+              </Box>
+            </Box>
           )}
 
           {a2aAgents.length >= 2 && (
-            <div className="space-y-2">
-              <Label className="flex items-center gap-1.5">A2A Agents</Label>
-              <p className="text-xs text-muted-foreground">All A2A calls are routed via GATE and audited.</p>
-              <div className="flex flex-wrap gap-2">
+            <Box>
+              <Typography variant="body2" sx={{ fontWeight: 500, mb: 0.5 }}>A2A Agents</Typography>
+              <Typography variant="caption" color="text.secondary">All A2A calls are routed via GATE and audited.</Typography>
+              <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1, mt: 1 }}>
                 {a2aAgents.map(a => (
-                  <button
+                  <Button
                     key={a.id}
+                    size="small"
+                    variant={data.a2aAgents.includes(a.id) ? 'contained' : 'outlined'}
                     onClick={() => setData(d => ({ ...d, a2aAgents: toggle(d.a2aAgents, a.id) }))}
-                    className={`px-3 py-1.5 rounded-md text-sm border transition-colors ${
-                      data.a2aAgents.includes(a.id)
-                        ? 'border-primary bg-primary text-primary-foreground'
-                        : 'border-border hover:border-primary/60'
-                    }`}
                   >
                     {a.name}
-                  </button>
+                  </Button>
                 ))}
-              </div>
-            </div>
+              </Box>
+            </Box>
           )}
 
-          <div className="flex justify-between pt-2">
-            <Button variant="outline" onClick={() => setStep(0)}>
-              <ChevronLeft className="mr-1 h-4 w-4" /> Back
+          <Box sx={{ display: 'flex', justifyContent: 'space-between', pt: 1 }}>
+            <Button variant="outlined" startIcon={<ChevronLeftIcon />} onClick={() => setStep(0)}>Back</Button>
+            <Button variant="contained" endIcon={<ChevronRightIcon />} onClick={() => setStep(2)}>
+              Review & Deploy
             </Button>
-            <Button onClick={() => setStep(2)}>
-              Review & Deploy <ChevronRight className="ml-1 h-4 w-4" />
-            </Button>
-          </div>
-        </div>
+          </Box>
+        </Box>
       )}
 
       {/* Step 2: Build & Deploy */}
       {step === 2 && (
-        <div className="space-y-6">
-          <div>
-            <Label className="text-base font-semibold">Step 3 — Build & Deploy</Label>
-          </div>
+        <Box sx={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
+          <Typography variant="subtitle1" sx={{ fontWeight: 600 }}>Step 3 — Build & Deploy</Typography>
 
-          <Card>
-            <CardContent className="pt-4 space-y-3 text-sm">
-              <div><span className="font-medium">Model:</span> {data.model}</div>
-              <div><span className="font-medium">Skills:</span> {data.skills.join(', ')}</div>
-              {data.tools.length > 0 && <div><span className="font-medium">Tools:</span> {data.tools.join(', ')}</div>}
-              {data.a2aAgents.length > 0 && <div><span className="font-medium">A2A:</span> {data.a2aAgents.length} agent(s)</div>}
+          <Card variant="outlined">
+            <CardContent sx={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
+              <Typography variant="body2"><strong>Model:</strong> {data.model}</Typography>
+              <Typography variant="body2"><strong>Skills:</strong> {data.skills.join(', ')}</Typography>
+              {data.tools.length > 0 && <Typography variant="body2"><strong>Tools:</strong> {data.tools.join(', ')}</Typography>}
+              {data.a2aAgents.length > 0 && <Typography variant="body2"><strong>A2A:</strong> {data.a2aAgents.length} agent(s)</Typography>}
             </CardContent>
           </Card>
 
-          <div className="space-y-2">
-            <Label>Build destination</Label>
-            <div className="flex gap-3">
+          <Box>
+            <Typography variant="body2" sx={{ fontWeight: 500, mb: 1 }}>Build destination</Typography>
+            <Box sx={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 2 }}>
               {(['gitlab', 'local'] as const).map(target => (
-                <button
+                <Box
                   key={target}
+                  component="button"
                   onClick={() => setData(d => ({ ...d, ciTarget: target }))}
-                  className={`flex-1 px-4 py-3 rounded-md text-sm border transition-colors text-left ${
-                    data.ciTarget === target ? 'border-primary bg-primary/5' : 'border-border'
-                  }`}
+                  sx={{
+                    border: 1,
+                    borderColor: data.ciTarget === target ? 'primary.main' : 'divider',
+                    bgcolor: data.ciTarget === target ? 'primary.50' : 'transparent',
+                    borderRadius: 1,
+                    p: 2,
+                    textAlign: 'left',
+                    cursor: 'pointer',
+                  }}
                 >
-                  <div className="font-medium">{target === 'gitlab' ? 'GitLab (private)' : 'Local Docker'}</div>
-                  <div className="text-xs text-muted-foreground mt-0.5">
+                  <Typography variant="body2" sx={{ fontWeight: 500 }}>
+                    {target === 'gitlab' ? 'GitLab (private)' : 'Local Docker'}
+                  </Typography>
+                  <Typography variant="caption" color="text.secondary">
                     {target === 'gitlab' ? 'CI pipeline + approval flow' : 'Generate code locally'}
-                  </div>
-                </button>
+                  </Typography>
+                </Box>
               ))}
-            </div>
-          </div>
+            </Box>
+          </Box>
 
-          <div className="flex items-center gap-3 border rounded-md p-3 bg-muted/40">
-            <Shield className="h-4 w-4 text-primary shrink-0" />
-            <span className="text-xs">Guardrails always active</span>
-            <ClipboardList className="h-4 w-4 text-primary shrink-0 ml-2" />
-            <span className="text-xs">Audit always on</span>
-            <span className="text-xs text-muted-foreground ml-auto">JWT + Agent ID auto-provisioned</span>
-          </div>
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, border: 1, borderColor: 'divider', borderRadius: 1, p: 1.5, bgcolor: 'grey.50' }}>
+            <ShieldIcon fontSize="small" color="primary" />
+            <Typography variant="caption">Guardrails always active</Typography>
+            <ListAltIcon fontSize="small" color="primary" />
+            <Typography variant="caption">Audit always on</Typography>
+            <Typography variant="caption" color="text.secondary" sx={{ ml: 'auto' }}>
+              JWT + Agent ID auto-provisioned
+            </Typography>
+          </Box>
 
-          <div className="flex justify-between pt-2">
-            <Button variant="outline" onClick={() => setStep(1)}>
-              <ChevronLeft className="mr-1 h-4 w-4" /> Back
+          <Box sx={{ display: 'flex', justifyContent: 'space-between', pt: 1 }}>
+            <Button variant="outlined" startIcon={<ChevronLeftIcon />} onClick={() => setStep(1)}>Back</Button>
+            <Button
+              variant="contained"
+              startIcon={buildMutation.isPending ? <CircularProgress size={16} color="inherit" /> : <RocketLaunchIcon />}
+              onClick={handleDeploy}
+              disabled={buildMutation.isPending}
+            >
+              {buildMutation.isPending ? 'Building…' : 'Approve + Deploy'}
             </Button>
-            <Button onClick={handleDeploy} disabled={buildMutation.isPending}>
-              {buildMutation.isPending
-                ? <><Loader2 className="mr-2 h-4 w-4 animate-spin" /> Building…</>
-                : <><Rocket className="mr-2 h-4 w-4" /> Approve + Deploy</>}
-            </Button>
-          </div>
-        </div>
+          </Box>
+        </Box>
       )}
-    </div>
+
+      <Snackbar
+        open={snack.open}
+        autoHideDuration={4000}
+        onClose={hideSnack}
+        anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }}
+      >
+        <Alert onClose={hideSnack} severity={snack.severity} variant="filled">
+          {snack.message}
+        </Alert>
+      </Snackbar>
+    </Box>
   )
 }

@@ -1,21 +1,18 @@
 import { useState } from 'react'
-import { useForm } from 'react-hook-form'
+import { useForm, Controller } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { z } from 'zod'
 import { useNavigate } from '@tanstack/react-router'
-import { AlertCircle, X } from 'lucide-react'
+import Box from '@mui/material/Box'
+import Card from '@mui/material/Card'
+import CardContent from '@mui/material/CardContent'
+import Typography from '@mui/material/Typography'
+import TextField from '@mui/material/TextField'
+import Button from '@mui/material/Button'
+import Alert from '@mui/material/Alert'
+import IconButton from '@mui/material/IconButton'
+import CloseIcon from '@mui/icons-material/Close'
 import { useAuthStore } from '@/lib/auth'
-import { Button } from '@/components/ui/button'
-import { Input } from '@/components/ui/input'
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
-import {
-  Form,
-  FormControl,
-  FormField,
-  FormItem,
-  FormLabel,
-  FormMessage,
-} from '@/components/ui/form'
 
 const schema = z.object({
   email: z.string().email('Invalid email'),
@@ -29,7 +26,7 @@ export function Login() {
   const login = useAuthStore(s => s.login)
   const [loginError, setLoginError] = useState<string | null>(null)
 
-  const form = useForm<FormValues>({
+  const { control, handleSubmit, formState } = useForm<FormValues>({
     resolver: zodResolver(schema),
     defaultValues: { email: '', password: '' },
   })
@@ -45,87 +42,84 @@ export function Login() {
   }
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-muted/40">
-      <Card className="w-full max-w-sm shadow-lg">
-        <CardHeader className="space-y-1 pb-4">
-          <CardTitle className="text-2xl font-bold">ATOM Studio</CardTitle>
-          <CardDescription>Sign in to your account</CardDescription>
-        </CardHeader>
-        <CardContent>
-          <Form {...form}>
-            <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4">
+    <Box
+      sx={{
+        minHeight: '100vh',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        bgcolor: 'grey.100',
+      }}
+    >
+      <Card sx={{ width: '100%', maxWidth: 360 }} elevation={3}>
+        <CardContent sx={{ p: 4 }}>
+          <Typography variant="h5" sx={{ fontWeight: 700 }} gutterBottom>
+            ATOM Studio
+          </Typography>
+          <Typography variant="body2" color="text.secondary" sx={{ mb: 3 }}>
+            Sign in to your account
+          </Typography>
 
-              {/* Inline error banner — clearly dismissible */}
-              {loginError && (
-                <div className="flex items-start gap-2 rounded-md border border-destructive/50 bg-destructive/10 px-3 py-2 text-sm text-destructive">
-                  <AlertCircle className="h-4 w-4 mt-0.5 shrink-0" />
-                  <span className="flex-1">{loginError}</span>
-                  <button
-                    type="button"
-                    onClick={() => setLoginError(null)}
-                    className="shrink-0 hover:opacity-70"
-                    aria-label="Dismiss"
-                  >
-                    <X className="h-4 w-4" />
-                  </button>
-                </div>
+          {loginError && (
+            <Alert
+              severity="error"
+              sx={{ mb: 2 }}
+              action={
+                <IconButton size="small" onClick={() => setLoginError(null)}>
+                  <CloseIcon fontSize="inherit" />
+                </IconButton>
+              }
+            >
+              {loginError}
+            </Alert>
+          )}
+
+          <Box component="form" onSubmit={handleSubmit(onSubmit)} sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+            <Controller
+              name="email"
+              control={control}
+              render={({ field, fieldState }) => (
+                <TextField
+                  {...field}
+                  label="Email"
+                  type="email"
+                  autoComplete="email"
+                  size="small"
+                  fullWidth
+                  error={!!fieldState.error}
+                  helperText={fieldState.error?.message}
+                  onChange={e => { setLoginError(null); field.onChange(e) }}
+                />
               )}
-
-              <FormField
-                control={form.control}
-                name="email"
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>Email</FormLabel>
-                    <FormControl>
-                      <Input
-                        type="email"
-                        placeholder="admin@atom.local"
-                        autoComplete="email"
-                        onChange={e => { setLoginError(null); field.onChange(e) }}
-                        value={field.value}
-                        name={field.name}
-                        ref={field.ref}
-                        onBlur={field.onBlur}
-                      />
-                    </FormControl>
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
-              <FormField
-                control={form.control}
-                name="password"
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>Password</FormLabel>
-                    <FormControl>
-                      <Input
-                        type="password"
-                        placeholder="••••••••"
-                        autoComplete="current-password"
-                        onChange={e => { setLoginError(null); field.onChange(e) }}
-                        value={field.value}
-                        name={field.name}
-                        ref={field.ref}
-                        onBlur={field.onBlur}
-                      />
-                    </FormControl>
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
-              <Button
-                type="submit"
-                className="w-full"
-                disabled={form.formState.isSubmitting}
-              >
-                {form.formState.isSubmitting ? 'Signing in…' : 'Sign in'}
-              </Button>
-            </form>
-          </Form>
+            />
+            <Controller
+              name="password"
+              control={control}
+              render={({ field, fieldState }) => (
+                <TextField
+                  {...field}
+                  label="Password"
+                  type="password"
+                  autoComplete="current-password"
+                  size="small"
+                  fullWidth
+                  error={!!fieldState.error}
+                  helperText={fieldState.error?.message}
+                  onChange={e => { setLoginError(null); field.onChange(e) }}
+                />
+              )}
+            />
+            <Button
+              type="submit"
+              variant="contained"
+              fullWidth
+              disabled={formState.isSubmitting}
+            >
+              {formState.isSubmitting ? 'Signing in…' : 'Sign in'}
+            </Button>
+          </Box>
         </CardContent>
       </Card>
-    </div>
+    </Box>
   )
 }

@@ -1,11 +1,14 @@
 import { useEffect, useRef, useState, useCallback } from 'react'
 import { Link } from '@tanstack/react-router'
 import { format } from 'date-fns'
-import { ChevronLeft, WifiOff, Wifi } from 'lucide-react'
+import Box from '@mui/material/Box'
+import Button from '@mui/material/Button'
+import Typography from '@mui/material/Typography'
+import Chip from '@mui/material/Chip'
+import WifiOffIcon from '@mui/icons-material/WifiOff'
+import WifiIcon from '@mui/icons-material/Wifi'
+import ChevronLeftIcon from '@mui/icons-material/ChevronLeft'
 import { useAuthStore } from '@/lib/auth'
-import { Badge } from '@/components/ui/badge'
-import { Button } from '@/components/ui/button'
-import { cn } from '@/lib/utils'
 
 interface LogLine {
   id: string
@@ -48,7 +51,7 @@ export function AgentLogs({ domainId, agentId }: AgentLogsProps) {
           source?: string
         }
         setLines(prev => [
-          ...prev.slice(-4999), // cap at 5000 lines
+          ...prev.slice(-4999),
           {
             id: String(++lineIdRef.current),
             timestamp: data.timestamp ?? new Date().toISOString(),
@@ -72,7 +75,6 @@ export function AgentLogs({ domainId, agentId }: AgentLogsProps) {
     ws.onerror = () => setConnected(false)
     ws.onclose = () => {
       setConnected(false)
-      // Reconnect after 3s
       setTimeout(connect, 3000)
     }
   }, [agentId, accessToken])
@@ -97,35 +99,31 @@ export function AgentLogs({ domainId, agentId }: AgentLogsProps) {
   }
 
   return (
-    <div className="flex flex-col h-full space-y-3">
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-3">
-          <Link
+    <Box sx={{ display: 'flex', flexDirection: 'column', height: '100%', gap: 2 }}>
+      <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+        <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
+          <Box
+            component={Link}
             to="/domains/$domainId/agents/$agentId"
-            params={{ domainId, agentId }}
-            className="flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground"
+            params={{ domainId, agentId } as never}
+            sx={{ display: 'flex', alignItems: 'center', gap: 0.5, color: 'text.secondary', textDecoration: 'none', fontSize: 14, '&:hover': { color: 'text.primary' } }}
           >
-            <ChevronLeft className="h-4 w-4" />
-            Agent
-          </Link>
-          <h2 className="text-lg font-semibold">Live Logs</h2>
-          <Badge variant={connected ? 'default' : 'secondary'} className="gap-1 text-xs">
-            {connected ? <Wifi className="h-3 w-3" /> : <WifiOff className="h-3 w-3" />}
-            {connected ? 'Connected' : 'Connecting…'}
-          </Badge>
-        </div>
-        <div className="flex items-center gap-2">
-          <span className="text-xs text-muted-foreground">{lines.length} lines</span>
+            <ChevronLeftIcon fontSize="small" /> Agent
+          </Box>
+          <Typography variant="h6" sx={{ fontWeight: 600 }}>Live Logs</Typography>
+          <Chip
+            icon={connected ? <WifiIcon /> : <WifiOffIcon />}
+            label={connected ? 'Connected' : 'Connecting…'}
+            color={connected ? 'success' : 'default'}
+            size="small"
+          />
+        </Box>
+        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+          <Typography variant="caption" color="text.secondary">{lines.length} lines</Typography>
+          <Button variant="outlined" size="small" onClick={() => setLines([])}>Clear</Button>
           <Button
-            variant="outline"
-            size="sm"
-            onClick={() => setLines([])}
-          >
-            Clear
-          </Button>
-          <Button
-            variant={autoScroll ? 'default' : 'outline'}
-            size="sm"
+            variant={autoScroll ? 'contained' : 'outlined'}
+            size="small"
             onClick={() => {
               setAutoScroll(true)
               bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
@@ -133,32 +131,49 @@ export function AgentLogs({ domainId, agentId }: AgentLogsProps) {
           >
             Auto-scroll
           </Button>
-        </div>
-      </div>
+        </Box>
+      </Box>
 
-      <div
-        className="flex-1 overflow-y-auto bg-black rounded-lg font-mono text-xs text-green-400 p-3 min-h-0"
-        style={{ height: 'calc(100vh - 200px)' }}
+      <Box
+        sx={{
+          flex: 1,
+          overflowY: 'auto',
+          bgcolor: '#000',
+          borderRadius: 1,
+          fontFamily: 'monospace',
+          fontSize: 12,
+          color: '#4ade80',
+          p: 1.5,
+          height: 'calc(100vh - 200px)',
+        }}
         onScroll={handleScroll}
       >
         {lines.length === 0 ? (
-          <span className="text-muted-foreground">
-            {connected
-              ? 'Waiting for log output…'
-              : 'Connecting to log stream…'}
-          </span>
+          <Typography sx={{ color: 'grey.600', fontSize: 12, fontFamily: 'monospace' }}>
+            {connected ? 'Waiting for log output…' : 'Connecting to log stream…'}
+          </Typography>
         ) : (
           lines.map(line => (
-            <div key={line.id} className={cn('flex gap-2 leading-5', line.source === 'stderr' && 'text-red-400')}>
-              <span className="text-gray-500 select-none shrink-0">
+            <Box
+              key={line.id}
+              sx={{
+                display: 'flex',
+                gap: 1.5,
+                lineHeight: 1.6,
+                color: line.source === 'stderr' ? '#f87171' : undefined,
+              }}
+            >
+              <Box component="span" sx={{ color: 'grey.600', userSelect: 'none', whiteSpace: 'nowrap', flexShrink: 0 }}>
                 {format(new Date(line.timestamp), 'HH:mm:ss.SSS')}
-              </span>
-              <span className="break-all whitespace-pre-wrap">{line.message}</span>
-            </div>
+              </Box>
+              <Box component="span" sx={{ wordBreak: 'break-all', whiteSpace: 'pre-wrap' }}>
+                {line.message}
+              </Box>
+            </Box>
           ))
         )}
         <div ref={bottomRef} />
-      </div>
-    </div>
+      </Box>
+    </Box>
   )
 }

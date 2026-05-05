@@ -1,8 +1,13 @@
 import { useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { Search, AlertCircle } from 'lucide-react'
+import Box from '@mui/material/Box'
+import Typography from '@mui/material/Typography'
+import Button from '@mui/material/Button'
+import TextField from '@mui/material/TextField'
+import Alert from '@mui/material/Alert'
+import InputAdornment from '@mui/material/InputAdornment'
+import SearchIcon from '@mui/icons-material/Search'
 import api from '@/lib/api'
-import { Input } from '@/components/ui/input'
 import { SkillCard } from '@/components/SkillCard'
 import { ToolCard } from '@/components/ToolCard'
 
@@ -52,50 +57,57 @@ export function ToolsSkills() {
   )
 
   return (
-    <div className="space-y-6">
-      <div className="flex items-center justify-between">
-        <h2 className="text-2xl font-bold tracking-tight">Tools & Skills</h2>
-      </div>
+    <Box sx={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
+      <Typography variant="h5" sx={{ fontWeight: 700 }}>Tools & Skills</Typography>
 
       {/* Tabs */}
-      <div className="flex gap-1 border-b">
+      <Box sx={{ display: 'flex', gap: 0, borderBottom: 1, borderColor: 'divider' }}>
         {(['skills', 'tools'] as Tab[]).map(t => (
-          <button
+          <Button
             key={t}
             onClick={() => setTab(t)}
-            className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
-              tab === t
-                ? 'border-primary text-primary'
-                : 'border-transparent text-muted-foreground hover:text-foreground'
-            }`}
+            sx={{
+              borderRadius: 0,
+              borderBottom: 2,
+              borderColor: tab === t ? 'primary.main' : 'transparent',
+              color: tab === t ? 'primary.main' : 'text.secondary',
+              fontWeight: tab === t ? 600 : 400,
+              px: 2,
+              py: 1,
+            }}
           >
             {t === 'skills' ? 'Skills' : 'Tools'}
-          </button>
+          </Button>
         ))}
-      </div>
+      </Box>
 
       {/* Search */}
-      <div className="relative max-w-sm">
-        <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
-        <Input
-          placeholder={`Search ${tab}…`}
-          className="pl-8"
-          value={search}
-          onChange={e => setSearch(e.target.value)}
-        />
-      </div>
+      <TextField
+        placeholder={`Search ${tab}…`}
+        value={search}
+        onChange={e => setSearch(e.target.value)}
+        size="small"
+        sx={{ maxWidth: 360 }}
+        slotProps={{ input: {
+          startAdornment: (
+            <InputAdornment position="start">
+              <SearchIcon fontSize="small" />
+            </InputAdornment>
+          ),
+        } }}
+      />
 
       {/* Skills tab */}
       {tab === 'skills' && (
         <>
           {skillsLoading ? (
-            <p className="text-sm text-muted-foreground">Loading skills…</p>
+            <Typography variant="body2" color="text.secondary">Loading skills…</Typography>
           ) : filteredSkills.length === 0 ? (
-            <p className="text-sm text-muted-foreground">No skills found.</p>
+            <Typography variant="body2" color="text.secondary">No skills found.</Typography>
           ) : (
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+            <Box sx={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: 2 }}>
               {filteredSkills.map(s => <SkillCard key={s.id} skill={s} />)}
-            </div>
+            </Box>
           )}
         </>
       )}
@@ -104,21 +116,20 @@ export function ToolsSkills() {
       {tab === 'tools' && (
         <>
           {toolsLoading ? (
-            <p className="text-sm text-muted-foreground">Loading tools…</p>
+            <Typography variant="body2" color="text.secondary">Loading tools…</Typography>
           ) : toolsUnavailable ? (
-            <div className="flex items-center gap-2 text-sm text-amber-600 border border-amber-200 bg-amber-50 rounded-md p-3">
-              <AlertCircle className="h-4 w-4 shrink-0" />
+            <Alert severity="warning">
               Tools unavailable — atom-llm is not reachable. Check that the LLM service is running.
-            </div>
+            </Alert>
           ) : filteredTools.length === 0 ? (
-            <p className="text-sm text-muted-foreground">No tools registered in atom-llm.</p>
+            <Typography variant="body2" color="text.secondary">No tools registered in atom-llm.</Typography>
           ) : (
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+            <Box sx={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: 2 }}>
               {filteredTools.map(t => <ToolCard key={t.name} tool={t} />)}
-            </div>
+            </Box>
           )}
         </>
       )}
-    </div>
+    </Box>
   )
 }

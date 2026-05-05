@@ -9,12 +9,15 @@ import {
   ShieldAlert, AlertCircle, Lock, RefreshCw,
   AlertTriangle, CheckCircle2,
 } from 'lucide-react'
+import Box from '@mui/material/Box'
+import Typography from '@mui/material/Typography'
+import Chip from '@mui/material/Chip'
+import Card from '@mui/material/Card'
+import CardContent from '@mui/material/CardContent'
+import IconButton from '@mui/material/IconButton'
+import TextField from '@mui/material/TextField'
 import api from '@/lib/api'
 import { useAuthStore } from '@/lib/auth'
-import { Badge } from '@/components/ui/badge'
-import { Button } from '@/components/ui/button'
-import { Card, CardContent, CardHeader } from '@/components/ui/card'
-import { Textarea } from '@/components/ui/textarea'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -98,8 +101,6 @@ function safeMessages(messages: Message[] | string | null | undefined): Message[
   return []
 }
 
-// Parse a LiteLLM/OpenAI-compatible error response from GATE or atom-llm.
-// Shape: { error: { message, type, param, code } }  — or fallback plain strings.
 async function parseLiteLLMError(
   resp: Response,
 ): Promise<{ text: string; errorType?: ErrorType; errorCode?: string }> {
@@ -112,7 +113,6 @@ async function parseLiteLLMError(
         errorCode: String(data.error.code ?? ''),
       }
     }
-    // Old plain-string fallback
     if (typeof data.error === 'string') {
       return { text: data.reason || data.error, errorType: data.error as ErrorType }
     }
@@ -218,38 +218,43 @@ export function AgentConversations({ domainId, agentId, gateUrl }: AgentConversa
   })
 
   const totalPages = data ? Math.ceil(data.total / pageSize) : 1
-
   const runningRun = data?.items.find(r => r.status === 'running') ?? null
 
   return (
-    <div className="space-y-5">
-      <div className="flex items-center gap-3">
-        <Link to="/domains/$domainId/agents/$agentId" params={{ domainId, agentId }} className="flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground transition-colors">
-          <ChevronLeft className="h-4 w-4" /> Agent
-        </Link>
-        <h2 className="text-xl font-semibold tracking-tight">Conversations</h2>
-        <span className="text-sm text-muted-foreground">{data?.total ?? '…'} total</span>
+    <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2.5 }}>
+      <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5 }}>
+        <Box
+          component={Link}
+          to="/domains/$domainId/agents/$agentId"
+          params={{ domainId, agentId } as never}
+          sx={{ display: 'flex', alignItems: 'center', gap: 0.5, color: 'text.secondary', textDecoration: 'none', fontSize: 14, '&:hover': { color: 'text.primary' } }}
+        >
+          <ChevronLeft size={16} /> Agent
+        </Box>
+        <Typography variant="h6" sx={{ fontWeight: 600 }}>Conversations</Typography>
+        <Typography variant="body2" color="text.secondary">{data?.total ?? '…'} total</Typography>
         {runningRun && (
-          <Badge variant="destructive" className="flex items-center gap-1 text-xs animate-pulse">
-            <Circle className="h-2 w-2 fill-current" /> Live
-          </Badge>
+          <Chip
+            icon={<Circle size={8} className="fill-current" />}
+            label="Live"
+            color="error"
+            size="small"
+            sx={{ animation: 'pulse 2s infinite', fontSize: 11 }}
+          />
         )}
-      </div>
+      </Box>
 
-      {/* ── Live chat panel ─────────────────────────────────────────────── */}
       <LiveChatPanel
         agentId={agentId}
         gateUrl={gateUrl}
         onRunCreated={() => queryClient.invalidateQueries({ queryKey: ['runs', agentId] })}
       />
 
-      {/* ── Live agent logs ─────────────────────────────────────────────── */}
       <LiveLogsPanel agentId={agentId} />
 
-      {isLoading && <p className="text-sm text-muted-foreground">Loading…</p>}
+      {isLoading && <Typography variant="body2" color="text.secondary">Loading…</Typography>}
 
-      {/* ── Run list ────────────────────────────────────────────────────── */}
-      <div className="space-y-3">
+      <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1.5 }}>
         {(data?.items ?? []).map(run => (
           <RunCard
             key={run.id}
@@ -261,34 +266,32 @@ export function AgentConversations({ domainId, agentId, gateUrl }: AgentConversa
         ))}
 
         {data?.items.length === 0 && (
-          <div className="text-center py-16 space-y-3">
-            <div className="flex justify-center">
-              <div className="rounded-full bg-muted p-4">
-                <MessageSquare className="h-8 w-8 text-muted-foreground/50" />
-              </div>
-            </div>
-            <div className="space-y-1">
-              <p className="text-sm font-medium text-muted-foreground">No conversations yet</p>
-              <p className="text-xs text-muted-foreground/70">
-                Use the chat panel above to start a live conversation with this agent.
-              </p>
-            </div>
-          </div>
+          <Box sx={{ textAlign: 'center', py: 8 }}>
+            <Box sx={{ display: 'flex', justifyContent: 'center', mb: 1.5 }}>
+              <Box sx={{ borderRadius: '50%', bgcolor: 'grey.100', p: 2 }}>
+                <MessageSquare size={32} style={{ color: '#9ca3af' }} />
+              </Box>
+            </Box>
+            <Typography variant="body2" color="text.secondary" sx={{ fontWeight: 500 }}>No conversations yet</Typography>
+            <Typography variant="caption" color="text.secondary">
+              Use the chat panel above to start a live conversation with this agent.
+            </Typography>
+          </Box>
         )}
-      </div>
+      </Box>
 
       {totalPages > 1 && (
-        <div className="flex items-center justify-end gap-2">
-          <span className="text-sm text-muted-foreground">Page {page} of {totalPages}</span>
-          <Button variant="outline" size="icon" disabled={page <= 1} onClick={() => setPage(p => p - 1)}>
-            <ChevronLeft className="h-4 w-4" />
-          </Button>
-          <Button variant="outline" size="icon" disabled={page >= totalPages} onClick={() => setPage(p => p + 1)}>
-            <ChevronRight className="h-4 w-4" />
-          </Button>
-        </div>
+        <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 1 }}>
+          <Typography variant="body2" color="text.secondary">Page {page} of {totalPages}</Typography>
+          <IconButton size="small" disabled={page <= 1} onClick={() => setPage(p => p - 1)}>
+            <ChevronLeft size={16} />
+          </IconButton>
+          <IconButton size="small" disabled={page >= totalPages} onClick={() => setPage(p => p + 1)}>
+            <ChevronRight size={16} />
+          </IconButton>
+        </Box>
       )}
-    </div>
+    </Box>
   )
 }
 
@@ -314,7 +317,6 @@ function LiveChatPanel({ agentId, gateUrl, onRunCreated }: LiveChatPanelProps) {
   })
   const [agentInfo, setAgentInfo] = useState<{ domain_id?: string; status?: string; name?: string } | null>(null)
   const scrollRef = useRef<HTMLDivElement>(null)
-  const textareaRef = useRef<HTMLTextAreaElement>(null)
   const token = useAuthStore(s => s.accessToken)
 
   useEffect(() => {
@@ -324,7 +326,6 @@ function LiveChatPanel({ agentId, gateUrl, onRunCreated }: LiveChatPanelProps) {
     }).catch(() => {})
   }, [agentId])
 
-  // Auto-scroll when history changes
   useEffect(() => {
     setTimeout(() => scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: 'smooth' }), 50)
   }, [chatHistory, sending])
@@ -344,7 +345,6 @@ function LiveChatPanel({ agentId, gateUrl, onRunCreated }: LiveChatPanelProps) {
     if (!input.trim() || sending || !canChat) return
     const msg = input.trim()
     setInput('')
-    if (textareaRef.current) textareaRef.current.style.height = 'auto'
     setSending(true)
 
     setChatHistory(h => persist([...h, { role: 'user', text: msg, ts: new Date() }]))
@@ -396,91 +396,80 @@ function LiveChatPanel({ agentId, gateUrl, onRunCreated }: LiveChatPanelProps) {
     setChatHistory([])
   }
 
-  function handleKeyDown(e: React.KeyboardEvent<HTMLTextAreaElement>) {
+  function handleKeyDown(e: React.KeyboardEvent<HTMLElement>) {
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault()
       send()
     }
   }
 
-  function handleInput(e: React.ChangeEvent<HTMLTextAreaElement>) {
-    setInput(e.target.value)
-    // Auto-resize textarea
-    e.target.style.height = 'auto'
-    e.target.style.height = Math.min(e.target.scrollHeight, 140) + 'px'
-  }
-
   if (!canChat && agentInfo) {
     return (
-      <div className="rounded-xl border border-dashed border-muted-foreground/25 bg-muted/20 p-8 text-center">
-        <div className="flex justify-center mb-3">
-          <div className="rounded-full bg-muted p-3">
-            <Bot className="h-6 w-6 text-muted-foreground/50" />
-          </div>
-        </div>
-        <p className="text-sm font-medium text-muted-foreground">Agent not deployed</p>
-        <p className="text-xs text-muted-foreground/60 mt-1">Deploy this agent to enable live chat.</p>
-      </div>
+      <Box sx={{ border: '1px dashed', borderColor: 'divider', borderRadius: 2, p: 6, textAlign: 'center' }}>
+        <Box sx={{ display: 'flex', justifyContent: 'center', mb: 1.5 }}>
+          <Box sx={{ borderRadius: '50%', bgcolor: 'grey.100', p: 1.5 }}>
+            <Bot size={24} style={{ color: '#9ca3af' }} />
+          </Box>
+        </Box>
+        <Typography variant="body2" color="text.secondary" sx={{ fontWeight: 500 }}>Agent not deployed</Typography>
+        <Typography variant="caption" color="text.secondary">Deploy this agent to enable live chat.</Typography>
+      </Box>
     )
   }
 
   return (
-    <div className="rounded-xl border border-border/60 bg-card shadow-sm overflow-hidden">
+    <Box sx={{ border: 1, borderColor: 'divider', borderRadius: 2, overflow: 'hidden' }}>
       {/* Header */}
-      <div className="flex items-center gap-3 px-4 py-3 border-b border-border/60 bg-muted/30">
-        <div className="flex items-center gap-2 flex-1 min-w-0">
-          <div className="relative shrink-0">
-            <Bot className="h-4 w-4 text-primary" />
+      <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5, px: 2, py: 1.5, borderBottom: 1, borderColor: 'divider', bgcolor: 'grey.50' }}>
+        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, flex: 1, minWidth: 0 }}>
+          <Box sx={{ position: 'relative', flexShrink: 0 }}>
+            <Bot size={16} style={{ color: '#1976d2' }} />
             {canChat && (
-              <span className="absolute -bottom-0.5 -right-0.5 h-2 w-2 rounded-full bg-emerald-500 ring-1 ring-background" />
+              <Box sx={{
+                position: 'absolute', bottom: -2, right: -2, width: 8, height: 8,
+                borderRadius: '50%', bgcolor: '#22c55e', border: '1px solid white'
+              }} />
             )}
-          </div>
-          <span className="text-sm font-medium truncate">
+          </Box>
+          <Typography variant="body2" sx={{ fontWeight: 500 }} noWrap>
             {agentInfo?.name ?? 'Agent'} — Live Chat
-          </span>
-        </div>
-
-        <div className="flex items-center gap-2 shrink-0">
+          </Typography>
+        </Box>
+        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, flexShrink: 0 }}>
           {canChat && (
-            <Badge variant="outline" className="text-xs gap-1 text-emerald-600 border-emerald-500/40 bg-emerald-500/5">
-              <CheckCircle2 className="h-3 w-3" /> Online
-            </Badge>
+            <Chip
+              icon={<CheckCircle2 size={12} />}
+              label="Online"
+              size="small"
+              variant="outlined"
+              sx={{ color: '#16a34a', borderColor: '#86efac', fontSize: 11 }}
+            />
           )}
           {chatHistory.length > 0 && (
-            <Button
-              variant="ghost"
-              size="icon"
-              className="h-7 w-7 text-muted-foreground hover:text-foreground"
-              onClick={clearHistory}
-              title="Clear conversation"
-            >
-              <Trash2 className="h-3.5 w-3.5" />
-            </Button>
+            <IconButton size="small" onClick={clearHistory} title="Clear conversation">
+              <Trash2 size={14} />
+            </IconButton>
           )}
-        </div>
-      </div>
+        </Box>
+      </Box>
 
       {/* Message area */}
-      <div
+      <Box
         ref={scrollRef}
-        className="h-[420px] overflow-y-auto px-4 py-4 space-y-3 scroll-smooth"
-        style={{ scrollbarWidth: 'thin' }}
+        sx={{ height: 420, overflowY: 'auto', px: 2, py: 2, display: 'flex', flexDirection: 'column', gap: 1.5 }}
       >
         {chatHistory.length === 0 && (
-          <div className="h-full flex flex-col items-center justify-center text-center gap-3 select-none">
-            <div className="rounded-full bg-primary/8 p-4 ring-1 ring-primary/15">
-              <Zap className="h-6 w-6 text-primary/70" />
-            </div>
-            <div className="space-y-1">
-              <p className="text-sm font-medium">Start a conversation</p>
-              <p className="text-xs text-muted-foreground max-w-xs">
-                Send a message to interact with this agent in real time. Responses stream live.
-              </p>
-            </div>
-            <p className="text-xs text-muted-foreground/50">
-              Press <kbd className="rounded border border-border bg-muted px-1 py-0.5 font-mono text-[10px]">Enter</kbd> to send &nbsp;·&nbsp; <kbd className="rounded border border-border bg-muted px-1 py-0.5 font-mono text-[10px]">Shift+Enter</kbd> for new line
-            </p>
-          </div>
+          <Box sx={{ height: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 1.5, userSelect: 'none' }}>
+            <Box sx={{ borderRadius: '50%', bgcolor: 'primary.50', p: 2, border: '1px solid', borderColor: 'primary.100' }}>
+              <Zap size={24} style={{ color: '#1976d2', opacity: 0.7 }} />
+            </Box>
+            <Box sx={{ textAlign: 'center' }}>
+              <Typography variant="body2" sx={{ fontWeight: 500 }}>Start a conversation</Typography>
+              <Typography variant="caption" color="text.secondary">
+                Send a message to interact with this agent in real time.
+              </Typography>
+            </Box>
+          </Box>
         )}
 
         {chatHistory.map((m, i) => (
@@ -488,39 +477,38 @@ function LiveChatPanel({ agentId, gateUrl, onRunCreated }: LiveChatPanelProps) {
         ))}
 
         {sending && <ThinkingBubble />}
-      </div>
+      </Box>
 
       {/* Input area */}
-      <div className="border-t border-border/60 bg-background/50 px-4 py-3">
-        <div className="flex gap-2 items-end">
-          <Textarea
-            ref={textareaRef}
+      <Box sx={{ borderTop: 1, borderColor: 'divider', bgcolor: 'background.paper', px: 2, py: 1.5 }}>
+        <Box sx={{ display: 'flex', gap: 1, alignItems: 'flex-end' }}>
+          <TextField
+            multiline
+            maxRows={5}
             placeholder={canChat ? 'Message the agent… (Enter to send, Shift+Enter for newline)' : 'Deploy agent to enable chat'}
             value={input}
             disabled={!canChat || sending}
-            onChange={handleInput}
+            onChange={e => setInput(e.target.value)}
             onKeyDown={handleKeyDown}
-            rows={1}
-            className="min-h-[38px] max-h-[140px] resize-none text-sm leading-relaxed py-2 overflow-y-auto field-sizing-content"
-            style={{ fieldSizing: 'content' } as React.CSSProperties}
+            size="small"
+            fullWidth
+            sx={{ '& .MuiInputBase-input': { fontSize: 14 } }}
           />
-          <Button
-            size="sm"
+          <IconButton
+            size="small"
             disabled={!canChat || sending || !input.trim()}
             onClick={send}
-            className="h-[38px] w-[38px] shrink-0 p-0"
+            color="primary"
+            sx={{ flexShrink: 0, border: 1, borderColor: 'divider' }}
           >
-            {sending
-              ? <RefreshCw className="h-4 w-4 animate-spin" />
-              : <Send className="h-4 w-4" />
-            }
-          </Button>
-        </div>
-        <p className="mt-1.5 text-[10px] text-muted-foreground/50 text-right">
+            {sending ? <RefreshCw size={16} className="animate-spin" /> : <Send size={16} />}
+          </IconButton>
+        </Box>
+        <Typography variant="caption" color="text.secondary" sx={{ display: 'block', textAlign: 'right', mt: 0.5 }}>
           {input.length > 0 ? `${input.length} chars` : 'Guardrail rejections show inline as policy alerts'}
-        </p>
-      </div>
-    </div>
+        </Typography>
+      </Box>
+    </Box>
   )
 }
 
@@ -534,7 +522,7 @@ function ChatBubble({ message }: { message: ChatMessage }) {
     return (
       <div className="flex gap-2.5 items-start">
         <div className="shrink-0 mt-0.5 rounded-full bg-muted p-1">
-          <Bot className="h-3.5 w-3.5 text-muted-foreground" />
+          <Bot size={14} style={{ color: '#6b7280' }} />
         </div>
         <div className={`rounded-xl px-3.5 py-2.5 max-w-[82%] text-sm ${classes}`}>
           <div className="flex items-center gap-1.5 mb-1 font-medium text-xs">
@@ -553,45 +541,56 @@ function ChatBubble({ message }: { message: ChatMessage }) {
 
   if (isUser) {
     return (
-      <div className="flex gap-2.5 items-end justify-end">
-        <div className="rounded-2xl rounded-br-sm px-3.5 py-2.5 bg-primary text-primary-foreground max-w-[82%] text-sm shadow-sm">
-          <p className="whitespace-pre-wrap leading-relaxed">{message.text}</p>
-          <p className="text-[10px] opacity-60 mt-1 text-right">{format(message.ts, 'HH:mm:ss')}</p>
-        </div>
-        <div className="shrink-0 rounded-full bg-primary/15 p-1">
-          <User className="h-3.5 w-3.5 text-primary" />
-        </div>
-      </div>
+      <Box sx={{ display: 'flex', gap: 1.5, alignItems: 'flex-end', justifyContent: 'flex-end' }}>
+        <Box sx={{ borderRadius: '16px 16px 4px 16px', px: 2, py: 1.5, bgcolor: 'primary.main', color: 'primary.contrastText', maxWidth: '82%', fontSize: 14 }}>
+          <Typography variant="body2" sx={{ whiteSpace: 'pre-wrap', color: 'inherit' }}>{message.text}</Typography>
+          <Typography variant="caption" sx={{ display: 'block', textAlign: 'right', opacity: 0.6, mt: 0.5, fontSize: 10 }}>
+            {format(message.ts, 'HH:mm:ss')}
+          </Typography>
+        </Box>
+        <Box sx={{ borderRadius: '50%', bgcolor: 'primary.50', p: 0.5, flexShrink: 0 }}>
+          <User size={14} style={{ color: '#1976d2' }} />
+        </Box>
+      </Box>
     )
   }
 
   return (
-    <div className="flex gap-2.5 items-end">
-      <div className="shrink-0 rounded-full bg-muted p-1">
-        <Bot className="h-3.5 w-3.5 text-muted-foreground" />
-      </div>
-      <div className="rounded-2xl rounded-bl-sm px-3.5 py-2.5 bg-muted/70 border border-border/40 max-w-[82%] text-sm shadow-sm">
-        <p className="whitespace-pre-wrap leading-relaxed">{message.text}</p>
-        <p className="text-[10px] text-muted-foreground/60 mt-1">{format(message.ts, 'HH:mm:ss')}</p>
-      </div>
-    </div>
+    <Box sx={{ display: 'flex', gap: 1.5, alignItems: 'flex-end' }}>
+      <Box sx={{ borderRadius: '50%', bgcolor: 'grey.100', p: 0.5, flexShrink: 0 }}>
+        <Bot size={14} style={{ color: '#6b7280' }} />
+      </Box>
+      <Box sx={{ borderRadius: '16px 16px 16px 4px', px: 2, py: 1.5, bgcolor: 'grey.100', border: 1, borderColor: 'divider', maxWidth: '82%', fontSize: 14 }}>
+        <Typography variant="body2" sx={{ whiteSpace: 'pre-wrap' }}>{message.text}</Typography>
+        <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 0.5, fontSize: 10 }}>
+          {format(message.ts, 'HH:mm:ss')}
+        </Typography>
+      </Box>
+    </Box>
   )
 }
 
 function ThinkingBubble() {
   return (
-    <div className="flex gap-2.5 items-end">
-      <div className="shrink-0 rounded-full bg-muted p-1">
-        <Bot className="h-3.5 w-3.5 text-muted-foreground" />
-      </div>
-      <div className="rounded-2xl rounded-bl-sm px-4 py-3 bg-muted/70 border border-border/40 text-sm">
-        <div className="flex gap-1 items-center h-4">
-          <span className="h-1.5 w-1.5 rounded-full bg-muted-foreground/50 animate-bounce [animation-delay:0ms]" />
-          <span className="h-1.5 w-1.5 rounded-full bg-muted-foreground/50 animate-bounce [animation-delay:150ms]" />
-          <span className="h-1.5 w-1.5 rounded-full bg-muted-foreground/50 animate-bounce [animation-delay:300ms]" />
-        </div>
-      </div>
-    </div>
+    <Box sx={{ display: 'flex', gap: 1.5, alignItems: 'flex-end' }}>
+      <Box sx={{ borderRadius: '50%', bgcolor: 'grey.100', p: 0.5, flexShrink: 0 }}>
+        <Bot size={14} style={{ color: '#6b7280' }} />
+      </Box>
+      <Box sx={{ borderRadius: '16px 16px 16px 4px', px: 2, py: 1.5, bgcolor: 'grey.100', border: 1, borderColor: 'divider' }}>
+        <Box sx={{ display: 'flex', gap: 0.5, alignItems: 'center', height: 16 }}>
+          {[0, 150, 300].map(delay => (
+            <Box
+              key={delay}
+              sx={{
+                width: 6, height: 6, borderRadius: '50%', bgcolor: 'text.disabled',
+                animation: 'bounce 1s infinite',
+                animationDelay: `${delay}ms`,
+              }}
+            />
+          ))}
+        </Box>
+      </Box>
+    </Box>
   )
 }
 
@@ -615,120 +614,123 @@ function RunCard({ run, agentId, expanded, onToggle }: RunCardProps) {
   const displayMessages = safeMessages(run.messages)
   const allMessages = [...displayMessages, ...liveMessages]
   const steps = safeSteps(run.steps)
-
   const title = run.run_name || run.user_msg || run.run_id.slice(0, 12)
 
   return (
-    <Card className={`overflow-hidden transition-shadow ${isRunning ? 'ring-1 ring-primary/30 shadow-sm' : 'hover:shadow-sm'}`}>
-      <CardHeader
-        className="py-3 px-4 cursor-pointer hover:bg-muted/30 transition-colors"
+    <Card
+      variant="outlined"
+      sx={{
+        overflow: 'hidden',
+        transition: 'box-shadow 0.2s',
+        ...(isRunning ? { boxShadow: '0 0 0 1px rgba(25,118,210,0.3)' } : { '&:hover': { boxShadow: 1 } }),
+      }}
+    >
+      <Box
+        sx={{ py: 1.5, px: 2, cursor: 'pointer', '&:hover': { bgcolor: 'grey.50' } }}
         onClick={onToggle}
       >
-        <div className="flex items-start justify-between gap-2">
-          <div className="flex-1 min-w-0">
-            <div className="flex items-center gap-2">
-              {isRunning && (
-                <Circle className="h-2 w-2 fill-primary text-primary shrink-0 animate-pulse" />
-              )}
-              <p className="text-sm font-medium text-foreground truncate">{title}</p>
-            </div>
+        <Box sx={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 1 }}>
+          <Box sx={{ flex: 1, minWidth: 0 }}>
+            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+              {isRunning && <Circle size={8} style={{ fill: '#1976d2', color: '#1976d2', animation: 'pulse 2s infinite', flexShrink: 0 }} />}
+              <Typography variant="body2" sx={{ fontWeight: 500 }} noWrap>{title}</Typography>
+            </Box>
             {run.reply && (
-              <p className="text-xs text-muted-foreground mt-0.5 truncate">{run.reply}</p>
+              <Typography variant="caption" color="text.secondary" noWrap sx={{ display: 'block' }}>
+                {run.reply}
+              </Typography>
             )}
-          </div>
-          <div className="flex items-center gap-2 shrink-0">
+          </Box>
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, flexShrink: 0 }}>
             {run.latency_ms != null && (
-              <span className="text-xs text-muted-foreground flex items-center gap-1">
-                <Clock className="h-3 w-3" />{run.latency_ms}ms
-              </span>
+              <Typography variant="caption" color="text.secondary" sx={{ display: 'flex', alignItems: 'center', gap: 0.25 }}>
+                <Clock size={12} />{run.latency_ms}ms
+              </Typography>
             )}
             {allMessages.length > 0 && (
-              <Badge variant="secondary" className="text-xs">
-                <MessageSquare className="h-2.5 w-2.5 mr-1" />{allMessages.length}
-              </Badge>
+              <Chip icon={<MessageSquare size={10} />} label={allMessages.length} size="small" />
             )}
             {steps.length > 0 && (
-              <Badge variant="secondary" className="text-xs">{steps.length} steps</Badge>
+              <Chip label={`${steps.length} steps`} size="small" />
             )}
-            <Badge
-              variant={isRunning ? 'destructive' : run.status === 'error' ? 'destructive' : 'outline'}
-              className="text-xs"
-            >
-              {isRunning ? 'live' : run.status}
-            </Badge>
+            <Chip
+              label={isRunning ? 'live' : run.status}
+              color={isRunning || run.status === 'error' ? 'error' : 'default'}
+              size="small"
+            />
             {run.trace_id && (
               <a
                 href={traceLink(run.trace_id)}
                 target="_blank"
                 rel="noreferrer"
                 onClick={e => e.stopPropagation()}
-                className="text-blue-500 hover:text-blue-400 transition-colors"
+                style={{ color: '#3b82f6' }}
                 title="View trace in Grafana Tempo"
               >
-                <ExternalLink className="h-3.5 w-3.5" />
+                <ExternalLink size={14} />
               </a>
             )}
-            <span className="text-xs text-muted-foreground whitespace-nowrap">
+            <Typography variant="caption" color="text.secondary" noWrap>
               {format(new Date(run.created_at), 'MMM d HH:mm:ss')}
-            </span>
-          </div>
-        </div>
-      </CardHeader>
+            </Typography>
+          </Box>
+        </Box>
+      </Box>
 
       {expanded && (
-        <CardContent className="px-4 pb-4 pt-0 space-y-2 border-t">
+        <CardContent sx={{ px: 2, pb: 2, pt: 0, borderTop: 1, borderColor: 'divider', display: 'flex', flexDirection: 'column', gap: 1 }}>
           {allMessages.length > 0 && (
-            <div className="space-y-2 pt-2">
+            <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1, pt: 1 }}>
               {allMessages.map((msg, i) => (
                 <MessageBubble key={i} message={msg} />
               ))}
               {isRunning && wsStatus === 'running' && (
-                <div className="flex gap-2 justify-start">
-                  <Bot className="h-4 w-4 mt-1 shrink-0 text-muted-foreground" />
-                  <div className="bg-muted rounded-2xl rounded-tl-sm px-3 py-2 text-xs text-muted-foreground animate-pulse">
+                <Box sx={{ display: 'flex', gap: 1 }}>
+                  <Bot size={16} style={{ marginTop: 4, flexShrink: 0, color: '#6b7280' }} />
+                  <Box sx={{ bgcolor: 'grey.100', borderRadius: 1, px: 1.5, py: 0.75, fontSize: 12, color: 'text.secondary', animation: 'pulse 2s infinite' }}>
                     Thinking…
-                  </div>
-                </div>
+                  </Box>
+                </Box>
               )}
-            </div>
+            </Box>
           )}
 
           {allMessages.length === 0 && (
             <>
               {run.user_msg && (
-                <div className="flex justify-end pt-2">
-                  <div className="bg-primary text-primary-foreground rounded-2xl rounded-tr-sm px-4 py-2 max-w-[80%] text-sm">
+                <Box sx={{ display: 'flex', justifyContent: 'flex-end', pt: 1 }}>
+                  <Box sx={{ bgcolor: 'primary.main', color: 'primary.contrastText', borderRadius: '16px 16px 4px 16px', px: 2, py: 1, maxWidth: '80%', fontSize: 14 }}>
                     {run.user_msg}
-                  </div>
-                </div>
+                  </Box>
+                </Box>
               )}
               {steps.map((step, i) => <StepBlock key={i} step={step} />)}
               {run.reply && (
-                <div className="flex justify-start">
-                  <div className="bg-muted rounded-2xl rounded-tl-sm px-4 py-2 max-w-[80%] text-sm whitespace-pre-wrap">
+                <Box sx={{ display: 'flex', justifyContent: 'flex-start' }}>
+                  <Box sx={{ bgcolor: 'grey.100', borderRadius: '16px 16px 16px 4px', px: 2, py: 1, maxWidth: '80%', fontSize: 14, whiteSpace: 'pre-wrap' }}>
                     {run.reply}
-                  </div>
-                </div>
+                  </Box>
+                </Box>
               )}
             </>
           )}
 
-          <div className="flex items-center gap-3 text-xs text-muted-foreground pt-1 border-t mt-2">
-            <span>run_id: <code className="font-mono">{run.run_id.slice(0, 12)}…</code></span>
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5, fontSize: 12, color: 'text.secondary', pt: 0.5, borderTop: 1, borderColor: 'divider', mt: 1 }}>
+            <Typography variant="caption">run_id: <code>{run.run_id.slice(0, 12)}…</code></Typography>
             {run.trace_id && (
               <a href={traceLink(run.trace_id)} target="_blank" rel="noreferrer"
-                className="flex items-center gap-1 text-blue-500 hover:text-blue-400">
-                <ExternalLink className="h-3 w-3" /> trace
+                style={{ display: 'flex', alignItems: 'center', gap: 4, color: '#3b82f6', fontSize: 12 }}>
+                <ExternalLink size={12} /> trace
               </a>
             )}
-          </div>
+          </Box>
         </CardContent>
       )}
     </Card>
   )
 }
 
-// ── Message bubble (for agentscope tRPC messages in run history) ──────────────
+// ── Message bubble ─────────────────────────────────────────────────────────────
 
 function MessageBubble({ message }: { message: Message }) {
   const isUser = message.role === 'user'
@@ -737,49 +739,51 @@ function MessageBubble({ message }: { message: Message }) {
 
   if (isSystem) {
     return (
-      <div className="text-center">
-        <span className="text-xs text-muted-foreground bg-muted rounded px-2 py-0.5">
+      <Box sx={{ textAlign: 'center' }}>
+        <Typography variant="caption" sx={{ bgcolor: 'grey.100', borderRadius: 0.5, px: 1, py: 0.25 }}>
           {message.content}
-        </span>
-      </div>
+        </Typography>
+      </Box>
     )
   }
 
   if (isTool) {
     return (
-      <div className="flex items-start gap-2 text-xs bg-amber-500/8 border border-amber-500/20 rounded-lg px-3 py-2.5">
-        <Wrench className="h-3.5 w-3.5 mt-0.5 shrink-0 text-amber-600" />
-        <div className="min-w-0">
-          {message.name && (
-            <span className="font-semibold text-amber-700 dark:text-amber-400">{message.name}</span>
-          )}
-          <pre className="mt-1 text-muted-foreground font-mono whitespace-pre-wrap break-all">{message.content}</pre>
-        </div>
-      </div>
+      <Box sx={{ display: 'flex', alignItems: 'flex-start', gap: 1, bgcolor: '#fffbeb', border: 1, borderColor: '#fde68a', borderRadius: 1, px: 1.5, py: 1.25, fontSize: 12 }}>
+        <Wrench size={14} style={{ marginTop: 2, flexShrink: 0, color: '#d97706' }} />
+        <Box sx={{ minWidth: 0 }}>
+          {message.name && <Typography variant="caption" sx={{ fontWeight: 600, color: '#92400e', display: 'block' }}>{message.name}</Typography>}
+          <pre style={{ margin: 0, fontSize: 11, fontFamily: 'monospace', whiteSpace: 'pre-wrap', wordBreak: 'break-all', color: '#6b7280' }}>{message.content}</pre>
+        </Box>
+      </Box>
     )
   }
 
   return (
-    <div className={`flex gap-2 ${isUser ? 'justify-end' : 'justify-start'}`}>
-      {!isUser && <Bot className="h-4 w-4 mt-1 shrink-0 text-muted-foreground" />}
-      <div className={`max-w-[80%] rounded-2xl px-4 py-2 text-sm whitespace-pre-wrap shadow-sm ${
-        isUser
-          ? 'bg-primary text-primary-foreground rounded-tr-sm'
-          : 'bg-muted/70 border border-border/40 rounded-tl-sm'
-      }`}>
+    <Box sx={{ display: 'flex', gap: 1, justifyContent: isUser ? 'flex-end' : 'flex-start' }}>
+      {!isUser && <Bot size={16} style={{ marginTop: 4, flexShrink: 0, color: '#6b7280' }} />}
+      <Box sx={{
+        maxWidth: '80%', borderRadius: isUser ? '16px 16px 4px 16px' : '16px 16px 16px 4px',
+        px: 2, py: 1, fontSize: 14, whiteSpace: 'pre-wrap',
+        bgcolor: isUser ? 'primary.main' : 'grey.100',
+        color: isUser ? 'primary.contrastText' : 'text.primary',
+        border: isUser ? 0 : 1, borderColor: 'divider',
+      }}>
         {message.name && !isUser && (
-          <p className="text-xs opacity-60 mb-1 font-medium">{message.name}</p>
+          <Typography variant="caption" sx={{ display: 'block', opacity: 0.6, mb: 0.5, fontWeight: 500 }}>
+            {message.name}
+          </Typography>
         )}
         {message.content}
         {message.url && (
           <a href={message.url} target="_blank" rel="noreferrer"
-            className="block mt-1 text-xs underline opacity-70">
+            style={{ display: 'block', marginTop: 4, fontSize: 12, opacity: 0.7, textDecoration: 'underline' }}>
             {message.url}
           </a>
         )}
-      </div>
-      {isUser && <User className="h-4 w-4 mt-1 shrink-0 text-muted-foreground" />}
-    </div>
+      </Box>
+      {isUser && <User size={16} style={{ marginTop: 4, flexShrink: 0, color: '#6b7280' }} />}
+    </Box>
   )
 }
 
@@ -816,57 +820,64 @@ function LiveLogsPanel({ agentId }: { agentId: string }) {
   }, [agentId, token])
 
   return (
-    <div className="rounded-xl border border-border/50 overflow-hidden">
-      <button
-        className="w-full flex items-center gap-2 px-4 py-2.5 bg-muted/30 hover:bg-muted/50 transition-colors text-left"
+    <Box sx={{ border: 1, borderColor: 'divider', borderRadius: 2, overflow: 'hidden' }}>
+      <Box
+        component="button"
         onClick={() => setExpanded(v => !v)}
+        sx={{
+          width: '100%', display: 'flex', alignItems: 'center', gap: 1, px: 2, py: 1.25,
+          bgcolor: 'grey.50', border: 0, cursor: 'pointer', textAlign: 'left',
+          '&:hover': { bgcolor: 'grey.100' },
+        }}
       >
-        <Terminal className="h-3.5 w-3.5 text-muted-foreground" />
-        <span className="text-xs font-medium text-muted-foreground">Agent Logs</span>
-        <div
-          className={`ml-1 h-1.5 w-1.5 rounded-full transition-colors ${connected ? 'bg-emerald-500' : 'bg-muted-foreground/30'}`}
-          title={connected ? 'Connected' : 'Disconnected'}
-        />
+        <Terminal size={14} style={{ color: '#6b7280' }} />
+        <Typography variant="caption" sx={{ fontWeight: 500 }} color="text.secondary">Agent Logs</Typography>
+        <Box sx={{
+          ml: 0.5, width: 6, height: 6, borderRadius: '50%',
+          bgcolor: connected ? '#22c55e' : 'grey.400',
+        }} />
         {logs.length > 0 && (
-          <Badge variant="secondary" className="text-[10px] h-4 ml-0.5">{logs.length}</Badge>
+          <Chip label={logs.length} size="small" sx={{ fontSize: 10, height: 16 }} />
         )}
-        <div className="ml-auto flex items-center gap-1">
+        <Box sx={{ ml: 'auto', display: 'flex', alignItems: 'center', gap: 0.5 }}>
           {logs.length > 0 && (
-            <span
-              className="text-xs text-muted-foreground/60 hover:text-muted-foreground px-1"
+            <Typography
+              variant="caption"
+              color="text.secondary"
               onClick={e => { e.stopPropagation(); setLogs([]) }}
+              sx={{ px: 0.5, '&:hover': { color: 'text.primary' } }}
             >
               Clear
-            </span>
+            </Typography>
           )}
-          <ChevronRight className={`h-3.5 w-3.5 text-muted-foreground/50 transition-transform ${expanded ? 'rotate-90' : ''}`} />
-        </div>
-      </button>
+          <ChevronRight size={14} style={{ color: '#9ca3af', transform: expanded ? 'rotate(90deg)' : undefined, transition: 'transform 0.2s' }} />
+        </Box>
+      </Box>
 
       {expanded && (
-        <div
+        <Box
           ref={scrollRef}
-          className="max-h-52 overflow-y-auto bg-[#0d0d0d] px-4 py-3 font-mono text-xs"
-          style={{ scrollbarWidth: 'thin', scrollbarColor: '#333 transparent' }}
+          sx={{
+            maxHeight: 208, overflowY: 'auto', bgcolor: '#0d0d0d', px: 2, py: 1.5,
+            fontFamily: 'monospace', fontSize: 12,
+          }}
         >
           {logs.length === 0 ? (
-            <p className="text-zinc-600 text-center py-3">
+            <Typography sx={{ color: '#52525b', textAlign: 'center', py: 1.5, fontSize: 12, fontFamily: 'monospace' }}>
               {connected ? 'Waiting for log events…' : 'Connecting to log stream…'}
-            </p>
+            </Typography>
           ) : (
             logs.map((l, i) => (
-              <div key={i} className="flex gap-3 leading-5 hover:bg-white/3 -mx-2 px-2 rounded">
-                <span className="text-zinc-600 shrink-0 select-none">{l.ts.slice(11, 23)}</span>
-                {l.source && (
-                  <span className="text-blue-400/70 shrink-0">[{l.source}]</span>
-                )}
-                <span className="text-emerald-400/90 whitespace-pre-wrap break-all">{l.msg}</span>
-              </div>
+              <Box key={i} sx={{ display: 'flex', gap: 1.5, lineHeight: 1.6 }}>
+                <Box component="span" sx={{ color: '#52525b', flexShrink: 0, userSelect: 'none' }}>{l.ts.slice(11, 23)}</Box>
+                {l.source && <Box component="span" sx={{ color: '#60a5fa', opacity: 0.7, flexShrink: 0 }}>[{l.source}]</Box>}
+                <Box component="span" sx={{ color: '#4ade80', opacity: 0.9, wordBreak: 'break-all', whiteSpace: 'pre-wrap' }}>{l.msg}</Box>
+              </Box>
             ))
           )}
-        </div>
+        </Box>
       )}
-    </div>
+    </Box>
   )
 }
 
@@ -875,32 +886,32 @@ function LiveLogsPanel({ agentId }: { agentId: string }) {
 function StepBlock({ step }: { step: Step }) {
   if (step.type === 'thinking') {
     return (
-      <div className="flex items-start gap-2 text-xs text-muted-foreground italic border-l-2 border-muted pl-3 py-1">
-        <Brain className="h-3.5 w-3.5 mt-0.5 shrink-0" />
-        <span className="whitespace-pre-wrap">{step.text}</span>
-      </div>
+      <Box sx={{ display: 'flex', alignItems: 'flex-start', gap: 1, fontSize: 12, color: 'text.secondary', fontStyle: 'italic', borderLeft: 2, borderColor: 'grey.300', pl: 1.5, py: 0.5 }}>
+        <Brain size={14} style={{ marginTop: 2, flexShrink: 0 }} />
+        <Typography variant="caption" sx={{ whiteSpace: 'pre-wrap' }}>{step.text}</Typography>
+      </Box>
     )
   }
   if (step.type === 'tool_use') {
     return (
-      <div className="flex items-start gap-2 text-xs bg-amber-500/8 border border-amber-500/20 rounded-lg px-3 py-2.5">
-        <Wrench className="h-3.5 w-3.5 mt-0.5 shrink-0 text-amber-600" />
-        <div>
-          <span className="font-semibold text-amber-700 dark:text-amber-400">{step.name}</span>
+      <Box sx={{ display: 'flex', alignItems: 'flex-start', gap: 1, bgcolor: '#fffbeb', border: 1, borderColor: '#fde68a', borderRadius: 1, px: 1.5, py: 1.25 }}>
+        <Wrench size={14} style={{ marginTop: 2, flexShrink: 0, color: '#d97706' }} />
+        <Box>
+          <Typography variant="caption" sx={{ fontWeight: 600, color: '#92400e' }}>{step.name}</Typography>
           {step.input && Object.keys(step.input).length > 0 && (
-            <pre className="mt-1 text-muted-foreground font-mono text-xs whitespace-pre-wrap">
+            <pre style={{ margin: '4px 0 0', fontSize: 11, fontFamily: 'monospace', whiteSpace: 'pre-wrap', color: '#6b7280' }}>
               {JSON.stringify(step.input, null, 2)}
             </pre>
           )}
-        </div>
-      </div>
+        </Box>
+      </Box>
     )
   }
   if (step.type === 'tool_result') {
     return (
-      <div className="text-xs text-muted-foreground bg-muted/50 rounded-lg px-3 py-2 font-mono whitespace-pre-wrap border border-border/30">
+      <Box sx={{ fontSize: 12, color: 'text.secondary', bgcolor: 'grey.100', borderRadius: 1, px: 1.5, py: 1, fontFamily: 'monospace', whiteSpace: 'pre-wrap', border: 1, borderColor: 'divider' }}>
         {step.content}
-      </div>
+      </Box>
     )
   }
   return null

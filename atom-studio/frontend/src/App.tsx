@@ -7,13 +7,14 @@ import {
   Navigate,
 } from '@tanstack/react-router'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { Toaster } from '@/components/ui/toaster'
 import { RequireAuth } from '@/components/app/RequireAuth'
 import { Layout } from '@/components/app/Layout'
 import { Login } from '@/pages/Login'
 import { Domains } from '@/pages/Domains'
 import { Agents } from '@/pages/Agents'
+import { AgentNewChoice } from '@/pages/AgentNewChoice'
 import { AgentBuilderChat } from '@/pages/AgentBuilderChat'
+import { AgentWizard } from '@/pages/AgentWizard'
 import { AgentDetail } from '@/pages/AgentDetail'
 import { AgentConversations } from '@/pages/AgentConversations'
 import { AgentLogs } from '@/pages/AgentLogs'
@@ -28,7 +29,6 @@ const rootRoute = createRootRoute({
   component: () => (
     <QueryClientProvider client={queryClient}>
       <Outlet />
-      <Toaster />
     </QueryClientProvider>
   ),
 })
@@ -75,7 +75,7 @@ const agentNewRoute = createRoute({
   component: () => (
     <RequireAuth>
       <Layout>
-        <AgentBuilderChat />
+        <AgentNewChoice />
       </Layout>
     </RequireAuth>
   ),
@@ -84,6 +84,30 @@ const agentNewRoute = createRoute({
 const agentBuildRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: '/agents/build',
+  component: () => (
+    <RequireAuth>
+      <Layout>
+        <AgentBuilderChat />
+      </Layout>
+    </RequireAuth>
+  ),
+})
+
+const agentWizardRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: '/agents/wizard',
+  component: () => (
+    <RequireAuth>
+      <Layout>
+        <AgentWizard />
+      </Layout>
+    </RequireAuth>
+  ),
+})
+
+const agentLegacyBuildRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: '/agents/builder',
   component: () => (
     <RequireAuth>
       <Layout>
@@ -181,6 +205,8 @@ const routeTree = rootRoute.addChildren([
   agentsRoute,
   agentNewRoute,
   agentBuildRoute,
+  agentWizardRoute,
+  agentLegacyBuildRoute,
   toolsSkillsRoute,
   agentDetailRoute,
   agentLogsRoute,

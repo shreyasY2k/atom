@@ -1,4 +1,7 @@
 import { useQuery } from '@tanstack/react-query'
+import Box from '@mui/material/Box'
+import Button from '@mui/material/Button'
+import Typography from '@mui/material/Typography'
 import api from '@/lib/api'
 
 interface Model {
@@ -17,23 +20,20 @@ export function ModelPicker({ value, onChange }: ModelPickerProps) {
     queryFn: async () => (await api.get('/api/builder/models')).data,
   })
 
-  if (isLoading) return <p className="text-sm text-muted-foreground">Loading models…</p>
+  if (isLoading) return <Typography variant="body2" color="text.secondary">Loading models…</Typography>
 
   return (
-    <div className="flex flex-wrap gap-2">
+    <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1 }}>
       {models.map(m => (
-        <button
+        <Button
           key={m.id}
+          size="small"
+          variant={value === m.id ? 'contained' : 'outlined'}
           onClick={() => onChange(m.id)}
-          className={`px-3 py-1.5 rounded-md text-sm border transition-colors ${
-            value === m.id
-              ? 'border-primary bg-primary text-primary-foreground'
-              : 'border-border hover:border-primary/60 hover:bg-accent'
-          }`}
         >
           {m.name}
-        </button>
+        </Button>
       ))}
-    </div>
+    </Box>
   )
 }

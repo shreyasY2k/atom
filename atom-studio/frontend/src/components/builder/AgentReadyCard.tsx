@@ -1,7 +1,10 @@
 import { CheckCircle } from 'lucide-react'
 import { Link } from '@tanstack/react-router'
-import { Button } from '@/components/ui/button'
-import { Card, CardContent } from '@/components/ui/card'
+import Box from '@mui/material/Box'
+import Card from '@mui/material/Card'
+import CardContent from '@mui/material/CardContent'
+import Typography from '@mui/material/Typography'
+import Button from '@mui/material/Button'
 
 interface Props {
   agentName: string | null
@@ -10,17 +13,17 @@ interface Props {
 
 export function AgentReadyCard({ agentName, chatUrl }: Props) {
   return (
-    <Card className="border-green-500 bg-green-50 dark:bg-green-950/20">
-      <CardContent className="pt-4 flex items-center justify-between gap-4">
-        <div className="flex items-center gap-3">
-          <CheckCircle className="h-5 w-5 text-green-500 shrink-0" />
-          <div>
-            <p className="font-semibold text-sm">{agentName ?? 'Agent'} is live</p>
-            <p className="text-xs text-muted-foreground">Deployed and ready to chat</p>
-          </div>
-        </div>
-        <Button asChild size="sm">
-          <Link to={chatUrl as never}>Chat now →</Link>
+    <Card variant="outlined" sx={{ borderColor: 'success.main', bgcolor: '#f0fdf4' }}>
+      <CardContent sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 2, pt: 2 }}>
+        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5 }}>
+          <CheckCircle size={20} style={{ color: '#22c55e', flexShrink: 0 }} />
+          <Box>
+            <Typography variant="body2" sx={{ fontWeight: 600 }}>{agentName ?? 'Agent'} is live</Typography>
+            <Typography variant="caption" color="text.secondary">Deployed and ready to chat</Typography>
+          </Box>
+        </Box>
+        <Button size="small" variant="contained" component={Link} to={chatUrl as never}>
+          Chat now →
         </Button>
       </CardContent>
     </Card>

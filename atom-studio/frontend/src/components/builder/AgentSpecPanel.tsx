@@ -1,5 +1,7 @@
 import { Shield, ClipboardList, Lock } from 'lucide-react'
-import { Badge } from '@/components/ui/badge'
+import Box from '@mui/material/Box'
+import Typography from '@mui/material/Typography'
+import Chip from '@mui/material/Chip'
 import type { AgentSpec } from '@/hooks/useBuilderChat'
 
 interface Props {
@@ -10,57 +12,65 @@ interface Props {
 
 function Row({ label, value }: { label: string; value: React.ReactNode }) {
   return (
-    <div className="flex justify-between items-start gap-2 py-1.5 border-b last:border-0">
-      <span className="text-xs text-muted-foreground w-16 shrink-0">{label}</span>
-      <span className="text-xs text-right flex-1 break-words">{value ?? <span className="text-muted-foreground/50">—</span>}</span>
-    </div>
+    <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 1, py: 0.75, borderBottom: '1px solid', borderColor: 'divider', '&:last-child': { borderBottom: 0 } }}>
+      <Typography variant="caption" color="text.secondary" sx={{ width: 64, flexShrink: 0 }}>{label}</Typography>
+      <Box sx={{ flex: 1, textAlign: 'right', fontSize: 12 }}>
+        {value ?? <Typography variant="caption" sx={{ opacity: 0.4 }}>—</Typography>}
+      </Box>
+    </Box>
   )
 }
 
 export function AgentSpecPanel({ spec, stage, ciTarget }: Props) {
   return (
-    <div className="space-y-4">
-      <div>
-        <h3 className="text-sm font-semibold mb-2 text-muted-foreground uppercase tracking-wide">Agent Spec</h3>
-        <div className="bg-muted/40 rounded-md px-3 py-1">
-          <Row label="Name" value={spec.agentName} />
-          <Row label="Model" value={spec.model} />
+    <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+      <Box>
+        <Typography variant="caption" color="text.secondary" sx={{ textTransform: 'uppercase', letterSpacing: 1, fontWeight: 600, display: 'block', mb: 1 }}>
+          Agent Spec
+        </Typography>
+        <Box sx={{ bgcolor: 'grey.50', borderRadius: 1, px: 1.5, py: 0.5 }}>
+          <Row label="Name" value={<Typography variant="caption" sx={{ fontWeight: 500 }}>{spec.agentName}</Typography>} />
+          <Row label="Model" value={<Typography variant="caption">{spec.model}</Typography>} />
           <Row label="Tools" value={
             spec.tools.length
-              ? <div className="flex flex-wrap gap-1 justify-end">{spec.tools.map(t => <Badge key={t} variant="outline" className="text-xs">{t}</Badge>)}</div>
+              ? <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.5, justifyContent: 'flex-end' }}>
+                  {spec.tools.map(t => <Chip key={t} label={t} size="small" variant="outlined" sx={{ fontSize: 10, height: 18 }} />)}
+                </Box>
               : null
           } />
           <Row label="Skills" value={
             spec.skills.length
-              ? <div className="flex flex-wrap gap-1 justify-end">{spec.skills.map(s => <Badge key={s} variant="secondary" className="text-xs">{s}</Badge>)}</div>
+              ? <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.5, justifyContent: 'flex-end' }}>
+                  {spec.skills.map(s => <Chip key={s} label={s} size="small" sx={{ fontSize: 10, height: 18 }} />)}
+                </Box>
               : null
           } />
           <Row label="HITL" value={spec.hitlConfig ? (spec.hitlConfig.enabled ? 'enabled' : 'disabled') : null} />
           <Row label="A2A" value={spec.a2aTargets.length ? spec.a2aTargets.join(', ') : 'none'} />
           <Row label="Build" value={ciTarget === 'gitlab' ? 'GitLab (private)' : 'Local Docker'} />
-        </div>
-      </div>
+        </Box>
+      </Box>
 
-      <div className="border rounded-md p-3 bg-background space-y-1.5">
-        <div className="flex items-center gap-2 text-xs text-muted-foreground">
-          <Shield className="h-3.5 w-3.5 text-primary" />
-          <span>Guardrails always active</span>
-        </div>
-        <div className="flex items-center gap-2 text-xs text-muted-foreground">
-          <ClipboardList className="h-3.5 w-3.5 text-primary" />
-          <span>Audit always on</span>
-        </div>
-        <div className="flex items-center gap-2 text-xs text-muted-foreground">
-          <Lock className="h-3.5 w-3.5 text-primary" />
-          <span>Agent ID + JWT auto-provisioned</span>
-        </div>
-      </div>
+      <Box sx={{ border: 1, borderColor: 'divider', borderRadius: 1, p: 1.5, bgcolor: 'background.paper', display: 'flex', flexDirection: 'column', gap: 0.75 }}>
+        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+          <Shield size={14} style={{ color: '#1976d2' }} />
+          <Typography variant="caption" color="text.secondary">Guardrails always active</Typography>
+        </Box>
+        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+          <ClipboardList size={14} style={{ color: '#1976d2' }} />
+          <Typography variant="caption" color="text.secondary">Audit always on</Typography>
+        </Box>
+        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+          <Lock size={14} style={{ color: '#1976d2' }} />
+          <Typography variant="caption" color="text.secondary">Agent ID + JWT auto-provisioned</Typography>
+        </Box>
+      </Box>
 
       {stage !== 'greeting' && (
-        <div className="text-xs text-muted-foreground text-center">
-          Stage: <span className="font-medium text-foreground">{stage}</span>
-        </div>
+        <Typography variant="caption" color="text.secondary" align="center">
+          Stage: <strong style={{ color: 'inherit' }}>{stage}</strong>
+        </Typography>
       )}
-    </div>
+    </Box>
   )
 }
