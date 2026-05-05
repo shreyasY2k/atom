@@ -46,7 +46,7 @@ func init() {
 	deployCmd.Flags().StringVar(&deployImage, "image", "", "Docker image name (defaults to project directory name)")
 	deployCmd.Flags().StringVar(&deployMessage, "message", "", "Deployment message / changelog")
 	deployCmd.Flags().BoolVar(&deploySkip, "skip-build", false, "Skip docker build and use existing image")
-	deployCmd.Flags().StringVar(&deployCIMode, "ci", "", "CI build provider: local | gitlab (overrides atom_agent.yaml)")
+	deployCmd.Flags().StringVar(&deployCIMode, "ci", "", "Build provider: local | gitlab — overrides atom_agent.yaml ci.provider")
 	deployCmd.Flags().StringVar(&deployRepo, "repo", "", "Repository URL for CI builds (auto-detected from git remote)")
 	deployCmd.Flags().StringVar(&deployCIToken, "token", "", "GitLab PAT (reads from ~/.atom/credentials or GITLAB_TOKEN env)")
 	deployCmd.Flags().StringVar(&deployBranch, "branch", "", "Branch to build from (overrides atom_agent.yaml ci.branch)")

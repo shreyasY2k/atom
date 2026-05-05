@@ -14,8 +14,21 @@ import (
 var createCmd = &cobra.Command{
 	Use:   "create",
 	Short: "Scaffold a new ReAct agent project",
-	Long:  "Interactive wizard that generates a working ReAct agent project using atom-sdk.\nNo flags required — everything is prompted.",
-	RunE:  runCreate,
+	Long: `Interactive wizard that generates a working ReAct agent project using atom-sdk.
+No flags required — everything is prompted.
+
+Generated files:
+  atom_agent.yaml   — CI provider, sdk_image, agent_id/domain_id (fill after creating in Studio)
+  Dockerfile        — ARG SDK_IMAGE / FROM; no credentials baked in
+  .gitlab-ci.yml    — ATOM_BUILD pipeline rule + SDK_IMAGE build-arg
+  server.py         — FastAPI app with /healthz and /run endpoints
+  tools.py          — Toolkit with registered tool functions (extend this)
+  agent.py          — Standalone CLI entrypoint
+  requirements.txt  — agentscope fork + fastapi + uvicorn
+
+After creation, fill in atom_agent.yaml with agent_id and domain_id from Studio,
+add gl_origin remote, then run: atom deploy`,
+	RunE: runCreate,
 }
 
 func runCreate(_ *cobra.Command, _ []string) error {

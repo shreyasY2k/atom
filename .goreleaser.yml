@@ -45,9 +45,9 @@ checksum:
   name_template: "checksums.txt"
 
 release:
-  github:
-    owner: "{{ .Env.GITHUB_REPOSITORY_OWNER }}"
-    name: atom
+  # No explicit github/gitlab block — GoReleaser auto-detects the SCM:
+  #   GitHub:  GITHUB_TOKEN set + GitHub Actions env  → GitHub Release
+  #   GitLab:  GITLAB_TOKEN set + GitLab CI env       → GitLab Release
   name_template: "ATOM v{{.Version}}"
   header: |
     ## ATOM v{{.Version}}
@@ -56,13 +56,13 @@ release:
 
     **macOS / Linux (one-liner):**
     ```bash
-    curl -fsSL https://github.com/{{ .Env.GITHUB_REPOSITORY_OWNER }}/atom/releases/latest/download/atom_$(uname -s | tr '[:upper:]' '[:lower:]')_$(uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/') \
+    curl -fsSL https://github.com/shreyasy2k/atom/releases/latest/download/atom_$(uname -s | tr '[:upper:]' '[:lower:]')_$(uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/') \
       -o /usr/local/bin/atom && chmod +x /usr/local/bin/atom
     ```
 
     **Go install:**
     ```bash
-    go install github.com/{{ .Env.GITHUB_REPOSITORY_OWNER }}/atom/atom-cli/cmd/atom@v{{.Version}}
+    go install github.com/shreyasy2k/atom/atom-cli/cmd/atom@v{{.Version}}
     ```
 
 changelog:
