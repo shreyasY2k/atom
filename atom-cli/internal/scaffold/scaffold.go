@@ -30,6 +30,9 @@ type TemplateData struct {
 	// Feature flags
 	UseMemory bool
 	UseHITL   bool
+	// SDKImage is the registry path (without tag) for the atom-sdk base image.
+	// Empty means gl_origin was not configured; templates fall back to python:3.11-slim.
+	SDKImage string
 }
 
 // Generate writes the scaffolded project into a new directory named after the project.
@@ -55,6 +58,7 @@ func Generate(a *wizard.Answers) error {
 		"Dockerfile":                       "agent/Dockerfile.tmpl",
 		".github/workflows/atom-build.yml": "agent/github-workflow-build.yml.tmpl",
 		".gitlab-ci.yml":                   "agent/gitlab-ci.yml.tmpl",
+		"atom_agent.yaml":                  "agent/atom_agent.yaml.tmpl",
 	}
 
 	for outFile, tmplPath := range files {
@@ -95,6 +99,7 @@ func buildData(a *wizard.Answers) TemplateData {
 		HasMemoryRecall: toolSet["memory_recall"],
 		UseMemory:       a.UseMemory,
 		UseHITL:         a.UseHITL,
+		SDKImage:        a.SDKImage,
 	}
 }
 

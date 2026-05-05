@@ -1,26 +1,19 @@
-stages:
-  - build
+stages: [build]
 
-build-agent:
+atom-build:
   stage: build
-  image: docker:latest
-  services:
-    - docker:dind
+  image: docker:24
+  services: [docker:24-dind]
+  variables:
+    DOCKER_BUILDKIT: "1"
   rules:
-    - if: '$CI_PIPELINE_SOURCE == "api"'
-    - if: '$CI_PIPELINE_SOURCE == "trigger"'
-    - if: '$CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH'
+    - if: '$ATOM_BUILD == "true"'
   before_script:
-    - docker login -u "$CI_REGISTRY_USER" -p "$CI_REGISTRY_PASSWORD" $CI_REGISTRY
+    # CI_REGISTRY_USER / CI_REGISTRY_PASSWORD grant read+write access to all registries
+    # under the same GitLab instance, including the atom-sdk base image registry.
+    - docker login $CI_REGISTRY -u $CI_REGISTRY_USER -p $CI_REGISTRY_PASSWORD
   script:
-    - TAG="${IMAGE_TAG:-latest}"
     - docker build
-        --cache-from "$CI_REGISTRY_IMAGE:latest"
-        --build-arg BUILDKIT_INLINE_CACHE=1
-        -t "$CI_REGISTRY_IMAGE:$TAG" .
-    - docker push "$CI_REGISTRY_IMAGE:$TAG"
-    - |
-      if [ "$TAG" != "latest" ]; then
-        docker tag "$CI_REGISTRY_IMAGE:$TAG" "$CI_REGISTRY_IMAGE:latest"
-        docker push "$CI_REGISTRY_IMAGE:latest"
-      fi
+        --build-arg SDK_IMAGE=${SDK_IMAGE:-{{ if .SDKImage }}{{ .SDKImage }}:latest{{ else }}python:3.11-slim{{ end }}}
+        -t $CI_REGISTRY_IMAGE:$ATOM_IMAGE_TAG .
+    - docker push $CI_REGISTRY_IMAGE:$ATOM_IMAGE_TAG

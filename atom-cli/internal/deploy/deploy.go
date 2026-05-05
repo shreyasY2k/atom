@@ -23,7 +23,14 @@ type deployResp struct {
 
 // BuildImage runs `docker build -t image .` in the given directory.
 func BuildImage(dir, image string) error {
-	cmd := exec.Command("docker", "build", "-t", image, dir)
+	return BuildImageWithArgs(dir, image, nil)
+}
+
+// BuildImageWithArgs runs `docker build` with optional extra args (e.g. --build-arg).
+func BuildImageWithArgs(dir, image string, extraArgs []string) error {
+	args := append([]string{"build", "-t", image}, extraArgs...)
+	args = append(args, dir)
+	cmd := exec.Command("docker", args...)
 	cmd.Stdout = newPrefixWriter("  [docker] ")
 	cmd.Stderr = newPrefixWriter("  [docker] ")
 	if err := cmd.Run(); err != nil {

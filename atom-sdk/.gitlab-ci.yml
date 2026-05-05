@@ -1,0 +1,16 @@
+stages: [build]
+
+build-base-image:
+  stage: build
+  image: docker:24
+  services: [docker:24-dind]
+  rules:
+    - if: '$CI_COMMIT_BRANCH == "main"'
+    - if: '$CI_COMMIT_TAG =~ /^v\d+\.\d+\.\d+$/'
+  script:
+    - docker login $CI_REGISTRY -u $CI_REGISTRY_USER -p $CI_REGISTRY_PASSWORD
+    - |
+      TAG=${CI_COMMIT_TAG:-latest}
+      docker build -t $CI_REGISTRY_IMAGE:$TAG -t $CI_REGISTRY_IMAGE:latest .
+      docker push $CI_REGISTRY_IMAGE:$TAG
+      docker push $CI_REGISTRY_IMAGE:latest

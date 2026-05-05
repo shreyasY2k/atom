@@ -1,11 +1,10 @@
-FROM python:3.11-slim
+# sdk_image tag is pinned in atom_agent.yaml — bump it or run: atom sdk upgrade <tag>
+ARG SDK_IMAGE={{ if .SDKImage }}{{ .SDKImage }}:latest{{ else }}python:3.11-slim{{ end }}
+FROM ${SDK_IMAGE}
+
 WORKDIR /app
 
-# git is required to install agentscope fork from GitHub
-RUN apt-get update && apt-get install -y --no-install-recommends git \
-    && rm -rf /var/lib/apt/lists/*
-
-# Install all dependencies — agentscope fork (AtomChatModel) declared in requirements.txt
+# Only agent-specific dependencies here — atom-sdk already in base image when SDK_IMAGE is set
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 

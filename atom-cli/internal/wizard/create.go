@@ -75,6 +75,9 @@ type Answers struct {
 	Tools       []string
 	UseMemory   bool
 	UseHITL     bool
+	// SDKImage is the container registry path for the atom-sdk base image,
+	// resolved from atom-sdk/gl_origin after the wizard runs. May be empty.
+	SDKImage string
 }
 
 // Run executes the interactive wizard and returns the collected answers.

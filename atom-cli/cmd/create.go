@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 
 	"github.com/spf13/cobra"
 	"github.com/your-org/atom/atom-cli/internal/scaffold"
@@ -23,11 +24,20 @@ func runCreate(_ *cobra.Command, _ []string) error {
 		return err
 	}
 
+	// Resolve atom-sdk base image from gl_origin in the ATOM monorepo root.
+	// Walk up from cwd to find the root (contains atom-sdk/ subdirectory).
+	answers.SDKImage = resolveSDKImage()
+
 	if err := scaffold.Generate(answers); err != nil {
 		return err
 	}
 
 	fmt.Printf("\n✓ Created ./%s/\n\n", answers.ProjectName)
+
+	if answers.SDKImage != "" {
+		fmt.Printf("  sdk_image: %s:latest\n", answers.SDKImage)
+		fmt.Printf("  (run `atom sdk upgrade <tag>` inside the project to pin a version)\n\n")
+	}
 
 	// Create virtual environment using Python 3.11+ (prefer 3.11 for compatibility)
 	pyBin := detectPython()
@@ -58,6 +68,31 @@ func runCreate(_ *cobra.Command, _ []string) error {
 
 	printNextSteps(answers.ProjectName)
 	return nil
+}
+
+// resolveSDKImage walks up from cwd looking for the ATOM monorepo root
+// (identified by the presence of an atom-sdk/ subdirectory) and reads
+// gl_origin to derive the registry URL. Returns empty string on failure.
+func resolveSDKImage() string {
+	cwd, err := os.Getwd()
+	if err != nil {
+		return ""
+	}
+	// Walk up the directory tree looking for a directory that contains atom-sdk/
+	dir := cwd
+	for {
+		sdkDir := filepath.Join(dir, "atom-sdk")
+		if info, err := os.Stat(sdkDir); err == nil && info.IsDir() {
+			img, _ := scaffold.ResolveSDKImage(dir)
+			return img
+		}
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			break
+		}
+		dir = parent
+	}
+	return ""
 }
 
 // detectPython returns the first available Python 3.11+ binary.
