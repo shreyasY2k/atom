@@ -7,6 +7,7 @@ Run locally:
 import asyncio
 import logging
 import os
+import subprocess
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
@@ -91,8 +92,33 @@ def _setup_otel(app: FastAPI) -> None:
         logger.warning("OTEL setup failed (%s) — tracing disabled", exc)
 
 
+def _run_migrations() -> None:
+    db_url = os.environ.get("DATABASE_URL", "")
+    migrations_path = os.environ.get("MIGRATIONS_PATH", "/migrations")
+    if not os.path.isdir(migrations_path):
+        logger.info("Migrations: directory %s not found, skipping", migrations_path)
+        return
+    result = subprocess.run(
+        ["migrate", "-database", db_url, "-path", migrations_path, "up"],
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode != 0:
+        raise RuntimeError(f"Migration failed: {result.stderr}")
+    applied = [line for line in result.stderr.splitlines() if "/u " in line]
+    n = len(applied)
+    ver = subprocess.run(
+        ["migrate", "-database", db_url, "-path", migrations_path, "version"],
+        capture_output=True,
+        text=True,
+    )
+    version = ver.stdout.strip() or ver.stderr.strip() or "unknown"
+    logger.info("Migrations: %d applied, schema at version %s", n, version)
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    _run_migrations()
     await init_pool()
     await init_producer()
     await broadcaster.start()

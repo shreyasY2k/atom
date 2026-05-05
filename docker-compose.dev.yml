@@ -238,6 +238,8 @@ services:
         condition: service_healthy
       redpanda:
         condition: service_healthy
+      atom-studio-api:
+        condition: service_healthy
     volumes:
       - ./atom-llm/config.dev.yaml:/app/config.dev.yaml:ro
     ports:
@@ -281,6 +283,13 @@ services:
       - "3001:3001"
     volumes:
       - ./.keys:/etc/atom:ro
+      - ./migrations:/migrations:ro
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3001/healthz"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 15s
 
   # ── atom-studio UI (React + Vite frontend) ────────────────────────────────────
   # Built from scratch in SESSION-07. Management portal UI.
@@ -314,7 +323,7 @@ services:
       postgres:
         condition: service_healthy
       atom-studio-api:
-        condition: service_started
+        condition: service_healthy
     env_file: .env
     environment:
       DATABASE_URL: postgresql://atom:${POSTGRES_PASSWORD:-changeme}@postgres:5432/atom

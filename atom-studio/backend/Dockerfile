@@ -1,4 +1,8 @@
+FROM migrate/migrate:v4.18.1 AS migrate-bin
+
 FROM python:3.11-slim
+
+COPY --from=migrate-bin /usr/local/bin/migrate /usr/local/bin/migrate
 
 WORKDIR /app
 

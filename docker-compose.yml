@@ -228,7 +228,8 @@ services:
     container_name: atom-llm
     restart: unless-stopped
     depends_on:
-      postgres: { condition: service_healthy }
+      postgres:         { condition: service_healthy }
+      atom-studio-api:  { condition: service_healthy }
     env_file: .env
     environment:
       DATABASE_URL: postgresql://atom:${POSTGRES_PASSWORD:-changeme}@postgres:5432/atom
@@ -268,8 +269,15 @@ services:
       OTEL_SERVICE_NAME: atom-studio
     volumes:
       - ./.keys:/etc/atom:ro
+      - ./migrations:/migrations:ro
     ports:
       - "3001:3001"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3001/healthz"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 15s
 
   # ── atom-studio UI ────────────────────────────────────────────────────────────
   atom-studio-ui:
@@ -289,8 +297,8 @@ services:
     container_name: atom-runtime
     restart: unless-stopped
     depends_on:
-      postgres: { condition: service_healthy }
-      atom-studio-api: { condition: service_started }
+      postgres:         { condition: service_healthy }
+      atom-studio-api:  { condition: service_healthy }
     env_file: .env
     environment:
       DATABASE_URL: postgresql://atom:${POSTGRES_PASSWORD:-changeme}@postgres:5432/atom?sslmode=disable
