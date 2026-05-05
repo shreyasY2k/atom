@@ -1,6 +1,6 @@
 ---
 name: atom-hitl
-description: Use when an agent needs to pause and wait for a human decision before proceeding. Covers the correct request_human_decision() call, when to trigger it, and how to handle the response including timeout behaviour.
+description: Human-in-the-loop escalation using request_human_decision(). Blocks until a reviewer approves or rejects. Include in any agent that needs approval before irreversible or high-value actions.
 ---
 
 # ATOM Human-in-the-Loop (HITL)
@@ -11,51 +11,90 @@ description: Use when an agent needs to pause and wait for a human decision befo
 from agentscope.hitl import request_human_decision
 ```
 
+## Full signature
+
+```python
+def request_human_decision(
+    payload: dict[str, Any],   # context shown to the reviewer
+    timeout_s: int = 300,      # seconds to wait (default 5 min)
+    poll_interval_s: int = 5,  # how often to poll
+) -> dict[str, Any]:
+    # Returns: {"approved": bool, "note": str, "decided_by": str, "decided_at": str}
+    # Raises:  TimeoutError if no decision within timeout_s
+    #          EnvironmentError if ATOM env vars not set
+```
+
 ## When to trigger HITL
 
-Generate HITL escalation when the agent needs human approval for:
-- Transactions or actions above a threshold (e.g. amount > 50,000)
-- Irreversible actions (delete, transfer, approve)
-- Low-confidence decisions (model uncertainty above a threshold)
-- Any action the user specified as requiring human review
+Escalate when the action is:
+- **Irreversible** — deletes data, sends communications, makes financial transactions
+- **High-value** — monetary amount above a threshold set by the agent intent
+- **Low-confidence** — model uncertainty is high
+- **Explicitly required** — user description says "escalate to human" or "require approval"
 
 ## Correct usage
 
 ```python
-decision = request_human_decision(
-    payload={
-        "action": "approve_loan",          # what the agent wants to do
-        "amount": 75000,                   # relevant data for reviewer
-        "customer_id": "CUST-4821",
-        "reason": "Credit score 720, income verified",
-    },
-    timeout_s=300,                         # how long to wait (default 300s)
-)
+from agentscope.hitl import request_human_decision
+import logging
 
-if decision["approved"]:
-    # proceed with the action
-    result = agent.use_tool("approve-loan", {"customer_id": "CUST-4821"})
-else:
-    # handle rejection gracefully
-    note = decision.get("note", "No reason given")
-    return f"Action rejected by reviewer: {note}"
+logger = logging.getLogger(__name__)
+
+async def approve_loan(customer_id: str, amount: float) -> str:
+    """Approve a loan after human review."""
+
+    # Trigger HITL before the irreversible action
+    try:
+        decision = request_human_decision(
+            payload={
+                "action": "approve_loan",
+                "customer_id": customer_id,
+                "amount": amount,
+                "currency": "USD",
+            },
+            timeout_s=300,
+        )
+    except TimeoutError:
+        logger.warning("HITL timed out for customer=%s", customer_id)
+        return "Approval timed out. Action not taken — please retry."
+
+    if decision["approved"]:
+        # Proceed only after explicit approval
+        logger.info("Loan approved by %s", decision["decided_by"])
+        # ... execute the action
+        return f"Loan of ${amount} approved."
+    else:
+        note = decision.get("note", "No reason given")
+        logger.info("Loan rejected: %s", note)
+        return f"Loan rejected: {note}"
 ```
 
-## Timeout handling
+## As a tool function registered in Toolkit
+
+HITL works naturally inside a tool function that the ReAct agent calls:
 
 ```python
-# request_human_decision raises TimeoutError if no decision in timeout_s
-try:
-    decision = request_human_decision(payload=payload, timeout_s=300)
-except TimeoutError:
-    # default safe behaviour: treat as rejected, do NOT proceed
-    return "Decision timed out — action not taken. Please retry."
+async def submit_transfer(account_id: str, amount: float, target: str) -> str:
+    """Submit a funds transfer — requires human approval above $10,000."""
+    if amount > 10_000:
+        decision = request_human_decision(
+            payload={"account": account_id, "amount": amount, "target": target},
+            timeout_s=600,
+        )
+        if not decision["approved"]:
+            return "Transfer rejected by reviewer."
+
+    # Execute transfer
+    ...
+    return "Transfer complete."
+
+toolkit.register_tool_function(submit_transfer, group_name="finance")
 ```
 
 ## Rules
 
-- NEVER proceed with a high-risk action if `decision["approved"]` is False
+- NEVER proceed with a high-risk action if `decision["approved"]` is `False`
 - NEVER retry `request_human_decision` for the same action in the same session
-- ALWAYS include enough context in `payload` for the reviewer to make a decision
-- The `timeout_s` should be appropriate to the urgency — default 300s is safe
-- `request_human_decision` routes through GATE internally — do NOT call the HITL API directly
+- ALWAYS include enough context in `payload` for the reviewer to make an informed decision
+- On `TimeoutError` — default safe behaviour is to NOT proceed; make this explicit
+- `request_human_decision` is synchronous (blocks); do not wrap in `asyncio.run()`

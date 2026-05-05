@@ -1,11 +1,11 @@
 ---
 name: atom-react-agent
-description: Use when generating agent.py for an ATOM agent. Provides the correct ReActAgent constructor, AtomChatModel wiring, and import paths for atom-sdk. Never use vanilla agentscope imports — always use atom-sdk patterns.
+description: Correct ReActAgent construction with required formatter, AtomChatModel, Toolkit, and memory. Use this for any generated agent.py. The formatter argument is required and must match the model provider.
 ---
 
 # ATOM ReAct Agent
 
-## Correct imports
+## Required imports
 
 ```python
 from agentscope.agent import ReActAgent
@@ -13,63 +13,111 @@ from agentscope.model import AtomChatModel
 from agentscope.tool import Toolkit
 from agentscope.memory import InMemoryMemory
 from agentscope.message import Msg
+# Pick the formatter that matches the model provider:
+from agentscope.formatter import (
+    GeminiChatFormatter,       # for gemini-* models
+    OpenAIChatFormatter,       # for gpt-* models
+    AnthropicChatFormatter,    # for claude-* models
+)
 ```
 
-## Correct agent construction
+## `ReActAgent.__init__` signature (COMPLETE)
 
 ```python
-def build_agent(name: str, sys_prompt: str, model_name: str, toolkit: Toolkit) -> ReActAgent:
-    return ReActAgent(
-        name=name,
-        sys_prompt=sys_prompt,
-        model=AtomChatModel(model_name=model_name),
-        memory=InMemoryMemory(),
-        toolkit=toolkit,
-    )
+ReActAgent(
+    name: str,                         # REQUIRED
+    sys_prompt: str,                   # REQUIRED
+    model: ChatModelBase,              # REQUIRED — use AtomChatModel
+    formatter: FormatterBase,          # REQUIRED — must match model provider
+    toolkit: Toolkit | None = None,    # optional but always provide
+    memory: MemoryBase | None = None,  # optional — use InMemoryMemory
+    long_term_memory: LongTermMemoryBase | None = None,
+    long_term_memory_mode: str = "both",
+    enable_meta_tool: bool = False,
+    parallel_tool_calls: bool = False,
+    max_iters: int = 10,
+)
 ```
 
-## AtomChatModel rules
+**`formatter` is REQUIRED and positional — omitting it raises `TypeError`.**
 
-- ALWAYS use `AtomChatModel` — never `OpenAIChatModel`, `LiteLLMModel`, or any other model class
-- NEVER pass `api_key`, `base_url`, or `client_kwargs` to `AtomChatModel` — these are injected from env vars automatically
-- The `model_name` must match an entry in atom-llm's `model_list` config (e.g. `"gemini-2.5-flash"`)
-- `AtomChatModel` reads `ATOM_GATE_URL`, `ATOM_DOMAIN_ID`, `ATOM_AGENT_ID`, `ATOM_AGENT_JWT` from environment — all injected by atom-runtime at pod start
-- For local dev, these are set in the agent's `.env` file
+## Choosing the right formatter
 
-## Entry point pattern
+| Model name starts with | Formatter class |
+|---|---|
+| `gemini-` | `GeminiChatFormatter()` |
+| `gpt-` | `OpenAIChatFormatter()` |
+| `claude-` | `AnthropicChatFormatter()` |
+
+## Minimal working agent
 
 ```python
-# agent.py
 import os
+import asyncio
+from agentscope import init
 from agentscope.agent import ReActAgent
 from agentscope.model import AtomChatModel
 from agentscope.tool import Toolkit
 from agentscope.memory import InMemoryMemory
 from agentscope.message import Msg
+from agentscope.formatter import GeminiChatFormatter  # change per model
 
 def main():
+    init(studio_url=os.environ.get("ATOM_GATE_URL", "http://localhost:8080"))
+
+    model_name = os.environ.get("ATOM_MODEL", "gemini-2.5-flash")
     toolkit = Toolkit()
-    # register tools and skills here
+    # register tools here: toolkit.register_tool_function(my_func)
 
     agent = ReActAgent(
         name=os.environ.get("ATOM_AGENT_NAME", "agent"),
         sys_prompt="You are a helpful assistant.",
-        model=AtomChatModel(model_name=os.environ.get("ATOM_MODEL", "gemini-2.5-flash")),
-        memory=InMemoryMemory(),
+        model=AtomChatModel(model_name=model_name),
+        formatter=GeminiChatFormatter(),   # REQUIRED
         toolkit=toolkit,
+        memory=InMemoryMemory(),
+        max_iters=10,
     )
-
-    # agent is now ready — atom-runtime wraps this in a serving loop
     return agent
 
 if __name__ == "__main__":
-    main()
+    agent = main()
+    response = asyncio.run(agent.reply(Msg(name="user", content="Hello!", role="user")))
+    print(response.get_text_content())
+```
+
+## Registering tools
+
+Tools are Python functions registered into the Toolkit **before** building the agent.
+The ReAct loop calls them automatically — you never call them manually.
+
+```python
+async def lookup_customer(customer_id: str) -> str:
+    """Look up customer record. Args: customer_id (str). Returns JSON string."""
+    # implementation here — all HTTP goes through GATE automatically
+    ...
+
+toolkit = Toolkit()
+toolkit.register_tool_function(
+    lookup_customer,
+    group_name="basic",   # "basic" is always active
+)
+```
+
+## Calling the agent
+
+```python
+from agentscope.message import Msg
+
+msg = Msg(name="user", content="Check customer C-123", role="user")
+response = await agent.reply(msg)
+text = response.get_text_content()
 ```
 
 ## What NOT to generate
 
-- NEVER: `import openai` or direct OpenAI SDK usage
-- NEVER: `import litellm` directly in agent code
-- NEVER: hardcode `ATOM_GATE_URL`, `ATOM_AGENT_JWT` or any credential in agent.py
-- NEVER: use `agentscope.model.OpenAIChatModel` or any model class other than `AtomChatModel`
-- NEVER: write `from agentscope.agents import ...` — the correct module is `agentscope.agent` (singular)
+- NEVER: `from agentscope.agents import ...` — module is `agentscope.agent` (singular)
+- NEVER: `from agentscope.models import ...` — module is `agentscope.model` (singular)
+- NEVER: `agent.use_tool(...)` — tools are called by the ReAct loop automatically
+- NEVER: omit `formatter=` — `ReActAgent` raises `TypeError` without it
+- NEVER: `AtomChatModel(api_key=..., base_url=...)` — credentials come from env vars only

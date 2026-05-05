@@ -2,9 +2,16 @@ import { useState, useCallback, useRef } from 'react'
 import api from '@/lib/api'
 import { useAuthStore } from '@/lib/auth'
 
+export interface BuilderOption {
+  label: string
+  value: string
+  description?: string
+}
+
 export interface BuilderMessage {
   role: 'user' | 'assistant'
   content: string
+  options?: BuilderOption[]
 }
 
 export interface AgentSpec {
@@ -60,6 +67,7 @@ export function useBuilderChat(domainId: string, ciTarget: 'gitlab' | 'local') {
     abortRef.current = new AbortController()
 
     let assistantContent = ''
+    let assistantOptions: BuilderOption[] = []
 
     try {
       const resp = await fetch('/api/builder/chat', {
@@ -98,7 +106,10 @@ export function useBuilderChat(domainId: string, ciTarget: 'gitlab' | 'local') {
           try {
             const evt = JSON.parse(raw)
             if (evt.type === 'session_id') setSessionId(evt.session_id)
-            if (evt.type === 'token') assistantContent = evt.content
+            if (evt.type === 'token') {
+              assistantContent = evt.content
+              assistantOptions = (evt.options as BuilderOption[]) ?? []
+            }
             if (evt.type === 'spec_update') applyUpdates(evt.updates)
             if (evt.type === 'stage_change') setStage(evt.stage)
           } catch { /* ignore parse errors */ }
@@ -106,7 +117,11 @@ export function useBuilderChat(domainId: string, ciTarget: 'gitlab' | 'local') {
       }
 
       if (assistantContent) {
-        setMessages(prev => [...prev, { role: 'assistant', content: assistantContent }])
+        setMessages(prev => [...prev, {
+          role: 'assistant',
+          content: assistantContent,
+          options: assistantOptions.length > 0 ? assistantOptions : undefined,
+        }])
       }
     } catch (err: unknown) {
       if (err instanceof Error && err.name !== 'AbortError') {

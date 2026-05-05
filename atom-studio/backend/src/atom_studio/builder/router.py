@@ -138,7 +138,7 @@ async def builder_chat(req: ChatRequest, claims: dict = Depends(require_auth)):
 
     prev_stage = state.stage
 
-    ai_message, updates, new_stage = await process_turn(
+    ai_message, options, updates, new_stage = await process_turn(
         state=state,
         user_message=req.message,
         atom_llm_url=settings.atom_llm_url,
@@ -151,7 +151,7 @@ async def builder_chat(req: ChatRequest, claims: dict = Depends(require_auth)):
     async def event_stream():
         if is_new_session:
             yield f"data: {json.dumps({'type': 'session_id', 'session_id': state.session_id})}\n\n"
-        yield f"data: {json.dumps({'type': 'token', 'content': ai_message})}\n\n"
+        yield f"data: {json.dumps({'type': 'token', 'content': ai_message, 'options': options})}\n\n"
         if updates:
             yield f"data: {json.dumps({'type': 'spec_update', 'updates': updates})}\n\n"
         if new_stage != prev_stage:

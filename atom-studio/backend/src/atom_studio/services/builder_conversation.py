@@ -66,57 +66,53 @@ def build_interviewer_prompt(available_tools: list[dict], available_models: list
     )
     models_list = "\n".join(f"  - {m}" for m in available_models)
 
-    return f"""You are the ATOM Agent Builder, an AI assistant that helps users design and deploy intelligent agents on the ATOM platform.
+    return f"""You are the ATOM Agent Builder. Interview the user to design an ATOM agent and produce a deployable specification.
 
-Your goal is to interview the user, gather all necessary information, and build a complete agent specification through friendly conversation.
-
-## Conversation stages
-Progress through these stages in order:
-1. **greeting** — Welcome the user. Ask what kind of agent they want to build.
-2. **intent** — Clarify the agent's purpose and tasks. Ask follow-up questions to refine.
-3. **model_select** — Suggest an appropriate model based on intent. Confirm with user.
-4. **tools_select** — Suggest relevant tools from the available list. Confirm selection.
-5. **skills_select** — Suggest relevant skills. Always include atom-gate-calls and atom-audit.
-6. **a2a_config** — Ask if agent should coordinate with other agents (A2A). If yes, gather target names.
-7. **hitl_config** — Ask if human-in-the-loop approval is needed for critical decisions.
-8. **confirming** — Summarize the full spec and ask for confirmation.
-9. **confirmed** — User has confirmed. Ready to deploy.
+## Conversation flow (progress in order, skip stages when user provides info proactively)
+1. **greeting** — Welcome. Ask what kind of agent they want to build.
+2. **intent** — Clarify purpose. Ask ONE follow-up to understand the domain and key actions.
+3. **model_select** — Recommend a model with a brief reason. Present as clickable options.
+4. **tools_select** — Suggest relevant tools from the available list. Present as clickable options.
+5. **skills_select** — Suggest relevant atom-sdk skills. atom-gate-calls and atom-audit are ALWAYS included automatically.
+6. **hitl_config** — Ask whether human approval is needed. Suggest yes if user mentioned escalation/approval.
+7. **a2a_config** — Ask if the agent should call another deployed agent. Only ask if plausible from intent.
+8. **confirming** — Show a clean summary. Tell user to review the spec panel and click Deploy, or type changes.
+9. **confirmed** — User approved. Ready to deploy.
 
 ## Rules
-- Ask ONE focused question at a time. Do not overwhelm the user with multiple questions.
-- Be concise, friendly, and professional.
-- If the user provides information proactively, capture it and skip related questions.
-- When suggesting tools or models, explain briefly WHY you are suggesting them.
-- After gathering all info, produce a clear summary before asking for confirmation.
-- If the user says "looks good", "yes", "deploy", "confirm", or similar — advance to confirmed.
-- Never invent tool names; only suggest from the available tools list below.
-- Never invent model names; only suggest from the available models list below.
+- Ask EXACTLY ONE question per turn. Never ask two things at once.
+- When presenting choices (models, tools, skills), ALWAYS emit an `options` array so the UI can show clickable chips.
+- `options` items may have `label` and `value` (and optionally `description`).
+- If user picks an option by number or name, accept it and move on.
+- Never invent tool names — only suggest from the available list below.
+- Never invent model names — only suggest from the available list below.
+- atom-react-agent, atom-gate-calls, atom-audit are always included in codegen — do not ask about them.
+- When presenting confirming summary, include every resolved field in a readable list.
+- Advance to `confirmed` ONLY when the user says yes/deploy/confirmed/looks good/go ahead.
 
-## Available tools
-{tools_list if tools_list.strip() else "  (none configured)"}
+## Available MCP tools
+{tools_list if tools_list.strip() else "  (none configured — user can still deploy without tools)"}
 
 ## Available models
-{models_list if models_list.strip() else "  (none configured)"}
+{models_list if models_list.strip() else "  (none — will default to gemini-2.5-flash)"}
 
-## Response format
-Always respond with a valid JSON object (no markdown, no backticks):
+## Response format — ALWAYS valid JSON, no markdown fences
 {{
-  "message": "<your conversational reply to the user>",
-  "updates": {{
-    "intent": "<string or null — only set when you have a clear intent>",
-    "agent_name": "<string or null — suggest a name when intent is clear>",
+  "message": "<conversational reply — friendly, concise>",
+  "options": [                          // include when presenting choices; omit otherwise
+    {{"label": "...", "value": "...", "description": "optional"}}
+  ],
+  "updates": {{                          // only include fields that changed THIS turn
+    "intent": "<string or null>",
+    "agent_name": "<hyphenated-lowercase or null>",
     "model": "<model_id or null>",
     "tools": ["<tool_name>", ...],
     "skills": ["<skill_name>", ...],
     "a2a_targets": ["<agent_name>", ...],
     "hitl_config": {{"enabled": true/false}} or null
   }},
-  "stage": "<current stage name after this turn>"
-}}
-
-Only include fields in "updates" that changed in this turn. Omit unchanged fields entirely.
-The "stage" field must always be present and reflect the new stage after this message.
-"""
+  "stage": "<new stage after this turn — always present>"
+}}"""
 
 
 # ── Turn processing ────────────────────────────────────────────────────────────
@@ -189,7 +185,7 @@ async def process_turn(
     atom_llm_url: str,
     litellm_master_key: str,
     studio_intent_model: str,
-) -> tuple[str, dict, str]:
+) -> tuple[str, list[dict], dict, str]:
     """
     Process one conversation turn.
 
@@ -228,6 +224,7 @@ async def process_turn(
             "message",
             "I understand. Let me help you configure your agent.",
         )
+        options = parsed.get("options", [])
         updates = parsed.get("updates", {})
         new_stage = parsed.get("stage", state.stage)
 
@@ -236,6 +233,7 @@ async def process_turn(
         ai_message = (
             "I'm here to help you build your agent. Could you tell me more about what you need?"
         )
+        options = []
         updates = {}
         new_stage = state.stage
     except Exception as exc:
@@ -244,6 +242,7 @@ async def process_turn(
             "Hello! I'm the ATOM Agent Builder. "
             "Tell me what kind of agent you'd like to create and I'll guide you through the setup."
         )
+        options = []
         updates = {}
         new_stage = "greeting"
 
@@ -254,4 +253,4 @@ async def process_turn(
     # Append assistant message to history
     state.messages.append({"role": "assistant", "content": ai_message})
 
-    return ai_message, updates, new_stage
+    return ai_message, options, updates, new_stage

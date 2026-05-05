@@ -1,67 +1,124 @@
 ---
 name: atom-memory
-description: Use when an agent needs to store facts across turns or recall relevant context before making a decision. Covers MemoryManager construction, remember(), recall(), and when to use short-term vs long-term memory.
+description: Working memory (InMemoryMemory) and long-term memory (Mem0LongTermMemory) for agents. Pass to ReActAgent constructor. Use add()/get_memory() for working memory. Covers correct classes and API — MemoryManager does not exist.
 ---
 
 # ATOM Memory
 
-## Import
+## Working memory (short-term, within session)
 
 ```python
-from agentscope.hitl import MemoryManager
+from agentscope.memory import InMemoryMemory
+
+memory = InMemoryMemory()
 ```
 
-## Construction
+Pass to `ReActAgent`:
+```python
+agent = ReActAgent(
+    ...,
+    memory=memory,          # short-term working memory
+)
+```
+
+The agent automatically calls `memory.add()` and `memory.get_memory()` during the ReAct loop.
+
+### Working memory API
 
 ```python
-# MemoryManager reads all config from ATOM env vars — no arguments needed
-memory = MemoryManager()
+from agentscope.message import Msg
+
+# Add a message to memory
+await memory.add(
+    Msg(name="system", content="Customer is VIP.", role="system"),
+    marks="context",      # optional tag for later filtering
+)
+
+# Retrieve messages (filtered by mark)
+messages = await memory.get_memory(
+    mark="context",         # only messages tagged "context"
+    prepend_summary=True,   # include compressed summary if available
+)
+
+# Get current size
+count = await memory.size()
+
+# Delete by mark
+await memory.delete_by_mark("context")
 ```
 
-Reads from environment:
-- `ATOM_MEMORY_BACKEND` — `pgvector` (long-term) or `redis` (short-term)
-- `ATOM_DOMAIN_ID`, `ATOM_AGENT_ID` — for namespacing stored memories
+## Long-term memory (across sessions)
 
-## Storing facts
+Long-term memory persists facts and experiences beyond a single conversation.
 
 ```python
-# Store a string fact — goes to long-term pgvector storage
-memory.remember("Customer 4821 has a credit limit of 75,000 and is KYC verified")
+from agentscope.memory import Mem0LongTermMemory
 
-# Store with explicit key for later retrieval
-memory.remember("last_transaction", "Transfer of 10,000 to ACC-9923 on 2025-01-15")
+long_term = Mem0LongTermMemory()   # requires: pip install mem0ai
 ```
 
-## Recalling context
+Pass to `ReActAgent`:
+```python
+agent = ReActAgent(
+    ...,
+    memory=InMemoryMemory(),
+    long_term_memory=long_term,
+    long_term_memory_mode="both",   # "agent_control" | "static_control" | "both"
+)
+```
+
+### Long-term memory API
 
 ```python
-# Semantic search — returns top_k most relevant memories
-memories = memory.recall("credit limit", top_k=3)
-context = "\n".join(m["content"] for m in memories)
+# Record facts from a conversation
+await long_term.record(msgs=[msg1, msg2])
 
-# Use recalled context in the LLM prompt
-sys_prompt = f"You are a helpful assistant.\n\nKnown context:\n{context}"
+# Retrieve relevant memories (semantic search)
+context = await long_term.retrieve(
+    msg=Msg(name="user", content="customer credit limit", role="user"),
+    limit=5,
+)
 ```
 
-## Short-term (Redis) vs long-term (pgvector)
+## Other memory backends
 
-- Short-term: use for within-session state, conversation history, temporary flags
-- Long-term: use for facts that should persist across sessions (customer data, decisions made)
-- Default `MemoryManager()` uses long-term pgvector — explicitly set `ATOM_MEMORY_BACKEND=redis` for short-term
+| Class | Backend | Use case |
+|---|---|---|
+| `InMemoryMemory` | Python list | Default — fast, single process |
+| `RedisMemory` | Redis | Multi-process / distributed |
+| `AsyncSQLAlchemyMemory` | SQL DB | Persistent across restarts |
+| `Mem0LongTermMemory` | mem0.ai | Semantic long-term recall |
+| `ReMePersonalLongTermMemory` | reme-ai | Personal preferences |
+| `ReMeTaskLongTermMemory` | reme-ai | Task experience |
 
-## Pattern: recall before respond
+## Correct pattern for memory-aware agents
 
 ```python
-def handle_message(self, msg: Msg) -> Msg:
-    # Always recall relevant context before calling the LLM
-    memories = self.memory.recall(msg.content, top_k=5)
-    context = "\n".join(m["content"] for m in memories)
-    enriched_prompt = f"{context}\n\nUser: {msg.content}"
-    return self.model(enriched_prompt)
+from agentscope.agent import ReActAgent
+from agentscope.model import AtomChatModel
+from agentscope.memory import InMemoryMemory
+from agentscope.formatter import GeminiChatFormatter
+
+memory = InMemoryMemory()
+
+# Pre-load context before agent replies
+await memory.add(
+    Msg(name="system", content="Customer CUST-001 has credit limit $50,000.", role="system"),
+    marks="customer_context",
+)
+
+agent = ReActAgent(
+    name="credit-agent",
+    sys_prompt="You are a credit analyst.",
+    model=AtomChatModel(model_name="gemini-2.5-flash"),
+    formatter=GeminiChatFormatter(),
+    memory=memory,
+)
 ```
 
-## Rules
+## What NOT to generate
 
-- NEVER import `psycopg2` or `redis` directly in agent code — use `MemoryManager`
-- NEVER hardcode pgvector connection strings or Redis URLs in agent.py
-- Memory is namespaced per agent automatically — no risk of cross-agent data leakage
+- NEVER: `from agentscope.hitl import MemoryManager` — `MemoryManager` does not exist
+- NEVER: `memory.remember(...)` or `memory.recall(...)` — methods are `add()` and `get_memory()`
+- NEVER: `import psycopg2` or `import redis` directly — use the memory backend classes
+- NEVER: pass `memory_manager=memory` to `AtomChatModel` unless it is a `MemoryManager` from the model module

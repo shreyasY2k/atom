@@ -1,50 +1,81 @@
 ---
 name: atom-audit
-description: Use for all generated agents. Defines audit and error handling rules that must always be followed — never suppress exceptions, always surface tool errors, never bypass GATE even for logging.
+description: Audit and error handling rules for all generated agents. Never suppress exceptions. Log actions with structured context. Retry rules for tool calls.
 ---
 
 # ATOM Audit Rules
 
 These rules apply to EVERY generated agent without exception.
+All LLM calls, tool calls, and A2A calls are automatically recorded in the GATE audit log.
 
 ## Never suppress exceptions
 
 ```python
-# CORRECT
-result = agent.use_tool("risk-score", {"customer_id": cid})
-if result.get("error"):
-    raise RuntimeError(f"risk-score tool failed: {result['error']}")
+# CORRECT — surface the error
+async def process_application(app_id: str) -> str:
+    """Process a loan application."""
+    result = await call_scoring_api(app_id)   # tool function
+    if result is None:
+        raise ValueError(f"Scoring API returned no result for {app_id}")
+    return result
 
 # WRONG — never do this
-try:
-    result = agent.use_tool("risk-score", {"customer_id": cid})
-except Exception:
-    pass  # ← NEVER suppress silently
+async def process_application(app_id: str) -> str:
+    try:
+        result = await call_scoring_api(app_id)
+    except Exception:
+        pass   # ← NEVER swallow exceptions silently
+    return ""
 ```
 
-## Always log decisions with context
+## Structured logging
 
 ```python
 import logging
 logger = logging.getLogger(__name__)
 
-# Log before any significant action
-logger.info("agent_action", extra={
-    "action": "approve_loan",
-    "customer_id": cid,
-    "amount": amount,
-    "model_confidence": confidence,
-})
+# Log BEFORE significant actions
+logger.info(
+    "agent_action: approving loan",
+    extra={
+        "action": "approve_loan",
+        "customer_id": cid,
+        "amount": amount,
+    }
+)
 ```
 
-Logs are collected by atom-runtime and forwarded to Kafka `atom.audit` topic automatically.
-Do NOT write to a file or external service directly.
+Logs flow to Kafka `atom.audit` via atom-runtime automatically.
+**Do NOT write audit records to files or external services directly.**
+
+## Tool function error handling
+
+Tool functions registered in Toolkit should raise on failure:
+
+```python
+async def fetch_credit_score(customer_id: str) -> str:
+    """Fetch credit score from bureau."""
+    async with httpx.AsyncClient() as client:
+        resp = await client.get(f"{BUREAU_URL}/score/{customer_id}")
+    if resp.status_code == 404:
+        raise ValueError(f"Customer {customer_id} not found in bureau")
+    if resp.status_code != 200:
+        raise RuntimeError(f"Bureau API error {resp.status_code}: {resp.text}")
+    return resp.text
+```
+
+The ReAct loop will surface the exception to the LLM so it can handle gracefully.
 
 ## Retry rules
 
-- Tool calls: max 1 retry on `5xx`, no retry on `4xx`
+- Tool calls: max 1 retry on `5xx`, **no retry on `4xx`** (bad request / not found)
 - A2A calls: no automatic retry — surface the error to the caller
-- LLM calls: `AtomChatModel` handles retries internally — do not wrap in a retry loop
+- LLM calls: `AtomChatModel` handles retries internally — **do not** wrap in a retry loop
+
+## HITL audit
+
+`request_human_decision()` creates an immutable HITL record automatically.
+Do not log it separately — it is already audited.
 
 ## What NOT to generate
 
@@ -52,5 +83,6 @@ Do NOT write to a file or external service directly.
 - NEVER: `except Exception: continue`
 - NEVER: a bare `try/except` with no re-raise or logging
 - NEVER: `logging.disable()` or suppressing log levels
-- NEVER: writing audit data to a file — it goes through GATE/Kafka automatically
-- NEVER: catch a `401` or `403` from GATE and silently fall back to a different path
+- NEVER: write audit data to a file or external service
+- NEVER: catch a `401` or `403` from GATE and silently fall back
+- NEVER: `asyncio.run()` inside an `async def` — use `await` instead

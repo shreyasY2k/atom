@@ -1,52 +1,88 @@
 ---
 name: atom-gate-calls
-description: Use when an agent needs to call tools or external services. All tool calls and LLM calls must go through GATE. Provides the correct use_tool() pattern and explains what never to do.
+description: How tools work in ATOM — register Python functions into Toolkit, the ReAct loop calls them automatically through GATE. Never call tools manually or make direct HTTP calls.
 ---
 
 # ATOM GATE Calls
 
 ## Core rule
 
-Every outbound call from an agent — tool invocations, LLM calls — goes through GATE.
-The agent never makes direct HTTP calls to external services, databases, or APIs.
+Every outbound call from an agent goes through GATE automatically.
+**You do not call tools manually.** Register them into the Toolkit; the ReAct loop invokes them.
 
-## Calling a tool
-
-```python
-# atom-sdk handles GATE routing automatically via use_tool()
-result = agent.use_tool("tool-name", {"param1": "value1", "param2": "value2"})
-```
-
-`use_tool()` internally constructs:
-```
-POST {ATOM_GATE_URL}/domain/{ATOM_DOMAIN_ID}/agent/{ATOM_AGENT_ID}/tools/invoke
-Authorization: Bearer {ATOM_AGENT_JWT}
-{ "tool": "tool-name", "input": { ... } }
-```
-
-The agent never constructs this URL manually. Always use `use_tool()`.
-
-## Handling tool responses
+## Registering a tool function
 
 ```python
-result = agent.use_tool("lookup-customer", {"customer_id": cid})
-if result.get("error"):
-    # handle gracefully — do NOT retry more than 2 times
-    raise RuntimeError(f"Tool error: {result['error']}")
-data = result["output"]
+from agentscope.tool import Toolkit
+
+async def risk_score(customer_id: str, loan_amount: float) -> str:
+    """Calculate risk score for a loan application.
+
+    Args:
+        customer_id: The customer's unique identifier.
+        loan_amount: Requested loan amount in USD.
+
+    Returns:
+        JSON string with risk_score (0-100) and recommendation.
+    """
+    # Your implementation — GATE handles auth and routing automatically
+    import httpx
+    # All requests go through ATOM_GATE_URL automatically via the SDK
+    ...
+
+toolkit = Toolkit()
+toolkit.register_tool_function(risk_score, group_name="basic")
 ```
 
-## Error handling rules
+**Rules for tool functions:**
+- Must have a proper docstring — the LLM reads it to decide when/how to call the tool
+- Argument types must be annotatable (str, int, float, list, dict)
+- Return a string or JSON-serialisable value
+- Can be `async def` or `def`
 
-- On `401` from GATE: the agent JWT may be expired — do NOT retry, raise immediately
-- On `403` from GATE: the tool is not in this agent's allowed list — do NOT retry, raise immediately
-- On `429` from GATE: rate limited — wait `retry_after` seconds, retry once only
-- On `5xx` from GATE: retry once after 2 seconds, then raise
-- NEVER silently swallow a GATE error
+## Tool groups
+
+All tools start in the `"basic"` group (always active). Use named groups for optional capabilities:
+
+```python
+toolkit.create_tool_group("crm", "CRM integration tools", active=False)
+toolkit.register_tool_function(lookup_customer, group_name="crm")
+toolkit.register_tool_function(update_customer, group_name="crm")
+
+# Activate group for all subsequent calls
+toolkit.update_tool_groups(["crm"], active=True)
+```
+
+## Dynamic tool activation (meta tool)
+
+With `enable_meta_tool=True`, the agent itself can activate/deactivate tool groups:
+
+```python
+agent = ReActAgent(
+    ...,
+    toolkit=toolkit,
+    enable_meta_tool=True,   # agent can call reset_equipped_tools()
+)
+```
+
+## Error handling for tools
+
+Tool functions should raise exceptions on failure — **never return an error silently**:
+
+```python
+async def lookup_customer(customer_id: str) -> str:
+    result = await call_crm_api(customer_id)
+    if not result:
+        raise ValueError(f"Customer {customer_id} not found")
+    return json.dumps(result)
+```
+
+The ReAct loop surfaces tool errors to the LLM so it can handle them gracefully.
 
 ## What NOT to generate
 
-- NEVER: `import requests` and call an external URL directly
-- NEVER: `import httpx` and call an external URL directly
-- NEVER: construct `ATOM_GATE_URL` + path manually in agent code
-- NEVER: pass the JWT as a query parameter or in the body
+- NEVER: `agent.use_tool("tool-name", {...})` — this method does not exist
+- NEVER: `import requests; requests.post(...)` — direct HTTP bypasses GATE
+- NEVER: `import httpx; httpx.post(url, ...)` — direct HTTP bypasses GATE
+- NEVER: construct `ATOM_GATE_URL` manually in agent code
+- NEVER: return `None` or empty string from a tool on failure — raise instead
