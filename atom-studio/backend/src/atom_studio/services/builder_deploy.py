@@ -435,6 +435,10 @@ The surrounding server (FastAPI, Kafka, /run, /healthz) is in a fixed server.py 
 - Imports: `agentscope.agent` (singular), `agentscope.model` (singular), `agentscope.formatter`, `agentscope.tool`
 - `formatter=OpenAIChatFormatter()` always — never any other formatter
 - `ReActAgent` requires `formatter=` positional arg — never omit
+- ALL tool functions MUST return ToolResponse — never str/dict/None
+  Use: `return ToolResponse(content=[TextBlock(type="text", text=result)])`
+  Import: `from agentscope.tool import Toolkit, ToolResponse; from agentscope.message import TextBlock`
+- For HITL: call `request_human_decision()` inside a tool function, wrap in ToolResponse
 - Tools registered via `toolkit.register_tool_function(func)` — no `agent.use_tool()`
 - No `agentscope.init()` in agent.py — server.py handles that
 - No markdown fences, pure Python only
