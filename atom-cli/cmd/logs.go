@@ -12,8 +12,16 @@ import (
 var logsCmd = &cobra.Command{
 	Use:   "logs <agent-id>",
 	Short: "Stream live logs from a deployed agent",
-	Args:  cobra.ExactArgs(1),
-	RunE:  runLogs,
+	Long: `Opens a WebSocket connection to atom-studio and streams live stdout/stderr
+from the running agent container. Press Ctrl-C to stop.
+
+The agent must be in 'deployed' status. Agent IDs are shown in atom-studio
+under Agents, or in the output of atom deploy.
+
+Example:
+  atom logs 3999cf06-d347-4d89-a94c-d605d8447766`,
+	Args: cobra.ExactArgs(1),
+	RunE: runLogs,
 }
 
 func runLogs(_ *cobra.Command, args []string) error {

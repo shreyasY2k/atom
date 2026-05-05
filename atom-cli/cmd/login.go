@@ -13,7 +13,13 @@ import (
 var loginCmd = &cobra.Command{
 	Use:   "login",
 	Short: "Authenticate with atom-studio",
-	RunE:  runLogin,
+	Long: `Prompts for atom-studio URL, email, and password, then saves the
+session token to ~/.atom/config.json.
+
+Default URL:  http://localhost:3001  (docker-compose)
+              http://api.atom.local  (Kubernetes / ingress)
+Credentials:  admin@atom.local / admin123  (development seed)`,
+	RunE: runLogin,
 }
 
 func runLogin(_ *cobra.Command, _ []string) error {

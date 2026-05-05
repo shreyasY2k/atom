@@ -13,20 +13,30 @@ import (
 var toolsCmd = &cobra.Command{
 	Use:   "tools",
 	Short: "Manage MCP tools",
-	Long:  "List and inspect MCP tools available via atom-llm.",
+	Long: `Browse and inspect MCP tools registered in atom-llm.
+
+MCP tools extend agent capabilities with external actions (HTTP calls, database
+queries, etc.). They are configured in atom-llm and available to agents via the
+Toolkit registered in tools.py.`,
 }
 
 var toolsListCmd = &cobra.Command{
 	Use:   "list",
 	Short: "List available MCP tools from atom-llm",
+	Long:  `Lists all MCP tools currently registered in atom-llm, with their names and descriptions.`,
 	RunE:  runToolsList,
 }
 
 var toolsShowCmd = &cobra.Command{
 	Use:   "show <name>",
 	Short: "Show input schema for a tool",
-	Args:  cobra.ExactArgs(1),
-	RunE:  runToolsShow,
+	Long: `Prints the JSON input schema for the named MCP tool — useful for understanding
+what arguments the tool accepts before wiring it up in tools.py.
+
+Example:
+  atom tools show web_search`,
+	Args: cobra.ExactArgs(1),
+	RunE: runToolsShow,
 }
 
 func init() {

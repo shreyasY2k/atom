@@ -14,20 +14,31 @@ import (
 var skillsCmd = &cobra.Command{
 	Use:   "skills",
 	Short: "Manage agent skills",
-	Long:  "List, show, and manage ATOM agent skills registered on the platform.",
+	Long: `Browse and inspect agent skills registered on the ATOM platform.
+
+Skills are knowledge bundles (SKILL.md + supporting files) that get injected
+into an agent's system prompt at runtime. They are registered in atom-studio
+and referenced by name in atom_agent.yaml or via atom build.`,
 }
 
 var skillsListCmd = &cobra.Command{
 	Use:   "list",
 	Short: "List all available skills",
-	RunE:  runSkillsList,
+	Long: `Lists all skills registered in atom-studio, showing name, whether it is
+a built-in platform skill, and its description.`,
+	RunE: runSkillsList,
 }
 
 var skillsShowCmd = &cobra.Command{
 	Use:   "show <name>",
 	Short: "Show SKILL.md content for a skill",
-	Args:  cobra.ExactArgs(1),
-	RunE:  runSkillsShow,
+	Long: `Prints the full SKILL.md content for the named skill — useful for
+reviewing what context a skill injects into the agent system prompt.
+
+Example:
+  atom skills show atom-gate-calls`,
+	Args: cobra.ExactArgs(1),
+	RunE: runSkillsShow,
 }
 
 func init() {
