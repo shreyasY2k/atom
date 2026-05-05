@@ -53,7 +53,7 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 COPY . .
 ENV PYTHONUNBUFFERED=1
-CMD ["python", "agent.py"]
+CMD ["uvicorn", "server:app", "--host", "0.0.0.0", "--port", "8080"]
 """
 
 
@@ -65,7 +65,7 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 COPY . .
 ENV PYTHONUNBUFFERED=1
-CMD ["python", "agent.py"]
+CMD ["uvicorn", "server:app", "--host", "0.0.0.0", "--port", "8080"]
 """
 
 
@@ -91,7 +91,7 @@ atom-build:
 
 
 def _build_requirements() -> str:
-    return "agentscope>=0.1.0\nfastapi>=0.110.0\nuvicorn>=0.29.0\n"
+    return "agentscope>=0.1.0\nfastapi>=0.110.0\nuvicorn[standard]>=0.29.0\nhttpx>=0.27.0\naiokafka>=0.11.0\npython-dotenv>=1.0.0\n"
 
 
 def _build_readme(state: BuilderState) -> str:
@@ -273,13 +273,14 @@ Import: {formatter_import}
 Use: formatter={formatter_instance}
 
 ## Fix rules
+- This is a FastAPI server (server.py), NOT a script — keep `app = FastAPI()`, `/healthz`, `/run`
 - Keep the same agent intent and structure
-- Fix imports: use `agentscope.agent` (singular), `agentscope.model`, `agentscope.formatter`, `agentscope.tool`, `agentscope.memory`, `agentscope.message`
-- `ReActAgent` REQUIRES `formatter=` as a positional argument — never omit it
-- Tools are registered with `toolkit.register_tool_function(func)` — no `agent.use_tool()`
-- All async def functions, `await` the agent reply
-- `agentscope.init()` MUST use `studio_url=os.environ.get("ATOM_STUDIO_URL", "http://atom-studio-api:3001")`
-  NEVER use `ATOM_GATE_URL` as studio_url — GATE does not have /trpc endpoints and returns 401
+- Fix imports: use `agentscope.agent`, `agentscope.model`, `agentscope.formatter`, `agentscope.tool`, `agentscope.memory`, `agentscope.message`
+- `agentscope.init()` must have NO ARGUMENTS — never pass studio_url (causes Socket.IO failure)
+- ALWAYS use `OpenAIChatFormatter()` — never `GeminiChatFormatter` or `AnthropicChatFormatter`
+- `ReActAgent` REQUIRES `formatter=OpenAIChatFormatter()` — never omit it
+- Tools registered via `toolkit.register_tool_function(func)` — no `agent.use_tool()`
+- CMD is `uvicorn server:app --host 0.0.0.0 --port 8080` — not `python agent.py`
 - Only output the fixed Python file content — no explanation, no markdown fences.
 """
 

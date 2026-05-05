@@ -1,126 +1,144 @@
 ---
 name: atom-react-agent
-description: Correct ReActAgent construction with required formatter, AtomChatModel, Toolkit, and memory. Use this for any generated agent.py. The formatter argument is required and must match the model provider.
+description: Generate a production FastAPI server (server.py) wrapping a ReActAgent with AtomChatModel. Always use OpenAIChatFormatter. agentscope.init() takes no arguments. The entrypoint is uvicorn not python.
 ---
 
-# ATOM ReAct Agent
+# ATOM ReAct Agent — Production Server Pattern
+
+ATOM agents are **FastAPI HTTP servers**, not scripts. The generated file must be a
+runnable server with `/healthz` and `/POST /run` endpoints, not a CLI script.
 
 ## Required imports
 
 ```python
+import agentscope
 from agentscope.agent import ReActAgent
+from agentscope.formatter import OpenAIChatFormatter   # always use this — AtomChatModel speaks OpenAI format
 from agentscope.model import AtomChatModel
 from agentscope.tool import Toolkit
-from agentscope.memory import InMemoryMemory
 from agentscope.message import Msg
-# Pick the formatter that matches the model provider:
-from agentscope.formatter import (
-    GeminiChatFormatter,       # for gemini-* models
-    OpenAIChatFormatter,       # for gpt-* models
-    AnthropicChatFormatter,    # for claude-* models
-)
+from fastapi import FastAPI
+from pydantic import BaseModel
 ```
 
-## `ReActAgent.__init__` signature (COMPLETE)
+## `agentscope.init()` — NO ARGUMENTS
+
+```python
+agentscope.init()   # never pass studio_url — atom-studio connects differently
+```
+
+Passing `studio_url=` triggers a Socket.IO connection to AgentScope Studio.
+Atom-studio does not have Socket.IO. Always call `init()` with no arguments.
+
+## `ReActAgent.__init__` signature
 
 ```python
 ReActAgent(
-    name: str,                         # REQUIRED
-    sys_prompt: str,                   # REQUIRED
-    model: ChatModelBase,              # REQUIRED — use AtomChatModel
-    formatter: FormatterBase,          # REQUIRED — must match model provider
-    toolkit: Toolkit | None = None,    # optional but always provide
-    memory: MemoryBase | None = None,  # optional — use InMemoryMemory
-    long_term_memory: LongTermMemoryBase | None = None,
-    long_term_memory_mode: str = "both",
-    enable_meta_tool: bool = False,
-    parallel_tool_calls: bool = False,
+    name: str,
+    sys_prompt: str,
+    model: AtomChatModel,
+    formatter: OpenAIChatFormatter,   # REQUIRED — always OpenAIChatFormatter
+    toolkit: Toolkit | None = None,
     max_iters: int = 10,
 )
 ```
 
-**`formatter` is REQUIRED and positional — omitting it raises `TypeError`.**
+## Always use `OpenAIChatFormatter`
 
-## Choosing the right formatter
+`AtomChatModel` routes all calls through LiteLLM which normalises to OpenAI format.
+Use `OpenAIChatFormatter()` for ALL models — Gemini, Claude, GPT, everything.
 
-| Model name starts with | Formatter class |
-|---|---|
-| `gemini-` | `GeminiChatFormatter()` |
-| `gpt-` | `OpenAIChatFormatter()` |
-| `claude-` | `AnthropicChatFormatter()` |
-
-## Minimal working agent
+## Minimal production server.py
 
 ```python
-import os
 import asyncio
-from agentscope import init
+import logging
+import os
+import time
+import uuid
+
+import agentscope
+import httpx
 from agentscope.agent import ReActAgent
+from agentscope.formatter import OpenAIChatFormatter
+from agentscope.message import Msg
 from agentscope.model import AtomChatModel
 from agentscope.tool import Toolkit
-from agentscope.memory import InMemoryMemory
-from agentscope.message import Msg
-from agentscope.formatter import GeminiChatFormatter  # change per model
+from fastapi import FastAPI
+from pydantic import BaseModel
 
-def main():
-    # ATOM_STUDIO_URL points to atom-studio-api which handles /trpc/registerRun.
-    # Do NOT use ATOM_GATE_URL here — GATE does not have the /trpc endpoints.
-    init(studio_url=os.environ.get("ATOM_STUDIO_URL", "http://atom-studio-api:3001"))
+log = logging.getLogger(__name__)
+logging.basicConfig(level=logging.INFO)
 
-    model_name = os.environ.get("ATOM_MODEL", "gemini-2.5-flash")
-    toolkit = Toolkit()
-    # register tools here: toolkit.register_tool_function(my_func)
+AGENT_ID   = os.environ.get("ATOM_AGENT_ID", "")
+STUDIO_URL = os.environ.get("ATOM_STUDIO_URL", "http://atom-studio-api:3001")
 
-    agent = ReActAgent(
-        name=os.environ.get("ATOM_AGENT_NAME", "agent"),
-        sys_prompt="You are a helpful assistant.",
-        model=AtomChatModel(model_name=model_name),
-        formatter=GeminiChatFormatter(),   # REQUIRED
-        toolkit=toolkit,
-        memory=InMemoryMemory(),
-        max_iters=10,
-    )
-    return agent
+app = FastAPI()
+agentscope.init()   # no studio_url
 
-if __name__ == "__main__":
-    agent = main()
-    response = asyncio.run(agent.reply(Msg(name="user", content="Hello!", role="user")))
-    print(response.get_text_content())
-```
+_toolkit = Toolkit()
+# toolkit.register_tool_function(my_tool_func)
 
-## Registering tools
-
-Tools are Python functions registered into the Toolkit **before** building the agent.
-The ReAct loop calls them automatically — you never call them manually.
-
-```python
-async def lookup_customer(customer_id: str) -> str:
-    """Look up customer record. Args: customer_id (str). Returns JSON string."""
-    # implementation here — all HTTP goes through GATE automatically
-    ...
-
-toolkit = Toolkit()
-toolkit.register_tool_function(
-    lookup_customer,
-    group_name="basic",   # "basic" is always active
+_agent = ReActAgent(
+    name=os.environ.get("ATOM_AGENT_NAME", "agent"),
+    sys_prompt="You are a helpful assistant.",
+    model=AtomChatModel(model_name=os.environ.get("ATOM_MODEL", "gemini-2.5-flash")),
+    formatter=OpenAIChatFormatter(),
+    toolkit=_toolkit,
+    max_iters=10,
 )
+
+
+class RunRequest(BaseModel):
+    message: str
+
+class RunResponse(BaseModel):
+    reply: str
+    run_id: str
+
+
+@app.get("/healthz")
+async def healthz():
+    return {"status": "ok"}
+
+
+@app.post("/run", response_model=RunResponse)
+async def run(req: RunRequest):
+    run_id = str(uuid.uuid4())
+    t0 = time.monotonic()
+
+    response = await _agent(Msg(name="user", content=req.message, role="user"))
+    blocks = response.get_content_blocks("text")
+    reply = " ".join(b.get("text", "") for b in blocks) if blocks else str(response.content)
+    latency_ms = int((time.monotonic() - t0) * 1000)
+
+    # Record run to atom-studio for Conversations view
+    try:
+        async with httpx.AsyncClient(timeout=5) as client:
+            await client.post(
+                f"{STUDIO_URL}/api/agents/{AGENT_ID}/runs/",
+                json={"run_id": run_id, "user_msg": req.message, "reply": reply,
+                      "latency_ms": latency_ms, "steps": []},
+            )
+    except Exception as exc:
+        log.warning("record_run failed: %s", exc)
+
+    return RunResponse(reply=reply, run_id=run_id)
 ```
 
-## Calling the agent
+## Dockerfile CMD
 
-```python
-from agentscope.message import Msg
-
-msg = Msg(name="user", content="Check customer C-123", role="user")
-response = await agent.reply(msg)
-text = response.get_text_content()
+```dockerfile
+CMD ["uvicorn", "server:app", "--host", "0.0.0.0", "--port", "8080"]
 ```
+
+NOT `CMD ["python", "agent.py"]` — the entrypoint is `uvicorn`.
 
 ## What NOT to generate
 
+- NEVER: `agentscope.init(studio_url=...)` — causes Socket.IO connection failure
+- NEVER: `CMD ["python", "agent.py"]` — agents are uvicorn servers, not scripts
+- NEVER: `GeminiChatFormatter`, `AnthropicChatFormatter` — always `OpenAIChatFormatter`
 - NEVER: `from agentscope.agents import ...` — module is `agentscope.agent` (singular)
 - NEVER: `from agentscope.models import ...` — module is `agentscope.model` (singular)
-- NEVER: `agent.use_tool(...)` — tools are called by the ReAct loop automatically
 - NEVER: omit `formatter=` — `ReActAgent` raises `TypeError` without it
-- NEVER: `AtomChatModel(api_key=..., base_url=...)` — credentials come from env vars only
-- NEVER: `init(studio_url=os.environ.get("ATOM_GATE_URL", ...))` — GATE does not have `/trpc/registerRun`. Always use `ATOM_STUDIO_URL` for studio_url.
