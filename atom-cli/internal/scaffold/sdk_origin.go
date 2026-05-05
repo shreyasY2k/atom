@@ -1,19 +1,30 @@
 package scaffold
 
 import (
+	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
 )
 
-// ResolveSDKImage reads the gl_origin remote from the atom-sdk subdirectory of atomRoot
-// and converts it to a container registry URL. Returns empty string (not an error) if
-// atom-sdk/gl_origin is not configured — the caller should fall back gracefully.
+// ResolveSDKImage returns the container registry path for the atom-sdk base image.
+// It tries two sources in order:
+//  1. atom-sdk/.registry file (used when atom-sdk is a directory inside the monorepo)
+//  2. git remote gl_origin of the atom-sdk subdirectory (used when atom-sdk is a separate repo)
+//
+// Returns empty string (no error) if neither source is configured.
 func ResolveSDKImage(atomRoot string) (string, error) {
-	out, err := exec.Command("git", "-C",
-		filepath.Join(atomRoot, "atom-sdk"),
-		"remote", "get-url", "gl_origin",
-	).Output()
+	sdkDir := filepath.Join(atomRoot, "atom-sdk")
+
+	// 1. Check for .registry file (monorepo layout)
+	if data, err := os.ReadFile(filepath.Join(sdkDir, ".registry")); err == nil {
+		if v := strings.TrimSpace(string(data)); v != "" {
+			return v, nil
+		}
+	}
+
+	// 2. Try gl_origin remote (separate-repo layout)
+	out, err := exec.Command("git", "-C", sdkDir, "remote", "get-url", "gl_origin").Output()
 	if err != nil {
 		return "", nil
 	}
