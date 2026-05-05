@@ -101,8 +101,10 @@ python agent.py
 
 ### Step 5 — Deploy and chat via GATE
 
+#### Local Docker build (default)
 ```bash
-../bin/atom deploy          # run from inside the agent directory (bin/ is in the repo root)
+# From inside the agent directory:
+../bin/atom deploy          # docker build → submit for HITL approval
 
 # Studio → HITL queue → Approve
 
@@ -114,6 +116,42 @@ curl -X POST http://localhost:8080/domain/<domain-id>/agent/<agent-id>/run \
 
 ../bin/atom logs <agent-id> # stream live logs
 ```
+
+#### GitLab CI build (private repos, recommended for teams)
+
+The generated `atom_agent.yaml` includes a `ci` block and `sdk_image` field.
+Set `ci.provider: gitlab` and push your agent to a private GitLab repo:
+
+```bash
+# Push agent repo to GitLab and set gl_origin remote
+git remote add gl_origin https://gitlab.com/<org>/<agent-repo>.git
+git push gl_origin main
+
+# atom deploy reads atom_agent.yaml automatically
+../bin/atom deploy --message "initial release"
+# First run: prompts for GitLab PAT (scope: api) → saved to ~/.atom/credentials
+
+# Upgrade the atom-sdk base image version
+../bin/atom sdk upgrade v0.2.0   # updates sdk_image in atom_agent.yaml
+../bin/atom sdk upgrade          # reset to :latest
+```
+
+**Runtime registry access** — so atom-runtime can pull private GitLab images:
+
+```bash
+# .env — add your GitLab PAT (scope: read_registry)
+GITLAB_REGISTRY_TOKEN=glpat-...
+GITLAB_REGISTRY_USER=oauth2
+
+# docker-compose dev: restart atom-runtime to pick up the new env vars
+make dev-rebuild-runtime
+
+# Kubernetes: create the imagePullSecret once
+make k8s-registry-secret   # creates gitlab-registry-secret in atom-agents namespace
+                             # then set IMAGE_PULL_SECRET_NAME=gitlab-registry-secret in .env
+```
+
+See [docs/CI_BUILD.md](docs/CI_BUILD.md) for the full GitLab CI guide, cross-group registry access, and SDK versioning.
 
 ---
 
@@ -158,12 +196,17 @@ Creates: **Financial Assistant**, **Document Summarizer**, **Risk Checker**, **C
 
 ```bash
 bin/atom login              # authenticate (prompts for Studio URL, email, password)
-bin/atom create             # scaffold a new agent project (interactive)
+bin/atom create             # scaffold a new agent project (interactive wizard)
+                            # → creates atom_agent.yaml, Dockerfile, .gitlab-ci.yml, tools.py …
 bin/atom deploy             # build image + submit for HITL approval
-  --agent-id <uuid>         # (reads .env if not set)
+  --ci      gitlab          # override build provider (reads atom_agent.yaml by default)
+  --agent-id <uuid>         # (reads atom_agent.yaml / .env if not set)
   --image    <name:tag>     # override image name
   --message  "text"         # changelog note
   --skip-build              # skip docker build, use existing image
+  --token   <pat>           # GitLab PAT (reads ~/.atom/credentials or GITLAB_TOKEN env)
+bin/atom sdk upgrade        # update sdk_image in atom_agent.yaml to :latest
+bin/atom sdk upgrade v0.2.0 # pin to a specific atom-sdk release tag
 bin/atom logs <agent-id>    # stream live logs from a deployed agent
 ```
 
@@ -189,6 +232,7 @@ pip install "git+https://github.com/shreyasY2k/atom.git#subdirectory=atom-sdk/at
 | Doc | What's in it |
 |-----|-------------|
 | [docs/SETUP.md](docs/SETUP.md) | Full setup guide for docker-compose and k8s, verification steps, troubleshooting |
+| [docs/CI_BUILD.md](docs/CI_BUILD.md) | GitLab CI image build guide — private repos, SDK versioning, cross-group registry, k8s imagePullSecrets |
 | [docs/DEVELOPER_GUIDE.md](docs/DEVELOPER_GUIDE.md) | Building agents, SDK patterns, tools, OPA policies |
 | [docs/RUNBOOK.md](docs/RUNBOOK.md) | JWT rotation, HMAC rotation, adding LLM providers, scaling, restoring data |
 | [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | Mermaid diagrams for every flow (request, deployment, HITL, audit chain) |

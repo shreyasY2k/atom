@@ -76,6 +76,16 @@ spec:
                   key: POSTGRES_PASSWORD
             - name: DATABASE_URL
               value: "postgresql://$(POSTGRES_USER):$(POSTGRES_PASSWORD)@$(POSTGRES_HOST):$(POSTGRES_PORT)/$(POSTGRES_DB)?sslmode=$(POSTGRES_SSL)"
+            - name: GITLAB_REGISTRY_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: atom-credentials
+                  key: GITLAB_REGISTRY_TOKEN
+                  optional: true
+            - name: GITLAB_REGISTRY_USER
+              value: oauth2
+            - name: IMAGE_PULL_SECRET_NAME
+              value: gitlab-registry-secret
           resources:
             requests:
               cpu: 50m

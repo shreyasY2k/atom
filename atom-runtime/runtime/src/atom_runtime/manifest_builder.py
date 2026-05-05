@@ -61,6 +61,7 @@ def build_deployment(
     cpu_limit: str = "500m",
     mem_request: str = "256Mi",
     mem_limit: str = "512Mi",
+    image_pull_secret: str | None = None,
 ) -> k8s.V1Deployment:
     name = resource_name(agent_id)
     pod_labels = {
@@ -89,6 +90,11 @@ def build_deployment(
                     security_context=k8s.V1PodSecurityContext(
                         run_as_non_root=True,
                         run_as_user=1000,
+                    ),
+                    image_pull_secrets=(
+                        [k8s.V1LocalObjectReference(name=image_pull_secret)]
+                        if image_pull_secret
+                        else None
                     ),
                     containers=[
                         k8s.V1Container(

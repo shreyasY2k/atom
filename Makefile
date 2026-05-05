@@ -11,7 +11,7 @@ SHELL := /bin/bash
         test test-go test-python test-e2e test-load \
         generate-keys go-sync go-tidy clean \
         registry-up ghcr-push ghcr-login deploy-from-ghcr \
-        k8s-secrets k8s-deploy monitoring-up monitoring-down \
+        k8s-secrets k8s-registry-secret k8s-deploy monitoring-up monitoring-down \
         ingress-up ingress-hosts
 
 # ── Cluster + registry ───────────────────────────────────────────────────────
@@ -410,6 +410,18 @@ deploy-from-ghcr: ## Apply manifests; images pulled from GHCR automatically
 	@echo "  Run: make seed-k8s   to create admin user."
 
 # ── Kubernetes secrets (idempotent) ──────────────────────────────────────────
+k8s-registry-secret: ## Create gitlab-registry-secret imagePullSecret in atom-agents namespace
+	@echo "→ Creating GitLab registry imagePullSecret in atom-agents namespace..."
+	@kubectl apply -f infra/manifests/namespaces.yaml
+	@kubectl create secret docker-registry gitlab-registry-secret \
+	  --namespace atom-agents \
+	  --docker-server=registry.gitlab.com \
+	  --docker-username=$(GITLAB_REGISTRY_USER) \
+	  --docker-password=$(GITLAB_REGISTRY_TOKEN) \
+	  --dry-run=client -o yaml | kubectl apply -f -
+	@echo "✓ gitlab-registry-secret created in atom-agents namespace."
+	@echo "  Set IMAGE_PULL_SECRET_NAME=gitlab-registry-secret in your .env (k8s backend only)."
+
 k8s-secrets: ## Create atom-credentials (passwords only) + atom-jwt-keys Secrets
 	@echo "→ Applying namespaces and Secrets..."
 	@kubectl apply -f infra/manifests/namespaces.yaml

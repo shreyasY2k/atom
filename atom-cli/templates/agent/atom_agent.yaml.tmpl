@@ -3,11 +3,13 @@
 agent_id: ""
 domain_id: ""
 image: {{ .ProjectName }}
-registry: ""  # e.g. registry.gitlab.com/yourorg/{{ .ProjectName }}
+# e.g. registry.gitlab.com/yourorg/{{ .ProjectName }}
+registry: ""
 
 ci:
   provider: {{ if .SDKImage }}gitlab{{ else }}local{{ end }}
-  origin: gl_origin      # git remote pointing to this repo on GitLab
+  # git remote name pointing to this agent repo on GitLab
+  origin: gl_origin
   branch: main
   registry_secret: GL_REGISTRY_TOKEN
 

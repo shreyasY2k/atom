@@ -200,6 +200,7 @@ async def run_deployment(req: DeployRequest) -> None:
             cpu_limit=cpu_lim,
             mem_request=mem_req,
             mem_limit=mem_lim,
+            image_pull_secret=settings.image_pull_secret_name or None,
         )
         name = resource_name(req.agent_id)
         try:

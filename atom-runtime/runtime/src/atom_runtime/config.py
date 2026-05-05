@@ -35,6 +35,18 @@ class Settings(BaseSettings):
     docker_network: str = "atom-dev_default"
     docker_agent_gate_url: str = "http://gate:8080"
 
+    # GitLab Container Registry credentials for pulling private agent images.
+    # Set GITLAB_REGISTRY_TOKEN to the PAT (scope: read_registry).
+    # Used by docker backend to pre-authenticate before pulling; used by k8s backend
+    # to create an imagePullSecret reference in agent Deployments.
+    gitlab_registry_url: str = "registry.gitlab.com"
+    gitlab_registry_user: str = "oauth2"
+    gitlab_registry_token: str = ""  # PAT with read_registry scope
+
+    # k8s: name of the docker-registry Secret in atom-agents namespace that agents
+    # use as imagePullSecrets. Created via `make k8s-registry-secret`.
+    image_pull_secret_name: str = ""  # e.g. "gitlab-registry-secret"
+
 
 @lru_cache
 def get_settings() -> Settings:

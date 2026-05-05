@@ -327,6 +327,10 @@ services:
       DOCKER_NETWORK: atom-dev_default
       DOCKER_AGENT_GATE_URL: http://gate:8080
       KAFKA_BROKERS: redpanda:9092
+      # GitLab registry credentials — allows atom-runtime to pull private agent images.
+      # Set GITLAB_REGISTRY_TOKEN in .env to your PAT (scope: read_registry).
+      GITLAB_REGISTRY_TOKEN: ${GITLAB_REGISTRY_TOKEN:-}
+      GITLAB_REGISTRY_USER: ${GITLAB_REGISTRY_USER:-oauth2}
       OTEL_EXPORTER_OTLP_ENDPOINT: http://alloy:4318
       OTEL_SERVICE_NAME: atom-runtime
     ports:

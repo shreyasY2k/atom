@@ -374,6 +374,7 @@ func readAgentConfig() (*agentConfig, error) {
 }
 
 // parseYAMLField extracts a scalar value from a "key: value" YAML line.
+// Strips inline comments (# …) from unquoted values.
 // Returns current if the line does not match key.
 func parseYAMLField(line, key, current string) string {
 	prefix := key + ":"
@@ -382,6 +383,12 @@ func parseYAMLField(line, key, current string) string {
 	}
 	val := strings.TrimSpace(strings.TrimPrefix(line, prefix))
 	val = strings.Trim(val, `"'`)
+	// Strip inline YAML comment: first " #" or "\t#" not inside a quoted string.
+	if idx := strings.Index(val, " #"); idx != -1 {
+		val = strings.TrimSpace(val[:idx])
+	} else if idx := strings.Index(val, "\t#"); idx != -1 {
+		val = strings.TrimSpace(val[:idx])
+	}
 	if val == "" {
 		return current
 	}
