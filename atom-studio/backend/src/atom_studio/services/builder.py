@@ -73,6 +73,8 @@ Use:     formatter={formatter_instance}
 6. For A2A targets, use `A2AAgent` + `WellKnownAgentCardResolver` as shown in atom-a2a skill.
 7. Include HITL (`request_human_decision`) where the intent requires human approval or escalation.
 8. Include `InMemoryMemory` if atom-memory skill is selected.
-9. Use `agentscope.init(studio_url=os.environ["ATOM_GATE_URL"])` at startup.
+9. Call `agentscope.init(studio_url=os.environ.get("ATOM_STUDIO_URL", "http://atom-studio-api:3001"))` at startup.
+   ATOM_STUDIO_URL points to atom-studio-api which handles /trpc/registerRun.
+   NEVER use ATOM_GATE_URL as studio_url — GATE does not have /trpc endpoints.
 10. Output ONLY the Python file content — no explanation, no markdown fences.
 """

@@ -278,6 +278,8 @@ Use: formatter={formatter_instance}
 - `ReActAgent` REQUIRES `formatter=` as a positional argument — never omit it
 - Tools are registered with `toolkit.register_tool_function(func)` — no `agent.use_tool()`
 - All async def functions, `await` the agent reply
+- `agentscope.init()` MUST use `studio_url=os.environ.get("ATOM_STUDIO_URL", "http://atom-studio-api:3001")`
+  NEVER use `ATOM_GATE_URL` as studio_url — GATE does not have /trpc endpoints and returns 401
 - Only output the fixed Python file content — no explanation, no markdown fences.
 """
 

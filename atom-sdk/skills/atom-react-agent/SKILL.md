@@ -63,7 +63,9 @@ from agentscope.message import Msg
 from agentscope.formatter import GeminiChatFormatter  # change per model
 
 def main():
-    init(studio_url=os.environ.get("ATOM_GATE_URL", "http://localhost:8080"))
+    # ATOM_STUDIO_URL points to atom-studio-api which handles /trpc/registerRun.
+    # Do NOT use ATOM_GATE_URL here — GATE does not have the /trpc endpoints.
+    init(studio_url=os.environ.get("ATOM_STUDIO_URL", "http://atom-studio-api:3001"))
 
     model_name = os.environ.get("ATOM_MODEL", "gemini-2.5-flash")
     toolkit = Toolkit()
@@ -121,3 +123,4 @@ text = response.get_text_content()
 - NEVER: `agent.use_tool(...)` — tools are called by the ReAct loop automatically
 - NEVER: omit `formatter=` — `ReActAgent` raises `TypeError` without it
 - NEVER: `AtomChatModel(api_key=..., base_url=...)` — credentials come from env vars only
+- NEVER: `init(studio_url=os.environ.get("ATOM_GATE_URL", ...))` — GATE does not have `/trpc/registerRun`. Always use `ATOM_STUDIO_URL` for studio_url.
