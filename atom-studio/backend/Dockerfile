@@ -4,6 +4,8 @@ FROM python:3.11-slim
 
 COPY --from=migrate-bin /usr/local/bin/migrate /usr/local/bin/migrate
 
+RUN apt-get update && apt-get install -y --no-install-recommends curl && rm -rf /var/lib/apt/lists/*
+
 WORKDIR /app
 
 # Copy source first so editable install creates correct .pth pointer

@@ -269,7 +269,7 @@ services:
         condition: service_completed_successfully
     env_file: .env
     environment:
-      DATABASE_URL: postgresql://atom:${POSTGRES_PASSWORD:-changeme}@postgres:5432/atom
+      DATABASE_URL: postgresql://atom:${POSTGRES_PASSWORD:-changeme}@postgres:5432/atom?sslmode=disable
       REDIS_URL: redis://:${REDIS_PASSWORD:-changeme}@redis:6379
       ATOM_LLM_URL: http://atom-llm:4000
       ATOM_RUNTIME_URL: http://atom-runtime:8090
