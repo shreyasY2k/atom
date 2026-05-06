@@ -31,7 +31,7 @@ type TemplateData struct {
 	UseMemory bool
 	UseHITL   bool
 	// SDKImage is the registry path (without tag) for the atom-sdk base image.
-	// Empty means gl_origin was not configured; templates fall back to python:3.11-slim.
+	// Empty means no .registry file was found; templates fall back to python:3.11-slim.
 	SDKImage string
 }
 
@@ -57,7 +57,6 @@ func Generate(a *wizard.Answers) error {
 		"README.md":                        "agent/README.md.tmpl",
 		"Dockerfile":                       "agent/Dockerfile.tmpl",
 		".github/workflows/atom-build.yml": "agent/github-workflow-build.yml.tmpl",
-		".gitlab-ci.yml":                   "agent/gitlab-ci.yml.tmpl",
 		"atom_agent.yaml":                  "agent/atom_agent.yaml.tmpl",
 	}
 

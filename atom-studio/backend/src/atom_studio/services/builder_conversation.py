@@ -24,12 +24,8 @@ class BuilderState:
     a2a_targets: list[str] = field(default_factory=list)
     hitl_config: dict | None = None
     domain_id: str | None = None
-    ci_target: str = "gitlab"
+    ci_target: str = "local"
     agent_id: str | None = None
-    gitlab_project_id: int | None = None
-    gitlab_repo_url: str | None = None
-    pipeline_id: int | None = None
-    pipeline_url: str | None = None
     chat_url: str | None = None
 
 

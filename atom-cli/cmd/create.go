@@ -18,16 +18,15 @@ var createCmd = &cobra.Command{
 No flags required — everything is prompted.
 
 Generated files:
-  atom_agent.yaml   — CI provider, sdk_image, agent_id/domain_id (fill after creating in Studio)
+  atom_agent.yaml   — sdk_image, agent_id/domain_id (fill after creating in Studio)
   Dockerfile        — ARG SDK_IMAGE / FROM; no credentials baked in
-  .gitlab-ci.yml    — ATOM_BUILD pipeline rule + SDK_IMAGE build-arg
   server.py         — FastAPI app with /healthz and /run endpoints
   tools.py          — Toolkit with registered tool functions (extend this)
   agent.py          — Standalone CLI entrypoint
   requirements.txt  — agentscope fork + fastapi + uvicorn
 
 After creation, fill in atom_agent.yaml with agent_id and domain_id from Studio,
-add gl_origin remote, then run: atom deploy`,
+then run: atom deploy`,
 	RunE: runCreate,
 }
 
@@ -37,7 +36,7 @@ func runCreate(_ *cobra.Command, _ []string) error {
 		return err
 	}
 
-	// Resolve atom-sdk base image from gl_origin in the ATOM monorepo root.
+	// Resolve atom-sdk base image from .registry file in the ATOM monorepo root.
 	// Walk up from cwd to find the root (contains atom-sdk/ subdirectory).
 	answers.SDKImage = resolveSDKImage()
 
@@ -84,14 +83,13 @@ func runCreate(_ *cobra.Command, _ []string) error {
 }
 
 // resolveSDKImage walks up from cwd looking for the ATOM monorepo root
-// (identified by the presence of an atom-sdk/ subdirectory) and reads
-// gl_origin to derive the registry URL. Returns empty string on failure.
+// (identified by the presence of an atom-sdk/ subdirectory) and reads the
+// .registry file to determine the base image. Returns empty string on failure.
 func resolveSDKImage() string {
 	cwd, err := os.Getwd()
 	if err != nil {
 		return ""
 	}
-	// Walk up the directory tree looking for a directory that contains atom-sdk/
 	dir := cwd
 	for {
 		sdkDir := filepath.Join(dir, "atom-sdk")

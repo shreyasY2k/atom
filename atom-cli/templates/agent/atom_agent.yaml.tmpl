@@ -3,15 +3,6 @@
 agent_id: ""
 domain_id: ""
 image: {{ .ProjectName }}
-# e.g. registry.gitlab.com/yourorg/{{ .ProjectName }}
-registry: ""
 
-ci:
-  provider: {{ if .SDKImage }}gitlab{{ else }}local{{ end }}
-  # git remote name pointing to this agent repo on GitLab
-  origin: gl_origin
-  branch: main
-  registry_secret: GL_REGISTRY_TOKEN
-
-# Pinned atom-sdk base image — run `atom sdk upgrade <tag>` to change version
+# Optional: base image for your Dockerfile build (passed as SDK_IMAGE build-arg)
 sdk_image: "{{ if .SDKImage }}{{ .SDKImage }}:latest{{ end }}"

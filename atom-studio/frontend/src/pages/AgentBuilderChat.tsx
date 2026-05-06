@@ -3,8 +3,6 @@ import { useQuery } from '@tanstack/react-query'
 import Box from '@mui/material/Box'
 import Typography from '@mui/material/Typography'
 import Button from '@mui/material/Button'
-import ToggleButton from '@mui/material/ToggleButton'
-import ToggleButtonGroup from '@mui/material/ToggleButtonGroup'
 import Select from '@mui/material/Select'
 import MenuItem from '@mui/material/MenuItem'
 import Paper from '@mui/material/Paper'
@@ -21,7 +19,6 @@ import { useBuilderDeploy } from '@/hooks/useBuilderDeploy'
 interface Domain { id: string; name: string }
 
 export function AgentBuilderChat() {
-  const [ciTarget, setCiTarget] = useState<'gitlab' | 'local'>('local')
   const [selectedDomainId, setSelectedDomainId] = useState<string>('')
 
   const { data: domains = [] } = useQuery<Domain[]>({
@@ -34,7 +31,7 @@ export function AgentBuilderChat() {
   }, [domains, selectedDomainId])
 
   const { messages, spec, stage, sessionId, loading, sendMessage } =
-    useBuilderChat(selectedDomainId, ciTarget)
+    useBuilderChat(selectedDomainId)
 
   const { steps, deploying, chatUrl, agentPy, error, deploy } = useBuilderDeploy()
 
@@ -66,15 +63,6 @@ export function AgentBuilderChat() {
             </Select>
           )}
 
-          <ToggleButtonGroup
-            size="small"
-            value={ciTarget}
-            exclusive
-            onChange={(_, v) => v && setCiTarget(v)}
-          >
-            <ToggleButton value="local" sx={{ fontSize: 12, px: 1.5, py: 0.5 }}>Local</ToggleButton>
-            <ToggleButton value="gitlab" sx={{ fontSize: 12, px: 1.5, py: 0.5 }}>GitLab CI</ToggleButton>
-          </ToggleButtonGroup>
         </Box>
       </Box>
 
@@ -154,7 +142,7 @@ export function AgentBuilderChat() {
             </Typography>
           </Box>
           <Box sx={{ flex: 1, overflowY: 'auto', p: 2 }}>
-            <AgentSpecPanel spec={spec} stage={stage} ciTarget={ciTarget} />
+            <AgentSpecPanel spec={spec} stage={stage} />
             {chatUrl && (
               <Box sx={{ mt: 2 }}>
                 <AgentReadyCard agentName={spec.agentName} chatUrl={chatUrl} />

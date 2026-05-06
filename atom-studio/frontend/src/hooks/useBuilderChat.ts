@@ -34,7 +34,7 @@ const EMPTY_SPEC: AgentSpec = {
   intent: null,
 }
 
-export function useBuilderChat(domainId: string, ciTarget: 'gitlab' | 'local') {
+export function useBuilderChat(domainId: string) {
   const [messages, setMessages] = useState<BuilderMessage[]>([])
   const [spec, setSpec] = useState<AgentSpec>(EMPTY_SPEC)
   const [stage, setStage] = useState<string>('greeting')
@@ -80,7 +80,7 @@ export function useBuilderChat(domainId: string, ciTarget: 'gitlab' | 'local') {
           session_id: sessionId,
           message: text,
           domain_id: domainId,
-          ci_target: ciTarget,
+          ci_target: 'local',
         }),
         signal: abortRef.current.signal,
       })
@@ -133,7 +133,7 @@ export function useBuilderChat(domainId: string, ciTarget: 'gitlab' | 'local') {
     } finally {
       setLoading(false)
     }
-  }, [loading, sessionId, domainId, ciTarget, accessToken, applyUpdates])
+  }, [loading, sessionId, domainId, accessToken, applyUpdates])
 
   const restoreSession = useCallback(async (sid: string) => {
     try {

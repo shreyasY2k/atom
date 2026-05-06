@@ -49,7 +49,6 @@ type BuilderState = {
   tools: string[]
   a2aAgents: string[]
   domainId: string
-  ciTarget: 'gitlab' | 'local'
 }
 
 const ALWAYS_ON_SKILLS = ['atom-gate-calls', 'atom-audit']
@@ -61,7 +60,6 @@ const initial: BuilderState = {
   tools: [],
   a2aAgents: [],
   domainId: '',
-  ciTarget: 'gitlab',
 }
 
 function toggle(arr: string[], val: string): string[] {
@@ -148,7 +146,7 @@ export function AgentBuilder() {
       skills: data.skills,
       a2a_links: data.a2aAgents,
       domain_id: selectedDomainId,
-      ci_config: { target: data.ciTarget },
+      ci_config: { target: 'local' },
     })
   }
 
@@ -302,35 +300,6 @@ export function AgentBuilder() {
               {data.a2aAgents.length > 0 && <Typography variant="body2"><strong>A2A:</strong> {data.a2aAgents.length} agent(s)</Typography>}
             </CardContent>
           </Card>
-
-          <Box>
-            <Typography variant="body2" sx={{ fontWeight: 500, mb: 1 }}>Build destination</Typography>
-            <Box sx={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 2 }}>
-              {(['gitlab', 'local'] as const).map(target => (
-                <Box
-                  key={target}
-                  component="button"
-                  onClick={() => setData(d => ({ ...d, ciTarget: target }))}
-                  sx={{
-                    border: 1,
-                    borderColor: data.ciTarget === target ? 'primary.main' : 'divider',
-                    bgcolor: data.ciTarget === target ? 'primary.50' : 'transparent',
-                    borderRadius: 1,
-                    p: 2,
-                    textAlign: 'left',
-                    cursor: 'pointer',
-                  }}
-                >
-                  <Typography variant="body2" sx={{ fontWeight: 500 }}>
-                    {target === 'gitlab' ? 'GitLab (private)' : 'Local Docker'}
-                  </Typography>
-                  <Typography variant="caption" color="text.secondary">
-                    {target === 'gitlab' ? 'CI pipeline + approval flow' : 'Generate code locally'}
-                  </Typography>
-                </Box>
-              ))}
-            </Box>
-          </Box>
 
           <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, border: 1, borderColor: 'divider', borderRadius: 1, p: 1.5, bgcolor: 'grey.50' }}>
             <ShieldIcon fontSize="small" color="primary" />

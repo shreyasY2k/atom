@@ -109,7 +109,7 @@ class ChatRequest(BaseModel):
     session_id: str | None = None
     message: str
     domain_id: str = ""
-    ci_target: str = "gitlab"
+    ci_target: str = "local"
 
 
 @router.post("/chat")

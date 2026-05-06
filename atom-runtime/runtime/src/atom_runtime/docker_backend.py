@@ -58,28 +58,15 @@ def _compose_project_from_network(network: str) -> str:
 
 
 def _ensure_image_pulled(client: docker.DockerClient, image: str) -> None:
-    """Pull the image explicitly using GitLab registry credentials if configured."""
-    from .config import get_settings  # noqa: PLC0415
-
-    settings = get_settings()
-    if not image.startswith(settings.gitlab_registry_url):
-        return  # not a GitLab registry image — no explicit pull needed
-
-    if not settings.gitlab_registry_token:
-        return  # no credentials configured — rely on host docker login
-
+    """Pull the image if not present locally (relies on host docker login for private registries)."""
     try:
-        logger.info("Logging in to %s and pulling %s", settings.gitlab_registry_url, image)
-        client.login(
-            username=settings.gitlab_registry_user,
-            password=settings.gitlab_registry_token,
-            registry=settings.gitlab_registry_url,
-            reauth=True,
-        )
-        client.images.pull(image)
-        logger.info("Image %s pulled successfully", image)
-    except docker.errors.APIError as exc:
-        logger.warning("Could not pull %s (will try run anyway): %s", image, exc)
+        client.images.get(image)
+    except docker.errors.ImageNotFound:
+        try:
+            logger.info("Pulling image %s", image)
+            client.images.pull(image)
+        except docker.errors.APIError as exc:
+            logger.warning("Could not pull %s (will try run anyway): %s", image, exc)
 
 
 def _run_container(

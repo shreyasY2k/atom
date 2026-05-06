@@ -7,7 +7,6 @@ import type { AgentSpec } from '@/hooks/useBuilderChat'
 interface Props {
   spec: AgentSpec
   stage: string
-  ciTarget: 'gitlab' | 'local'
 }
 
 function Row({ label, value }: { label: string; value: React.ReactNode }) {
@@ -21,7 +20,7 @@ function Row({ label, value }: { label: string; value: React.ReactNode }) {
   )
 }
 
-export function AgentSpecPanel({ spec, stage, ciTarget }: Props) {
+export function AgentSpecPanel({ spec, stage }: Props) {
   return (
     <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
       <Box>
@@ -47,7 +46,7 @@ export function AgentSpecPanel({ spec, stage, ciTarget }: Props) {
           } />
           <Row label="HITL" value={spec.hitlConfig ? (spec.hitlConfig.enabled ? 'enabled' : 'disabled') : null} />
           <Row label="A2A" value={spec.a2aTargets.length ? spec.a2aTargets.join(', ') : 'none'} />
-          <Row label="Build" value={ciTarget === 'gitlab' ? 'GitLab (private)' : 'Local Docker'} />
+          <Row label="Build" value="Local Docker" />
         </Box>
       </Box>
 

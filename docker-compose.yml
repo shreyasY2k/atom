@@ -15,8 +15,6 @@ name: atom
 #
 # Registry:
 #   Default:  ghcr.io/shreyasy2k  (GitHub Container Registry — no login needed)
-#   GitLab:   set ATOM_IMAGE_REGISTRY=registry.gitlab.com/shreyasy2k/atom in .env
-#             and docker login registry.gitlab.com first
 #
 # To build from source instead, use docker-compose.dev.yml.
 
@@ -311,10 +309,6 @@ services:
       KAFKA_BROKERS: redpanda:9092
       OTEL_EXPORTER_OTLP_ENDPOINT: http://alloy:4318
       OTEL_SERVICE_NAME: atom-runtime
-      # GitLab registry credentials — allows atom-runtime to pull private agent images.
-      # Set GITLAB_REGISTRY_TOKEN in .env to your PAT (scope: read_registry).
-      GITLAB_REGISTRY_TOKEN: ${GITLAB_REGISTRY_TOKEN:-}
-      GITLAB_REGISTRY_USER: ${GITLAB_REGISTRY_USER:-oauth2}
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
     ports:

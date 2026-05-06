@@ -5,7 +5,6 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
-	"io"
 	"net/http"
 	"os"
 	"strings"
@@ -19,7 +18,6 @@ import (
 var (
 	buildIntent string
 	buildOutput string
-	buildDeploy bool
 )
 
 var buildCmd = &cobra.Command{
@@ -28,12 +26,11 @@ var buildCmd = &cobra.Command{
 	Long: `Interactive wizard that analyses your agent intent with Gemini and suggests
 capabilities (model, skills, MCP tools, A2A agents).
 
-By default, generates code locally. Use --deploy to trigger GitLab CI + approval flow.
+Generates a scaffolded agent project locally. Use atom deploy to build and submit it.
 
 Examples:
   atom build
   atom build --intent "Monitor credit applications and escalate high-risk ones"
-  atom build --intent "..." --deploy
   atom build --intent "..." --output ./my-agent`,
 	RunE: runBuild,
 }
@@ -41,7 +38,6 @@ Examples:
 func init() {
 	buildCmd.Flags().StringVar(&buildIntent, "intent", "", "Agent intent (skips interactive prompt)")
 	buildCmd.Flags().StringVar(&buildOutput, "output", "", "Output directory (default: ./<agent-name>)")
-	buildCmd.Flags().BoolVar(&buildDeploy, "deploy", false, "Trigger GitLab CI pipeline + approval after scaffolding")
 }
 
 type intentSuggestion struct {
@@ -102,22 +98,7 @@ func runBuild(_ *cobra.Command, _ []string) error {
 		fmt.Printf("  💡 %s\n", suggestion.Reasoning)
 	}
 
-	// Choose build destination
 	target := "local"
-	if buildDeploy {
-		target = "gitlab"
-	} else if buildIntent == "" {
-		// Interactive: ask
-		fmt.Println("\n? Choose build destination:")
-		fmt.Println("  1) Local only (generate code — deploy later with atom deploy)")
-		fmt.Println("  2) GitLab CI (generate + trigger pipeline + submit for approval)")
-		fmt.Print("> ")
-		reader := bufio.NewReader(os.Stdin)
-		choice, _ := reader.ReadString('\n')
-		if strings.TrimSpace(choice) == "2" {
-			target = "gitlab"
-		}
-	}
 
 	// Determine output directory
 	agentName := sanitizeName(intent)
@@ -134,13 +115,7 @@ func runBuild(_ *cobra.Command, _ []string) error {
 	fmt.Printf("\n✓ Scaffolded at %s/\n", outDir)
 	fmt.Printf("  agent.py  atom_agent.yaml  Dockerfile  requirements.txt\n")
 
-	if target == "gitlab" {
-		fmt.Println("\n⠋ Triggering build + approval workflow...")
-		if err := triggerBuildAndDeploy(cfg, intent, suggestion, domainID); err != nil {
-			return fmt.Errorf("deploy failed: %w", err)
-		}
-		fmt.Println("✓ Build submitted. Check ATOM Studio → Agents for approval status.")
-	}
+	_ = target // always local — run `atom deploy` in the scaffolded directory
 
 	return nil
 }
@@ -187,37 +162,6 @@ func analyseIntent(cfg *config.Config, intent, domainID string) (*intentSuggesti
 	return &suggestion, nil
 }
 
-func triggerBuildAndDeploy(cfg *config.Config, intent string, s *intentSuggestion, domainID string) error {
-	payload, _ := json.Marshal(map[string]any{
-		"intent":    intent,
-		"model":     s.Model,
-		"mcp_tools": s.Tools,
-		"skills":    s.Skills,
-		"a2a_links": []string{},
-		"domain_id": domainID,
-		"ci_config": map[string]string{"target": "gitlab"},
-	})
-	req, err := http.NewRequest("POST", cfg.StudioURL+"/api/agents/build-and-deploy", bytes.NewReader(payload))
-	if err != nil {
-		return err
-	}
-	req.Header.Set("Authorization", "Bearer "+cfg.AccessToken)
-	req.Header.Set("Content-Type", "application/json")
-
-	client := &http.Client{Timeout: 60 * time.Second}
-	resp, err := client.Do(req)
-	if err != nil {
-		return err
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode >= 400 {
-		body, _ := io.ReadAll(resp.Body)
-		return fmt.Errorf("server error %d: %s", resp.StatusCode, string(body))
-	}
-	return nil
-}
-
 const agentPyTmpl = `import agentscope
 from agentscope.agent import ReActAgent
 from atom_platform_sdk import AtomChatModel, Toolkit
@@ -247,7 +191,6 @@ const atomAgentYamlTmpl = `# atom_agent.yaml — fill in agent_id and domain_id 
 agent_id: ""
 domain_id: ""
 model: {{.Model}}
-ci_provider: gitlab
 sdk_image: ""
 `
 

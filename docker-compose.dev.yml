@@ -279,11 +279,6 @@ services:
       PLATFORM_HMAC_SECRET: ${PLATFORM_HMAC_SECRET:-changeme-hmac-secret}
       OTEL_EXPORTER_OTLP_ENDPOINT: http://alloy:4318
       OTEL_SERVICE_NAME: atom-studio
-      # GitLab agent builder — set these in .env to enable GitLab CI deploys
-      ATOM_GITLAB_URL: ${ATOM_GITLAB_URL:-https://gitlab.com}
-      ATOM_GITLAB_GROUP: ${ATOM_GITLAB_GROUP:-}
-      ATOM_GITLAB_PAT: ${ATOM_GITLAB_PAT:-}
-      ATOM_GITLAB_RUNNER_USER: ${ATOM_GITLAB_RUNNER_USER:-}
     ports:
       - "3001:3001"
     volumes:
@@ -343,10 +338,6 @@ services:
       DOCKER_NETWORK: atom-dev_default
       DOCKER_AGENT_GATE_URL: http://gate:8080
       KAFKA_BROKERS: redpanda:9092
-      # GitLab registry credentials — allows atom-runtime to pull private agent images.
-      # Set GITLAB_REGISTRY_TOKEN in .env to your PAT (scope: read_registry).
-      GITLAB_REGISTRY_TOKEN: ${GITLAB_REGISTRY_TOKEN:-}
-      GITLAB_REGISTRY_USER: ${GITLAB_REGISTRY_USER:-oauth2}
       OTEL_EXPORTER_OTLP_ENDPOINT: http://alloy:4318
       OTEL_SERVICE_NAME: atom-runtime
     ports:
