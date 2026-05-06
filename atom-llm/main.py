@@ -34,13 +34,16 @@ app.include_router(atom_tools_router)
 # Outputs structured JSON so Alloy's regex '"trace_id":"(\w+)"' can extract
 # trace IDs and Grafana can link Loki log lines → Tempo traces.
 
+
 def _get_trace_id() -> str:
     try:
         from opentelemetry import trace  # noqa: PLC0415
+
         ctx = trace.get_current_span().get_span_context()
         return format(ctx.trace_id, "032x") if ctx and ctx.is_valid else ""
     except Exception:
         return ""
+
 
 class _AtomJsonFormatter(logging.Formatter):
     def format(self, record: logging.LogRecord) -> str:
@@ -57,6 +60,7 @@ class _AtomJsonFormatter(logging.Formatter):
         if record.exc_info:
             obj["error"] = self.formatException(record.exc_info)[:1000]
         return json.dumps(obj)
+
 
 _handler = logging.StreamHandler()
 _handler.setFormatter(_AtomJsonFormatter())
@@ -89,12 +93,17 @@ try:
 except Exception as exc:
     logging.getLogger(__name__).warning("Prometheus metrics not available: %s", exc)
 
-def _prisma_push() -> None:
-    """Push LiteLLM's Prisma schema before the server starts.
 
-    LiteLLM wraps its own prisma setup in a silent try/except, so schema
-    failures let the proxy start with missing tables. Running it here makes
-    the failure fatal and immediately visible in the container logs.
+def _prisma_push() -> None:
+    """Apply LiteLLM's Prisma migrations before the server starts.
+
+    Uses `prisma migrate deploy` (via litellm_proxy_extras) rather than
+    `prisma db push --accept-data-loss`.  The latter syncs the DB to ONLY
+    contain Prisma-managed tables and will silently DROP the ATOM schema
+    tables created by golang-migrate (users, domains, agents, …).
+    `migrate deploy` only applies pending migrations — it never drops tables
+    outside the Prisma schema.
+
     Only runs when DATABASE_URL is set (skipped in no-DB local mode).
     """
     import subprocess
@@ -104,19 +113,30 @@ def _prisma_push() -> None:
     if not db_url:
         return
 
-    import litellm as _lt
-    schema = os.path.join(os.path.dirname(_lt.__file__), "proxy", "schema.prisma")
+    # Prefer litellm_proxy_extras which ships a proper migrations/ directory.
+    try:
+        import litellm_proxy_extras as _extras
+
+        schema = os.path.join(os.path.dirname(_extras.__file__), "schema.prisma")
+    except ImportError:
+        import litellm as _lt
+
+        schema = os.path.join(os.path.dirname(_lt.__file__), "proxy", "schema.prisma")
+
     if not os.path.exists(schema):
-        print(f"[atom-llm] WARNING: schema.prisma not found at {schema}, skipping", flush=True)
+        print(
+            f"[atom-llm] WARNING: schema.prisma not found at {schema}, skipping",
+            flush=True,
+        )
         return
 
-    print(f"[atom-llm] running prisma db push on {schema}", flush=True)
+    print(f"[atom-llm] running prisma migrate deploy on {schema}", flush=True)
     result = subprocess.run(
-        ["prisma", "db", "push", "--schema", schema, "--accept-data-loss", "--skip-generate"],
+        ["prisma", "migrate", "deploy", "--schema", schema],
         check=False,
     )
     if result.returncode != 0:
-        print("[atom-llm] prisma db push failed — aborting startup", flush=True)
+        print("[atom-llm] prisma migrate deploy failed — aborting startup", flush=True)
         sys.exit(result.returncode)
 
 
