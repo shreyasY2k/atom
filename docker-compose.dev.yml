@@ -47,6 +47,8 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+      atom-llm:
+        condition: service_healthy
     volumes:
       - ./migrations:/migrations:ro
     entrypoint: ["/bin/sh"]
@@ -237,8 +239,6 @@ services:
       postgres:
         condition: service_healthy
       redpanda:
-        condition: service_healthy
-      atom-studio-api:
         condition: service_healthy
     volumes:
       - ./atom-llm/config.dev.yaml:/app/config.dev.yaml:ro

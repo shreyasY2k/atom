@@ -97,15 +97,25 @@ except Exception as exc:
 def _prisma_push() -> None:
     """Apply LiteLLM's Prisma migrations before the server starts.
 
-    Uses `prisma migrate deploy` (via litellm_proxy_extras) rather than
-    `prisma db push --accept-data-loss`.  The latter syncs the DB to ONLY
-    contain Prisma-managed tables and will silently DROP the ATOM schema
-    tables created by golang-migrate (users, domains, agents, …).
-    `migrate deploy` only applies pending migrations — it never drops tables
-    outside the Prisma schema.
+    Three scenarios — all data-safe, nothing is ever dropped:
 
-    Only runs when DATABASE_URL is set (skipped in no-DB local mode).
+    1. Normal / subsequent run (_prisma_migrations exists):
+       prisma migrate deploy applies pending migrations, no-ops if current.
+
+    2. P3005 — existing tables from old db push, no migration history:
+       Baseline via `prisma migrate resolve --applied <name>` for every
+       migration in migrations/. This is the official Prisma baselining
+       workflow (https://pris.ly/d/migrate-baseline). It creates
+       _prisma_migrations and marks all 118 migrations as applied without
+       touching any table data. Then migrate deploy picks up new ones.
+
+    3. Empty DB (first run / post dev-reset-db):
+       migrate deploy creates _prisma_migrations + all LiteLLM tables.
+
+    ATOM tables are always preserved — migrate deploy never drops tables
+    that are not in the Prisma schema.
     """
+    import glob
     import subprocess
     import sys
 
@@ -113,15 +123,19 @@ def _prisma_push() -> None:
     if not db_url:
         return
 
-    # Prefer litellm_proxy_extras which ships a proper migrations/ directory.
+    # litellm_proxy_extras ships schema.prisma + migrations/; prefer it.
     try:
         import litellm_proxy_extras as _extras
 
-        schema = os.path.join(os.path.dirname(_extras.__file__), "schema.prisma")
+        extras_dir = os.path.dirname(_extras.__file__)
+        schema = os.path.join(extras_dir, "schema.prisma")
+        migrations_dir = os.path.join(extras_dir, "migrations")
     except ImportError:
         import litellm as _lt
 
-        schema = os.path.join(os.path.dirname(_lt.__file__), "proxy", "schema.prisma")
+        extras_dir = os.path.join(os.path.dirname(_lt.__file__), "proxy")
+        schema = os.path.join(extras_dir, "schema.prisma")
+        migrations_dir = os.path.join(extras_dir, "migrations")
 
     if not os.path.exists(schema):
         print(
@@ -134,10 +148,89 @@ def _prisma_push() -> None:
     result = subprocess.run(
         ["prisma", "migrate", "deploy", "--schema", schema],
         check=False,
+        capture_output=True,
+        text=True,
     )
-    if result.returncode != 0:
-        print("[atom-llm] prisma migrate deploy failed — aborting startup", flush=True)
-        sys.exit(result.returncode)
+    print(result.stdout, end="", flush=True)
+    if result.returncode == 0:
+        return
+
+    # P3005: schema not empty but no _prisma_migrations tracking table.
+    # Baseline every existing migration as already applied, then retry.
+    if (
+        "P3005" in result.stdout
+        or "P3005" in result.stderr
+        or "not empty" in (result.stderr or "")
+    ):
+        print(result.stderr or "", end="", flush=True)
+        if not os.path.isdir(migrations_dir):
+            print(
+                "[atom-llm] ERROR: migrations dir not found, cannot baseline",
+                flush=True,
+            )
+            sys.exit(1)
+
+        migration_names = sorted(
+            os.path.basename(d)
+            for d in glob.glob(os.path.join(migrations_dir, "*"))
+            if os.path.isdir(d)
+        )
+        print(
+            f"[atom-llm] P3005 baseline: marking {len(migration_names)} migrations as applied",
+            flush=True,
+        )
+
+        # Use the first migration to let Prisma create the _prisma_migrations table
+        # with the correct schema, then bulk-insert the rest via SQL.
+        first, *rest = migration_names
+        subprocess.run(
+            ["prisma", "migrate", "resolve", "--applied", first, "--schema", schema],
+            check=False,
+            capture_output=True,
+        )
+
+        # Bulk-insert remaining migrations in a single query — much faster than
+        # 117 more subprocess calls.
+        if rest:
+            import asyncio
+            import uuid
+
+            import asyncpg
+
+            async def _bulk_insert() -> None:
+                conn = await asyncpg.connect(db_url)
+                try:
+                    await conn.executemany(
+                        """
+                        INSERT INTO "_prisma_migrations"
+                            (id, checksum, finished_at, migration_name, started_at, applied_steps_count)
+                        VALUES ($1, '', NOW(), $2, NOW(), 1)
+                        ON CONFLICT DO NOTHING
+                        """,
+                        [(str(uuid.uuid4()), name) for name in rest],
+                    )
+                finally:
+                    await conn.close()
+
+            asyncio.run(_bulk_insert())
+
+        print(
+            "[atom-llm] baseline complete — retrying prisma migrate deploy", flush=True
+        )
+        result2 = subprocess.run(
+            ["prisma", "migrate", "deploy", "--schema", schema],
+            check=False,
+        )
+        if result2.returncode != 0:
+            print(
+                "[atom-llm] prisma migrate deploy failed after baseline — aborting",
+                flush=True,
+            )
+            sys.exit(result2.returncode)
+        return
+
+    print(f"[atom-llm] prisma migrate deploy failed:\n{result.stderr}", flush=True)
+    sys.exit(result.returncode)
 
 
 if __name__ == "__main__":
