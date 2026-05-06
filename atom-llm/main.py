@@ -83,12 +83,13 @@ if os.environ.get("OTEL_EXPORTER_OTLP_ENDPOINT"):
 
     litellm.callbacks.append(OTELLogger())
 
-# Register Prometheus metrics callback so LiteLLM exposes /metrics.
+# Register Prometheus metrics callback and mount /metrics scrape endpoint.
 try:
     import litellm  # noqa: F811
     from litellm.integrations.prometheus import PrometheusLogger
 
     litellm.callbacks.append(PrometheusLogger())
+    PrometheusLogger._mount_metrics_endpoint()
     logging.getLogger(__name__).info("Prometheus metrics enabled at /metrics")
 except Exception as exc:
     logging.getLogger(__name__).warning("Prometheus metrics not available: %s", exc)

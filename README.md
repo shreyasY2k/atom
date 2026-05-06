@@ -20,32 +20,39 @@ Every LLM call flows through **GATE** — authenticated, policy-checked, rate-li
 
 ## Start the stack
 
-### Option A — Docker Compose (recommended for getting started)
+### Docker Compose (recommended)
 
 ```bash
 # 1. Clone
-git clone https://github.com/shreyasY2k/atom.git && cd atom
+git clone https://gitlab.com/shreyasy2k/atom.git && cd atom
 
 # 2. Generate keys and configure
 cp .env.example .env
 make generate-keys
 # Edit .env — set GEMINI_API_KEY  (free key: aistudio.google.com/app/apikey)
-# Also set ATOM_ENCRYPTION_KEY and PLATFORM_HMAC_SECRET to real values:
+# Also set ATOM_ENCRYPTION_KEY and PLATFORM_HMAC_SECRET:
 #   openssl rand -hex 32   (run twice, one value per variable)
 
-# 3. Start everything
-make up                     # pulls images, runs migrations + seed automatically
+# 3. Start everything (builds images, runs migrations + seed automatically)
+make dev-up
 
 # 4. Open Studio
 open http://localhost:3000  # admin@atom.local / admin123
 ```
 
-### Option B — Kubernetes (kind)
+**Migrations run automatically** on every `make dev-up` — no manual migration steps needed.
+
+To wipe all data and start fresh:
+```bash
+make dev-down && make dev-reset-db && make dev-up
+```
+
+### Kubernetes (kind)
 
 ```bash
 cp .env.example .env && make generate-keys   # then set GEMINI_API_KEY in .env
 make infra-up                                # kind cluster + infra (Postgres, Redis, etc.)
-make k8s-deploy                              # build + deploy all services (migrations auto-run)
+make k8s-deploy                              # deploy all services (migrations auto-run)
 make monitoring-up                           # Grafana + Loki + Tempo
 sudo make ingress-hosts && make ingress-up   # *.atom.local on port 80
 
