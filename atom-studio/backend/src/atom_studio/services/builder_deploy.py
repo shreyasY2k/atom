@@ -44,6 +44,7 @@ sdk_image: ""
 def _build_dockerfile() -> str:
     return """FROM python:3.11-slim
 WORKDIR /app
+RUN apt-get update && apt-get install -y --no-install-recommends git && rm -rf /var/lib/apt/lists/*
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 COPY . .
@@ -53,8 +54,10 @@ CMD ["uvicorn", "server:app", "--host", "0.0.0.0", "--port", "8080"]
 
 
 def _build_requirements() -> str:
+    # agentscope must come from the atom-sdk fork — PyPI agentscope lacks
+    # AtomChatModel, OpenAIChatFormatter, ReActAgent, and the Toolkit API.
     return (
-        "agentscope>=0.1.0\n"
+        "agentscope @ git+https://github.com/shreyasY2k/atom-sdk.git\n"
         "fastapi>=0.110.0\n"
         "uvicorn[standard]>=0.29.0\n"
         "httpx>=0.27.0\n"
