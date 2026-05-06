@@ -243,7 +243,7 @@ services:
     volumes:
       - ./atom-llm/config.dev.yaml:/app/config.dev.yaml:ro
     ports:
-      - "127.0.0.1:4000:4000"
+      - "4000:4000"
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:4000/health/liveliness"]
       interval: 10s

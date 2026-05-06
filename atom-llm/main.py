@@ -22,6 +22,8 @@ load_dotenv()
 os.environ.setdefault("CONFIG_FILE_PATH", "/app/config.dev.yaml")
 
 from litellm.proxy.proxy_server import app  # noqa: E402
+from starlette.requests import Request  # noqa: E402
+from starlette.responses import JSONResponse  # noqa: E402
 
 from atom_extensions.provision import router as provision_router  # noqa: E402
 from atom_extensions.tools_skills import atom_tools_router  # noqa: E402
@@ -29,6 +31,21 @@ from atom_extensions.tools_skills import atom_tools_router  # noqa: E402
 # Mount ATOM routers — must happen before uvicorn starts.
 app.include_router(provision_router)
 app.include_router(atom_tools_router)
+
+
+# ── Unauthenticated GET /health ───────────────────────────────────────────────
+# LiteLLM's /health requires the master key and logs an ERROR for every
+# unauthenticated request.  Internal Docker networking (Prometheus, Docker
+# Desktop bridge, health pollers) hit this endpoint without auth and flood
+# the logs.  We intercept GET /health before the auth middleware and return
+# a simple liveness response.  Authenticated callers who want the full model
+# health report should use GET /health/services (requires bearer token).
+@app.middleware("http")
+async def _health_no_auth(request: Request, call_next):
+    if request.method == "GET" and request.url.path == "/health":
+        return JSONResponse({"status": "ok"})
+    return await call_next(request)
+
 
 # ── JSON logging with trace_id ────────────────────────────────────────────────
 # Outputs structured JSON so Alloy's regex '"trace_id":"(\w+)"' can extract
