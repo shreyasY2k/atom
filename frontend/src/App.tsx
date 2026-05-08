@@ -10,6 +10,7 @@ import AgentList from './pages/agents/List'
 import Composer from './pages/workflows/Composer'
 import ComposerLanding from './pages/workflows/ComposerLanding'
 import WorkflowList from './pages/workflows/List'
+import WorkflowRuns from './pages/workflows/Runs'
 import Chat from './pages/chat/Chat'
 import Tasks from './pages/tasks/Tasks'
 import AuditEvents from './pages/audit/Events'
@@ -52,6 +53,7 @@ export default function App() {
                 <Route path="agents" element={<AgentList />} />
                 <Route path="workflows/compose" element={<ComposerLanding />} />
                 <Route path="workflows/compose/:name" element={<ComposerParam />} />
+                <Route path="workflows/runs" element={<WorkflowRuns />} />
                 <Route path="workflows" element={<WorkflowList />} />
                 <Route path="chat" element={<Chat />} />
                 <Route path="tasks" element={<Tasks />} />

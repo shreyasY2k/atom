@@ -65,6 +65,25 @@ def _put(bucket: str, key: str, body: bytes, content_type: str = "application/js
         pass
 
 
+def read_run_events(run_id: str) -> list[dict]:
+    """Read all node events for a workflow run from MinIO audit-logs/workflow-run/{run_id}/."""
+    try:
+        s3 = _s3()
+        paginator = s3.get_paginator("list_objects_v2")
+        events: list[dict] = []
+        for page in paginator.paginate(Bucket="audit-logs", Prefix=f"workflow-run/{run_id}/"):
+            for obj in page.get("Contents", []):
+                try:
+                    body = s3.get_object(Bucket="audit-logs", Key=obj["Key"])["Body"].read()
+                    events.append(json.loads(body))
+                except Exception:
+                    continue
+        events.sort(key=lambda e: e.get("timestamp", ""))
+        return events
+    except Exception:
+        return []
+
+
 def write_workflow_spec(name: str, version: str, yaml_text: str) -> None:
     """Write workflow spec to minio://specs/workflows/<name>/<version>/<ts>.yaml."""
     now = datetime.now(timezone.utc)

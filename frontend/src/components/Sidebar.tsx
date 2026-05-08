@@ -8,6 +8,7 @@ import AutoFixHighIcon from '@mui/icons-material/AutoFixHigh'
 import SmartToyIcon from '@mui/icons-material/SmartToy'
 import AccountTreeIcon from '@mui/icons-material/AccountTree'
 import ListIcon from '@mui/icons-material/List'
+import PlaylistPlayIcon from '@mui/icons-material/PlaylistPlay'
 import ChatIcon from '@mui/icons-material/Chat'
 import AssignmentIcon from '@mui/icons-material/Assignment'
 import HistoryIcon from '@mui/icons-material/History'
@@ -37,7 +38,8 @@ const groups: NavGroup[] = [
     heading: 'WORKFLOWS',
     items: [
       { to: '/workflows/compose', label: 'Composer', icon: <AccountTreeIcon fontSize="small" /> },
-      { to: '/workflows', label: 'List', icon: <ListIcon fontSize="small" />, exact: true },
+      { to: '/workflows/runs', label: 'Runs', icon: <PlaylistPlayIcon fontSize="small" /> },
+      { to: '/workflows', label: 'Registry', icon: <ListIcon fontSize="small" />, exact: true },
     ],
   },
   {

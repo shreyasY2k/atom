@@ -141,6 +141,56 @@ async def get_run(name: str, run_id: str):
     return {**_run_index.get(run_id, {}), **desc}
 
 
+@router.get("/workflows/{name}/runs/{run_id}/nodes")
+def get_run_nodes(name: str, run_id: str):
+    """Get node-level execution events for a completed workflow run (from MinIO)."""
+    events = audit.read_run_events(run_id)
+    # Group into node steps
+    nodes_started: dict[str, dict] = {}
+    nodes_completed: dict[str, dict] = {}
+    run_meta: dict = {}
+
+    for ev in events:
+        etype = ev.get("type", "")
+        nid = ev.get("node_id")
+        if etype == "run_started":
+            run_meta = ev
+        elif etype == "node_start" and nid:
+            nodes_started[nid] = ev
+        elif etype == "node_complete" and nid:
+            nodes_completed[nid] = ev
+
+    # Build ordered step list
+    seen: set = set()
+    steps = []
+    for ev in events:
+        nid = ev.get("node_id")
+        if nid and nid not in seen and ev.get("type") == "node_start":
+            seen.add(nid)
+            start = nodes_started.get(nid, {})
+            end = nodes_completed.get(nid, {})
+            steps.append({
+                "node_id": nid,
+                "node_type": start.get("node_type", "unknown"),
+                "actor_type": start.get("actor_type", "system"),
+                "actor_id": start.get("actor_id", ""),
+                "started_at": start.get("timestamp"),
+                "completed_at": end.get("timestamp"),
+                "duration_ms": end.get("duration_ms"),
+                "result": end.get("result", "pending"),
+                "output_hash": end.get("output_hash"),
+                "status": "completed" if end else "running",
+            })
+
+    return {
+        "run_id": run_id,
+        "workflow_name": name,
+        "run_started_at": run_meta.get("timestamp"),
+        "steps": steps,
+        "raw_event_count": len(events),
+    }
+
+
 @router.get("/workflows/{name}/runs/{run_id}/events")
 async def stream_events(name: str, run_id: str):
     """SSE stream of node_started / node_completed / node_routed events."""
