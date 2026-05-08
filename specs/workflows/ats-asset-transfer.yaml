@@ -1,14 +1,10 @@
 # Reference workflow — Asset Transfer Service (ATS) for US bank securities ops
 #
-# Real-world shape: ACATS-style transfer between two custodians, simplified
-# for stage. NINE nodes. Two of them (KYC, asset reconciliation) start as
-# human_task in the "before" state and are replaced with agent nodes during
-# the demo.
-#
+# Demonstrates every node type with its full attribute set (sessions 01–05).
 # Three demo paths:
-#   1. Routine ($40K transfer)         — both agents fire, one human at end
-#   2. High-value ($1.2M transfer)     — decision branches to compliance human
-#   3. KYC low-confidence              — KYC agent confidence < 0.85, routes to human
+#   1. Routine ($40K)     — KYC PASS, no sanction hit, amount < $250K, agents run
+#   2. High-value ($1.2M) — branches to compliance-review (amount > $250K)
+#   3. KYC breach         — KYC confidence < 0.75 → kyc-human-review (skip_if bypasses for tiny amounts)
 
 apiVersion: mphasis.platform/v1
 kind: WorkflowDeployment
@@ -16,13 +12,13 @@ kind: WorkflowDeployment
 metadata:
   name: ats-asset-transfer
   domain: banking-securities-ops
-  version: 1.0.0
+  version: 1.1.0
   description: >
     Asset Transfer Service workflow for US bank securities operations.
     Receives an inbound transfer request, refreshes KYC, screens for
-    sanctions, branches by amount, reconciles assets (or routes for
-    compliance review), submits SWIFT/DTC instruction, captures human
-    final approval, audits.
+    sanctions, branches by amount tier, reconciles assets or routes for
+    compliance review, submits SWIFT/DTC instruction, captures human
+    final approval, notifies.
   owner: mphasis-bfsi-platform-team
 
   layout:
@@ -84,20 +80,46 @@ spec:
       securities:     { type: array }
       destination:    { type: object }
 
+  # Default error handler — if any node errors and has no on_error set,
+  # jump to notify with _last_error in context.
+  error_handler: notify
+
   nodes:
 
+    # ── Step 1: Register the incoming transfer ────────────────────────────────
     - id: receive-request
       label: "Receive transfer request"
+      description: >
+        Registers the inbound ACATS-style transfer request with the
+        incoming-queue service. Returns a tracking receipt.
       type: http
       method: POST
       url_template: "http://incoming-queue:8099/transfers"
       body_template:
         transfer_id: "{{ ctx.input.transfer_id }}"
+        customer_id: "{{ ctx.input.customer_id }}"
+        amount_usd: "{{ ctx.input.amount_usd }}"
+      # Extract the receipt_id from the response rather than storing the whole blob
+      extract:
+        receipt_id: receipt.id
+        queued_at: receipt.queued_at
       output_capture: receive_result
+      timeout_seconds: 15
+      retry:
+        max_attempts: 3
+        backoff: exponential
+        initial_delay_seconds: 1.0
+        max_delay_seconds: 10.0
+      tags: [ingestion, idempotent]
       next: kyc-refresh
 
+    # ── Step 2: KYC refresh (agent) ───────────────────────────────────────────
     - id: kyc-refresh
       label: "KYC refresh"
+      description: >
+        Pulls the customer's current KYC profile, checks document staleness,
+        runs adverse-media + PEP screening, returns a confidence score and
+        recommendation. Routes to kyc-human-review if confidence < 0.75.
       type: agent
       agent_ref:
         name: kyc-refresh
@@ -107,45 +129,101 @@ spec:
       output_capture: kyc_result
       confidence_threshold: 0.75
       fallback_node: kyc-human-review
+      timeout_seconds: 120
+      retry:
+        max_attempts: 2
+        backoff: constant
+        initial_delay_seconds: 5.0
+      # If agent is unreachable entirely, route to human review
+      on_error: kyc-human-review
+      tags: [kyc, compliance]
       next: ofac-screen
 
+    # ── Step 3: Human KYC review (low-confidence) ────────────────────────────
     - id: kyc-human-review
       label: "KYC human review (low-confidence)"
+      description: >
+        Created when the KYC agent returns confidence < 0.75 or errors.
+        Reviewer sees agent draft and can accept, reject, or edit.
       type: human_task
       assignee_group: ops
       task_template:
         title: "KYC needs human review for {{ ctx.input.customer_id }}"
         description: >
           The KYC agent returned confidence {{ ctx.kyc_result.confidence }}.
-          Threshold is 0.85. Please review the agent's draft KYC and
-          accept, reject, or edit.
+          Threshold is 0.75. Please review the agent draft and
+          accept, reject, or edit before the transfer proceeds.
         actions: [accept, reject, edit]
       sla_seconds: 7200
+      priority: high
+      # Show only the agent draft and transfer_id to the reviewer — not the whole context
+      evidence: [kyc_result, receive_result]
+      # Auto-skip for very small amounts (under $1,000) — trivial, no need for human
+      skip_if:
+        condition: ctx.input.amount_usd < 1000
+        auto_resolution: accept
+      escalation_policy:
+        action: escalate
+        escalate_to_group: compliance
       output_capture: kyc_human_decision
+      tags: [kyc, human-in-the-loop]
       next: ofac-screen
 
+    # ── Step 4: OFAC sanctions screening ─────────────────────────────────────
     - id: ofac-screen
       label: "OFAC sanctions screening"
+      description: >
+        Screens the customer and destination institution against the OFAC
+        SDN list and other sanctions databases. Fail-soft: a network error
+        is recorded and the workflow continues (with a flag in ctx).
       type: http
       method: POST
       url_template: "http://ofac-svc:8096/screen"
       body_template:
         customer_id: "{{ ctx.input.customer_id }}"
         destination: "{{ ctx.input.destination }}"
+      # Pull the specific hit flag and score out of the response
+      extract:
+        sanctions_hit: result.hit
+        sanctions_score: result.risk_score
+        screening_id: result.screening_id
       output_capture: ofac_result
       timeout_seconds: 10
+      retry:
+        max_attempts: 2
+        backoff: constant
+        initial_delay_seconds: 2.0
+      on_error: notify
+      tags: [compliance, sanctions]
       next: amount-decision
 
+    # ── Step 5: Amount-tier routing ───────────────────────────────────────────
     - id: amount-decision
-      label: "Routine vs high-value?"
+      label: "Route by amount tier"
+      description: >
+        Three-way decision: ultra-high-value (>$1M) → compliance-review,
+        high-value ($250K–$1M) → compliance-review, routine (<$250K) →
+        asset-recon. Both high-value tiers land in compliance-review;
+        the label distinguishes them in the audit trail.
       type: decision
-      expression: "ctx.input.amount_usd > 250000"
-      branches:
-        true: compliance-review
-        false: asset-recon
+      # Multi-way cases evaluated in order; first match wins
+      cases:
+        - condition: ctx.input.amount_usd > 1000000
+          target: compliance-review
+          label: "Ultra high-value (>$1M)"
+        - condition: ctx.input.amount_usd > 250000
+          target: compliance-review
+          label: "High-value ($250K–$1M)"
+      default: asset-recon
+      tags: [routing, risk-tiering]
 
+    # ── Step 6a: Asset reconciliation (routine path) ─────────────────────────
     - id: asset-recon
       label: "Asset reconciliation (routine)"
+      description: >
+        Compares incoming CUSIPs/quantities against customer records and
+        the security master. Returns a confidence score; low confidence
+        routes to compliance-review for manual check.
       type: agent
       agent_ref:
         name: asset-recon
@@ -156,24 +234,49 @@ spec:
       output_capture: recon_result
       confidence_threshold: 0.80
       fallback_node: compliance-review
+      timeout_seconds: 120
+      retry:
+        max_attempts: 2
+        backoff: exponential
+      on_error: compliance-review
+      tags: [reconciliation, securities]
       next: swift-submit
 
+    # ── Step 6b: Compliance review (high-value or fallback) ──────────────────
     - id: compliance-review
-      label: "Compliance review (high-value or fallback)"
+      label: "Compliance review (high-value / fallback)"
+      description: >
+        Triggered for all high-value transfers and as fallback when
+        asset-recon confidence < 0.80. Compliance officer sees KYC result,
+        OFAC screening, and recon output before approving.
       type: human_task
       assignee_group: compliance
       task_template:
         title: "Compliance review needed: transfer {{ ctx.input.transfer_id }}"
         description: >
           Transfer of ${{ ctx.input.amount_usd }} requires compliance review.
-          KYC: {{ ctx.kyc_result }}. OFAC: {{ ctx.ofac_result }}.
+          KYC result: {{ ctx.kyc_result.recommendation }}.
+          OFAC screening: {{ ctx.ofac_result.sanctions_hit }}.
+          Recon: {{ ctx.recon_result.recommendation }}.
         actions: [accept, reject, edit]
       sla_seconds: 14400
+      priority: high
+      # Surface only the relevant results — not the full context
+      evidence: [kyc_result, ofac_result, recon_result]
+      escalation_policy:
+        action: escalate
+        escalate_to_group: risk-management
       output_capture: compliance_decision
+      tags: [compliance, human-in-the-loop]
       next: swift-submit
 
+    # ── Step 7: Submit SWIFT/DTC instruction ──────────────────────────────────
     - id: swift-submit
       label: "Submit SWIFT/DTC instruction"
+      description: >
+        Sends the MT103 / DTC ACATS instruction to the settlement gateway.
+        Authenticated with a bearer token (injected from env at run time).
+        Retried up to 3× with exponential backoff on transient errors.
       type: http
       method: POST
       url_template: "http://swift-gw:8097/instructions"
@@ -182,34 +285,78 @@ spec:
         amount_usd: "{{ ctx.input.amount_usd }}"
         securities: "{{ ctx.input.securities }}"
         destination: "{{ ctx.input.destination }}"
+        compliance_ref: "{{ ctx.compliance_decision.task_id }}"
+      auth:
+        type: bearer
+        token: "{{ ctx.env.SWIFT_API_TOKEN }}"
+      # Extract the instruction reference number from the response
+      extract:
+        instruction_id: data.instruction_id
+        settlement_date: data.expected_settlement_date
+        swift_status: data.status
+      expect_status: [200, 201, 202]
       output_capture: swift_result
       timeout_seconds: 30
-      retry: { max_attempts: 3, backoff: exponential }
+      retry:
+        max_attempts: 3
+        backoff: exponential
+        initial_delay_seconds: 2.0
+        max_delay_seconds: 30.0
+      on_error: notify
+      tags: [settlement, swift, state-changing]
       next: final-accept
 
+    # ── Step 8: Final human accept / override ─────────────────────────────────
     - id: final-accept
       label: "Final accept / override"
+      description: >
+        Operations officer reviews the full execution trail and either
+        confirms the SWIFT instruction was submitted correctly, overrides
+        it, or rejects. Auto-approves for micro-transfers under $500.
       type: human_task
       assignee_group: ops
       task_template:
         title: "Final approval: transfer {{ ctx.input.transfer_id }}"
         description: >
-          Workflow has executed. Review the full audit trail and accept,
-          reject, or edit. SWIFT instruction: {{ ctx.swift_result }}.
+          Workflow has executed end-to-end.
+          SWIFT instruction ID: {{ ctx.swift_result.instruction_id }}.
+          Settlement expected: {{ ctx.swift_result.settlement_date }}.
+          Review audit trail and accept, reject, or edit.
         actions: [accept, reject, edit]
       sla_seconds: 1800
+      priority: high
+      evidence: [swift_result, kyc_result, ofac_result, compliance_decision]
+      # Tiny amounts can be auto-approved after SWIFT submission
+      skip_if:
+        condition: ctx.input.amount_usd < 500
+        auto_resolution: accept
+      escalation_policy:
+        action: auto_approve
       output_capture: final_decision
+      tags: [final-gate, human-in-the-loop]
       next: notify
 
+    # ── Step 9: Audit and notify ──────────────────────────────────────────────
     - id: notify
       label: "Audit + notify"
+      description: >
+        Marks the transfer complete in the incoming-queue system and
+        posts the final outcome. Also reached as the global error_handler
+        node — in that case, _last_error is in ctx.
       type: http
       method: POST
       url_template: "http://incoming-queue:8099/transfers/{{ ctx.input.transfer_id }}/complete"
       body_template:
         final_decision: "{{ ctx.final_decision }}"
+        swift_result: "{{ ctx.swift_result }}"
+        error: "{{ ctx._last_error }}"
       output_capture: notify_result
-      next: null  # terminal
+      timeout_seconds: 10
+      retry:
+        max_attempts: 2
+        backoff: constant
+      tags: [notification, terminal]
+      next: null   # terminal
 
   audit:
     log_to: minio://audit-logs/workflow/ats-asset-transfer
