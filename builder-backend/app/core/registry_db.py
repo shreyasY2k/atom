@@ -26,6 +26,16 @@ def _init():
                 status             TEXT NOT NULL DEFAULT 'deployed'
             )
         """)
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS agent_runs (
+                run_id             TEXT PRIMARY KEY,
+                agent_name         TEXT NOT NULL,
+                service_account_id TEXT NOT NULL,
+                started_at         TEXT NOT NULL,
+                completed_at       TEXT,
+                status             TEXT NOT NULL DEFAULT 'running'
+            )
+        """)
 
 
 @contextmanager
@@ -76,6 +86,32 @@ def list_all() -> list[dict]:
 def mark_undeployed(name: str) -> None:
     with _conn() as conn:
         conn.execute("UPDATE agents SET status='undeployed' WHERE name=?", (name,))
+
+
+def upsert_run(run: dict) -> None:
+    with _conn() as conn:
+        conn.execute("""
+            INSERT INTO agent_runs (run_id, agent_name, service_account_id, started_at, completed_at, status)
+            VALUES (:run_id, :agent_name, :service_account_id, :started_at, :completed_at, :status)
+            ON CONFLICT(run_id) DO UPDATE SET
+              completed_at=excluded.completed_at,
+              status=excluded.status
+        """, run)
+
+
+def get_run(run_id: str) -> dict | None:
+    with _conn() as conn:
+        row = conn.execute("SELECT * FROM agent_runs WHERE run_id=?", (run_id,)).fetchone()
+        return dict(row) if row else None
+
+
+def list_runs(agent_name: str, limit: int = 50) -> list[dict]:
+    with _conn() as conn:
+        rows = conn.execute(
+            "SELECT * FROM agent_runs WHERE agent_name=? ORDER BY started_at DESC LIMIT ?",
+            (agent_name, limit)
+        ).fetchall()
+        return [dict(r) for r in rows]
 
 
 # Initialise on import

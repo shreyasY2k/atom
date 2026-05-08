@@ -498,6 +498,55 @@ function useVoiceInput(onTranscript: (t: string) => void) {
   return { listening, toggle, supported }
 }
 
+// ── Run History (previous invocations for an agent) ──────────────────────────
+
+function RunHistory({
+  agentName, onSelectRun,
+}: {
+  agentName: string
+  onSelectRun: (runId: string) => void
+}) {
+  const { data } = useQuery({
+    queryKey: ['agent-runs', agentName],
+    queryFn: () => builderApi.listAgentRuns(agentName),
+    refetchInterval: 15000,
+  })
+  const runs = data?.runs ?? []
+  if (runs.length === 0) return null
+
+  return (
+    <Box sx={{ mt: 0.75, px: 1 }}>
+      <Typography variant="caption" color="text.secondary" sx={{ fontWeight: 600, fontSize: '0.6rem', textTransform: 'uppercase', letterSpacing: '0.07em', display: 'block', mb: 0.25 }}>
+        Recent runs
+      </Typography>
+      {runs.slice(0, 8).map(r => {
+        const age = Math.floor((Date.now() - new Date(r.started_at).getTime()) / 60000)
+        return (
+          <Box
+            key={r.run_id}
+            component="button"
+            onClick={() => onSelectRun(r.run_id)}
+            sx={{
+              display: 'flex', alignItems: 'center', gap: 0.5, width: '100%',
+              background: 'none', border: 'none', cursor: 'pointer', textAlign: 'left',
+              px: 0.5, py: 0.35, borderRadius: 0.75,
+              '&:hover': { bgcolor: 'action.hover' },
+            }}
+          >
+            <Box sx={{ width: 6, height: 6, borderRadius: '50%', bgcolor: r.status === 'completed' ? '#3B6D11' : r.status === 'error' ? '#b91c1c' : '#534AB7', flexShrink: 0 }} />
+            <Typography variant="caption" fontFamily="monospace" sx={{ fontSize: '0.6rem', flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: 'text.secondary' }}>
+              {r.run_id.slice(-8)}
+            </Typography>
+            <Typography variant="caption" sx={{ fontSize: '0.58rem', color: 'text.disabled', flexShrink: 0 }}>
+              {age < 60 ? `${age}m` : `${Math.floor(age / 60)}h`}
+            </Typography>
+          </Box>
+        )
+      })}
+    </Box>
+  )
+}
+
 // ── Main Chat ─────────────────────────────────────────────────────────────────
 
 export default function Chat() {
@@ -540,6 +589,7 @@ export default function Chat() {
   const [attachPreview, setAttachPreview] = useState<string | null>(null)
   const [selectedMsgId, setSelectedMsgId] = useState<string | null>(null)
   const [dataViewOpen, setDataViewOpen] = useState(false)
+  const [historyRunId, setHistoryRunId] = useState<string | null>(null)
 
   const fileInputRef = useRef<HTMLInputElement>(null)
   const bottomRef = useRef<HTMLDivElement>(null)
@@ -587,6 +637,13 @@ export default function Chat() {
   const handleMsgClick = (msg: RunMessage) => {
     if (msg.role !== 'agent' || !msg.runId) return
     setSelectedMsgId(prev => prev === msg.id ? null : msg.id)
+    setHistoryRunId(null)
+    setDataViewOpen(true)
+  }
+
+  const handleHistoryRun = (runId: string) => {
+    setHistoryRunId(runId)
+    setSelectedMsgId(null)
     setDataViewOpen(true)
   }
 
@@ -603,18 +660,23 @@ export default function Chat() {
             const [ci, ei] = getSeeds(a.name)
             const mode = (a as AgentRecord & { reasoning_mode?: string }).reasoning_mode
             return (
-              <ListItemButton key={a.name} selected={selectedName === a.name} onClick={() => switchAgent(a.name)}
-                sx={{ borderRadius: 1.5, mb: 0.25, gap: 1, '&.Mui-selected': { bgcolor: 'primary.main', color: 'primary.contrastText' } }}>
-                <AgentAvatar name={a.name} colorIdx={ci} emojiIdx={ei} size={24} />
-                <ListItemText
-                  primary={<Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
-                    <Typography variant="caption" fontWeight={600} noWrap>{a.name}</Typography>
-                    {mode === 'guided' && <Chip label="G" size="small" sx={{ height: 14, fontSize: '0.55rem' }} />}
-                  </Box>}
-                  secondary={a.service_account_id?.slice(-8)}
-                  secondaryTypographyProps={{ fontSize: '0.6rem', fontFamily: 'monospace' }}
-                />
-              </ListItemButton>
+              <React.Fragment key={a.name}>
+                <ListItemButton selected={selectedName === a.name} onClick={() => switchAgent(a.name)}
+                  sx={{ borderRadius: 1.5, mb: 0.25, gap: 1, '&.Mui-selected': { bgcolor: 'primary.main', color: 'primary.contrastText' } }}>
+                  <AgentAvatar name={a.name} colorIdx={ci} emojiIdx={ei} size={24} />
+                  <ListItemText
+                    primary={<Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+                      <Typography variant="caption" fontWeight={600} noWrap>{a.name}</Typography>
+                      {mode === 'guided' && <Chip label="G" size="small" sx={{ height: 14, fontSize: '0.55rem' }} />}
+                    </Box>}
+                    secondary={a.service_account_id?.slice(-8)}
+                    secondaryTypographyProps={{ fontSize: '0.6rem', fontFamily: 'monospace' }}
+                  />
+                </ListItemButton>
+                {selectedName === a.name && (
+                  <RunHistory agentName={a.name} onSelectRun={handleHistoryRun} />
+                )}
+              </React.Fragment>
             )
           })}
         </List>
@@ -713,9 +775,16 @@ export default function Chat() {
       </Box>
 
       {/* Right: Data View panel */}
-      {dataViewOpen && selectedMsg?.runId && selectedMsg.agentName && (
-        <DataView runId={selectedMsg.runId} agentName={selectedMsg.agentName} onClose={() => { setDataViewOpen(false); setSelectedMsgId(null) }} />
-      )}
+      {dataViewOpen && selectedName && (() => {
+        const runId = historyRunId ?? selectedMsg?.runId ?? null
+        return runId ? (
+          <DataView
+            runId={runId}
+            agentName={selectedName}
+            onClose={() => { setDataViewOpen(false); setSelectedMsgId(null); setHistoryRunId(null) }}
+          />
+        ) : null
+      })()}
     </Box>
   )
 }

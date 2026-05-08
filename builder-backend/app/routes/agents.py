@@ -15,9 +15,6 @@ from app.core.container import LocalDeployManager, WORK_DIR, AGENT_PORT, contain
 from app.core.schema import AgentSpec
 from pydantic import ValidationError
 
-# In-memory index of agent test runs (transient — resets on restart)
-_agent_runs: dict[str, dict] = {}
-
 router = APIRouter(prefix="/agents", tags=["agents"])
 
 SPECS_PATH  = Path(os.environ.get("SPECS_PATH", "/app/specs"))
@@ -209,6 +206,16 @@ def invoke_agent(name: str, payload: dict):
     run_id = f"run-{uuid.uuid4().hex[:10]}"
     started_at = datetime.now(timezone.utc).isoformat()
 
+    # Persist the run immediately so it survives restarts
+    registry_db.upsert_run({
+        "run_id": run_id,
+        "agent_name": name,
+        "status": "running",
+        "started_at": started_at,
+        "completed_at": None,
+        "service_account_id": rec.get("service_account_id", ""),
+    })
+
     endpoint = rec["endpoint"]
     # Pass run_id into the agent so it can tag LiteLLM calls for trace correlation
     enriched = {**payload, "_run_id": run_id}
@@ -219,26 +226,44 @@ def invoke_agent(name: str, payload: dict):
         result = r.json()
     except httpx.HTTPStatusError as e:
         completed_at = datetime.now(timezone.utc).isoformat()
-        _agent_runs[run_id] = {
+        registry_db.upsert_run({
             "run_id": run_id, "agent_name": name, "status": "error",
             "started_at": started_at, "completed_at": completed_at,
             "service_account_id": rec.get("service_account_id", ""),
-        }
+        })
         raise HTTPException(e.response.status_code, f"Agent returned error: {e.response.text}")
     except Exception as e:
         raise HTTPException(502, f"Could not reach agent at {endpoint}: {e}")
 
     completed_at = datetime.now(timezone.utc).isoformat()
-    _agent_runs[run_id] = {
+    registry_db.upsert_run({
         "run_id": run_id,
         "agent_name": name,
         "status": "completed",
         "started_at": started_at,
         "completed_at": completed_at,
         "service_account_id": rec.get("service_account_id", ""),
-    }
+    })
+
+    # Register run + messages in Studio so all invocations appear in Studio's UI
+    _register_with_studio(
+        run_id=run_id,
+        agent_name=name,
+        svc_id=rec.get("service_account_id", ""),
+        user_input=payload,
+        agent_output=result,
+        started_at=started_at,
+        completed_at=completed_at,
+    )
 
     return {"result": result, "run_id": run_id}
+
+
+@router.get("/{name}/runs")
+def list_agent_runs(name: str, limit: int = 50):
+    """List recent invocations for an agent. Persisted across restarts."""
+    runs = registry_db.list_runs(name, limit)
+    return {"runs": runs}
 
 
 @router.get("/{name}/runs/{run_id}/events")
@@ -248,9 +273,22 @@ def get_run_events(name: str, run_id: str):
     Reads LiteLLM events from MinIO in the time window of the run,
     filtered by the agent's service account ID.
     """
-    run = _agent_runs.get(run_id)
+    run = registry_db.get_run(run_id)
     if not run:
-        raise HTTPException(404, f"run {run_id!r} not found")
+        # Fallback: use the agent's current SA with a broad time window (last 2 hours)
+        # This covers runs from before the last restart
+        rec = registry_db.get(name)
+        if not rec:
+            raise HTTPException(404, f"run {run_id!r} not found and agent {name!r} not registered")
+        from datetime import datetime, timezone, timedelta
+        now = datetime.now(timezone.utc)
+        run = {
+            "run_id": run_id,
+            "agent_name": name,
+            "service_account_id": rec.get("service_account_id", ""),
+            "started_at": (now - timedelta(hours=2)).isoformat(),
+            "completed_at": now.isoformat(),
+        }
 
     events = audit.read_agent_run_events(
         service_account_id=run["service_account_id"],
@@ -289,33 +327,34 @@ def get_run_events(name: str, run_id: str):
                 content = "\n".join(text_parts)
             messages.append({"role": role, "content": content})
 
-        # Extract response content from the `response` field
+        # Extract response content from the `response` field.
+        # LiteLLM S3 callback may store the response as:
+        #   - dict with "choices" array (OpenAI style)
+        #   - dict with "content" or "text" at top level
+        #   - string (plain text or JSON output)
         response_content = ""
         tool_calls: list[dict] = []
         resp = ev.get("response")
-        if isinstance(resp, dict):
-            choices = resp.get("choices") or []
-        elif isinstance(resp, str):
-            response_content = resp
-            choices = []
-        else:
-            choices = []
 
-        if choices and isinstance(choices, list):
-            msg = choices[0].get("message", {})
-            rc = msg.get("content") or ""
-            if isinstance(rc, list):
-                rc = "\n".join(
-                    b.get("text", "") for b in rc
-                    if isinstance(b, dict) and b.get("type") == "text"
-                )
-            response_content = rc or ""
-            for tc in (msg.get("tool_calls") or []):
-                fn = tc.get("function", {})
-                tool_calls.append({
-                    "name": fn.get("name", ""),
-                    "arguments": fn.get("arguments", "{}"),
-                })
+        if isinstance(resp, str):
+            response_content = resp
+
+        elif isinstance(resp, dict):
+            # Try OpenAI-style choices array
+            choices = resp.get("choices") or []
+            if choices and isinstance(choices, list):
+                msg = choices[0].get("message", {}) if isinstance(choices[0], dict) else {}
+                rc = msg.get("content") or ""
+                if isinstance(rc, list):
+                    rc = "\n".join(b.get("text", "") for b in rc if isinstance(b, dict) and b.get("type") == "text")
+                response_content = rc or ""
+                for tc in (msg.get("tool_calls") or []):
+                    fn = tc.get("function", {}) if isinstance(tc, dict) else {}
+                    tool_calls.append({"name": fn.get("name", ""), "arguments": fn.get("arguments", "{}")})
+            elif "text" in resp:
+                response_content = str(resp["text"])
+            elif "content" in resp:
+                response_content = str(resp["content"])
 
         event_type = "tool_call" if ev.get("call_type") == "function" else "llm_call"
         normalized.append({
@@ -332,3 +371,101 @@ def get_run_events(name: str, run_id: str):
         })
 
     return {"run_id": run_id, "events": normalized, "raw_count": len(events)}
+
+
+# ── Studio tRPC integration ────────────────────────────────────────────────────
+
+STUDIO_URL = os.environ.get("STUDIO_URL", "http://studio:3000")
+
+
+def _studio_trpc(procedure: str, data: dict) -> None:
+    """Call a Studio tRPC mutation. Fails silently — never blocks the critical path."""
+    try:
+        httpx.post(
+            f"{STUDIO_URL}/api/trpc/{procedure}",
+            json={"json": data},
+            headers={"Content-Type": "application/json"},
+            timeout=3,
+        )
+    except Exception:
+        pass
+
+
+def _register_with_studio(
+    run_id: str,
+    agent_name: str,
+    svc_id: str,
+    user_input: dict,
+    agent_output: dict,
+    started_at: str,
+    completed_at: str,
+) -> None:
+    """Register a run + user/agent messages in AgentScope Studio so invocations appear
+    in Studio's run list alongside traces captured via agentscope.init()."""
+    import json as _json
+
+    # 1. Register the run
+    _studio_trpc("registerRun", {
+        "id": run_id,
+        "project": svc_id,      # Studio groups runs by project = service account ID
+        "name": agent_name,
+        "timestamp": started_at,
+        "pid": 0,
+        "status": "FINISHED",
+    })
+
+    # 2. Register a reply slot for the user message
+    user_reply_id = f"{run_id}-user"
+    _studio_trpc("registerReply", {
+        "runId": run_id,
+        "replyId": user_reply_id,
+        "replyRole": "user",
+        "replyName": "User",
+        "timestamp": started_at,
+    })
+
+    # 3. Push user message
+    user_content = user_input.get("text") or _json.dumps(
+        {k: v for k, v in user_input.items() if k != "_run_id"}, default=str
+    )
+    _studio_trpc("pushMessage", {
+        "runId": run_id,
+        "replyId": user_reply_id,
+        "replyRole": "user",
+        "replyName": "User",
+        "msg": {
+            "id": f"{run_id}-user-msg",
+            "name": "User",
+            "role": "user",
+            "content": user_content,
+            "metadata": None,
+            "timestamp": started_at,
+        },
+    })
+
+    # 4. Register a reply slot for the agent message
+    agent_reply_id = f"{run_id}-agent"
+    _studio_trpc("registerReply", {
+        "runId": run_id,
+        "replyId": agent_reply_id,
+        "replyRole": "assistant",
+        "replyName": agent_name,
+        "timestamp": completed_at,
+    })
+
+    # 5. Push agent response
+    agent_content = _json.dumps(agent_output, default=str) if isinstance(agent_output, dict) else str(agent_output)
+    _studio_trpc("pushMessage", {
+        "runId": run_id,
+        "replyId": agent_reply_id,
+        "replyRole": "assistant",
+        "replyName": agent_name,
+        "msg": {
+            "id": f"{run_id}-agent-msg",
+            "name": agent_name,
+            "role": "assistant",
+            "content": agent_content,
+            "metadata": {"service_account_id": svc_id},
+            "timestamp": completed_at,
+        },
+    })

@@ -31,6 +31,9 @@ export const builderApi = {
   getRunEvents: (name: string, runId: string): Promise<{ run_id: string; events: TraceEvent[]; raw_count: number }> =>
     fetch(`${BASE}/agents/${name}/runs/${runId}/events`).then(json),
 
+  listAgentRuns: (name: string): Promise<{ runs: { run_id: string; started_at: string; status: string }[] }> =>
+    fetch(`${BASE}/agents/${name}/runs`).then(json),
+
   // Specs
   validateSpec: (yaml_text: string): Promise<unknown> =>
     fetch(`${BASE}/specs/agent/validate`, {

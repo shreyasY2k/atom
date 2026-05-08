@@ -124,9 +124,20 @@ def read_agent_run_events(
             from datetime import timedelta
             cursor += timedelta(days=1)
 
+        # Convert ISO timestamps to Unix floats for comparison
+        def _iso_to_float(s: str) -> float:
+            try:
+                return datetime.fromisoformat(s.replace("Z", "+00:00")).timestamp()
+            except Exception:
+                return 0.0
+
+        t_start = _iso_to_float(started_at) - 2  # 2s buffer before
+        t_end   = _iso_to_float(completed_at) + 30 if completed_at else _iso_to_float(started_at) + 600
+
         events: list[dict] = []
         for date in sorted(dates):
-            for prefix in [f"litellm/{date}/", f"{date}/"]:
+            # LiteLLM uses date-based prefixes directly (no litellm/ sub-prefix)
+            for prefix in [f"{date}/", f"litellm/{date}/"]:
                 try:
                     paginator = s3.get_paginator("list_objects_v2")
                     for page in paginator.paginate(Bucket="audit-logs", Prefix=prefix):
@@ -134,30 +145,36 @@ def read_agent_run_events(
                             try:
                                 body = s3.get_object(Bucket="audit-logs", Key=obj["Key"])["Body"].read()
                                 event = json.loads(body)
-                                # Filter: match by end_user (LiteLLM sets this to SERVICE_ACCOUNT_ID)
-                                # or by user_api_key_alias if set.  At least one must match.
+
+                                # Filter by service account (end_user, alias, or metadata.actor_id)
                                 end_user = event.get("end_user") or ""
-                                alias = event.get("user_api_key_alias") or ""
-                                meta = event.get("metadata") or {}
-                                actor = meta.get("actor_id", "") if isinstance(meta, dict) else ""
+                                alias    = event.get("user_api_key_alias") or ""
+                                meta     = event.get("metadata") or {}
+                                actor    = meta.get("actor_id", "") if isinstance(meta, dict) else ""
                                 if not (
                                     service_account_id in end_user
                                     or service_account_id in alias
                                     or service_account_id in actor
                                 ):
                                     continue
-                                # Time filter
-                                ts = event.get("startTime") or event.get("timestamp", "")
-                                if ts and not (started_at <= ts[:26] <= completed_at[:26]):
-                                    continue
+
+                                # Time filter using Unix float comparison
+                                t0 = event.get("startTime")
+                                if t0:
+                                    try:
+                                        if not (t_start <= float(t0) <= t_end):
+                                            continue
+                                    except Exception:
+                                        pass
+
                                 events.append(event)
                             except Exception:
                                 continue
                 except Exception:
                     continue
 
-        events.sort(key=lambda e: e.get("startTime") or e.get("timestamp", ""))
-        return events[:50]
+        events.sort(key=lambda e: float(e.get("startTime") or 0))
+        return events[:100]
 
     except Exception:
         return []
