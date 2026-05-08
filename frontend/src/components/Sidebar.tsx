@@ -2,7 +2,7 @@ import React from 'react'
 import { useNavigate, useLocation } from 'react-router-dom'
 import {
   List, ListItemButton, ListItemIcon, ListItemText,
-  Typography, Divider, Box,
+  Tooltip, Typography, Divider, Box,
 } from '@mui/material'
 import AutoFixHighIcon from '@mui/icons-material/AutoFixHigh'
 import SmartToyIcon from '@mui/icons-material/SmartToy'
@@ -30,65 +30,65 @@ const groups: NavGroup[] = [
   {
     heading: 'AGENTS',
     items: [
-      { to: '/agents/build', label: 'Build Agent', icon: <AutoFixHighIcon fontSize="small" /> },
-      { to: '/agents', label: 'Registry', icon: <SmartToyIcon fontSize="small" />, exact: true },
+      { to: '/agents/build',  label: 'Build Agent', icon: <AutoFixHighIcon fontSize="small" /> },
+      { to: '/agents',        label: 'Registry',    icon: <SmartToyIcon fontSize="small" />, exact: true },
     ],
   },
   {
     heading: 'WORKFLOWS',
     items: [
-      { to: '/workflows/compose', label: 'Composer', icon: <AccountTreeIcon fontSize="small" /> },
-      { to: '/workflows/runs', label: 'Runs', icon: <PlaylistPlayIcon fontSize="small" /> },
-      { to: '/workflows', label: 'Registry', icon: <ListIcon fontSize="small" />, exact: true },
+      { to: '/workflows/compose', label: 'Composer',  icon: <AccountTreeIcon fontSize="small" /> },
+      { to: '/workflows/runs',    label: 'Runs',      icon: <PlaylistPlayIcon fontSize="small" /> },
+      { to: '/workflows',         label: 'Registry',  icon: <ListIcon fontSize="small" />, exact: true },
     ],
   },
   {
     heading: 'OPERATIONS',
     items: [
-      { to: '/chat', label: 'Chat', icon: <ChatIcon fontSize="small" /> },
-      { to: '/tasks', label: 'Tasks', icon: <AssignmentIcon fontSize="small" /> },
+      { to: '/chat',   label: 'Chat',  icon: <ChatIcon fontSize="small" /> },
+      { to: '/tasks',  label: 'Tasks', icon: <AssignmentIcon fontSize="small" /> },
     ],
   },
   {
     heading: 'AUDIT',
     items: [
-      { to: '/audit', label: 'Events', icon: <HistoryIcon fontSize="small" />, exact: true },
-      { to: '/audit/identities', label: 'Identities', icon: <BadgeIcon fontSize="small" /> },
+      { to: '/audit',             label: 'Events',     icon: <HistoryIcon fontSize="small" />, exact: true },
+      { to: '/audit/identities',  label: 'Identities', icon: <BadgeIcon fontSize="small" /> },
     ],
   },
 ]
 
-export default function Sidebar() {
+interface Props {
+  collapsed: boolean
+}
+
+export default function Sidebar({ collapsed }: Props) {
   const navigate = useNavigate()
   const location = useLocation()
 
-  const isActive = (item: NavItem) => {
-    if (item.exact) return location.pathname === item.to
-    return location.pathname.startsWith(item.to)
-  }
+  const isActive = (item: NavItem) =>
+    item.exact ? location.pathname === item.to : location.pathname.startsWith(item.to)
 
   return (
-    <Box sx={{ display: 'flex', flexDirection: 'column', height: '100%', overflowY: 'auto' }}>
+    <Box sx={{ display: 'flex', flexDirection: 'column', height: '100%', overflowY: 'auto', overflowX: 'hidden' }}>
       {groups.map((group, gi) => (
         <React.Fragment key={group.heading}>
           {gi > 0 && <Divider sx={{ my: 0.5 }} />}
-          <Box sx={{ px: 1.5, pt: gi === 0 ? 1.5 : 1, pb: 0.5 }}>
-            <Typography
-              variant="caption"
-              sx={{
-                fontWeight: 700,
-                letterSpacing: '0.08em',
-                color: 'text.secondary',
-                px: 1,
-              }}
-            >
-              {group.heading}
-            </Typography>
-          </Box>
-          <List dense disablePadding sx={{ px: 1 }}>
+
+          {/* Group heading — hidden when collapsed */}
+          {!collapsed && (
+            <Box sx={{ px: 1.5, pt: gi === 0 ? 1.5 : 1, pb: 0.5 }}>
+              <Typography variant="caption" sx={{ fontWeight: 700, letterSpacing: '0.08em', color: 'text.secondary', px: 1 }}>
+                {group.heading}
+              </Typography>
+            </Box>
+          )}
+          {collapsed && gi === 0 && <Box sx={{ pt: 1 }} />}
+
+          <List dense disablePadding sx={{ px: collapsed ? 0.5 : 1 }}>
             {group.items.map((item) => {
               const active = isActive(item)
-              return (
+              const btn = (
                 <ListItemButton
                   key={item.to}
                   selected={active}
@@ -96,6 +96,9 @@ export default function Sidebar() {
                   sx={{
                     borderRadius: 1.5,
                     mb: 0.25,
+                    justifyContent: collapsed ? 'center' : 'flex-start',
+                    px: collapsed ? 1 : 1.5,
+                    minWidth: 0,
                     '&.Mui-selected': {
                       bgcolor: 'primary.main',
                       color: 'primary.contrastText',
@@ -104,26 +107,32 @@ export default function Sidebar() {
                     },
                   }}
                 >
-                  <ListItemIcon sx={{ minWidth: 32, color: 'text.secondary' }}>
+                  <ListItemIcon sx={{ minWidth: collapsed ? 0 : 32, color: 'text.secondary', justifyContent: 'center' }}>
                     {item.icon}
                   </ListItemIcon>
-                  <ListItemText
-                    primary={item.label}
-                    primaryTypographyProps={{ fontSize: '0.8125rem' }}
-                  />
+                  {!collapsed && (
+                    <ListItemText primary={item.label} primaryTypographyProps={{ fontSize: '0.8125rem' }} />
+                  )}
                 </ListItemButton>
               )
+              return collapsed ? (
+                <Tooltip key={item.to} title={item.label} placement="right">
+                  {btn}
+                </Tooltip>
+              ) : btn
             })}
           </List>
         </React.Fragment>
       ))}
 
       <Box sx={{ flexGrow: 1 }} />
-      <Box sx={{ px: 2, py: 1.5, borderTop: 1, borderColor: 'divider' }}>
-        <Typography variant="caption" color="text.secondary" fontFamily="monospace">
-          v1.0.0
-        </Typography>
-      </Box>
+      {!collapsed && (
+        <Box sx={{ px: 2, py: 1.5, borderTop: 1, borderColor: 'divider' }}>
+          <Typography variant="caption" color="text.secondary" fontFamily="monospace">
+            v1.0.0
+          </Typography>
+        </Box>
+      )}
     </Box>
   )
 }

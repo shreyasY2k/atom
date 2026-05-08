@@ -20,8 +20,8 @@ import { useQuery } from '@tanstack/react-query'
 import { useSearchParams } from 'react-router-dom'
 import {
   Avatar, Box, Chip, CircularProgress, Collapse,
-  Divider, IconButton, List, ListItemButton, ListItemText,
-  Paper, Tab, Tabs, Tooltip, Typography,
+  FormControl, IconButton, InputLabel, MenuItem,
+  Paper, Select, Tab, Tabs, Tooltip, Typography,
 } from '@mui/material'
 import SendIcon from '@mui/icons-material/Send'
 import AttachFileIcon from '@mui/icons-material/AttachFile'
@@ -384,46 +384,60 @@ export default function Chat() {
   return (
     <Box sx={{ display:'flex', height:'100%', overflow:'hidden' }}>
 
-      {/* ── Col 1: Agent selector (190px) ── */}
-      <Box sx={{ width:190, flexShrink:0, borderRight:1, borderColor:'divider', display:'flex', flexDirection:'column', bgcolor:'background.paper' }}>
-        <Box sx={{ px:1.5, py:1.25, borderBottom:1, borderColor:'divider' }}>
-          <Typography variant="caption" color="text.secondary" fontWeight={700} sx={{ textTransform:'uppercase', letterSpacing:'0.08em' }}>Agents</Typography>
+      {/* ── Col 1: Run list + agent dropdown (260px) ── */}
+      <Box sx={{ width:260, flexShrink:0, borderRight:1, borderColor:'divider', display:'flex', flexDirection:'column', bgcolor:'background.paper' }}>
+        {/* Agent dropdown */}
+        <Box sx={{ px:1.5, pt:1.25, pb:1, borderBottom:1, borderColor:'divider' }}>
+          <FormControl size="small" fullWidth>
+            <InputLabel sx={{ fontSize:'0.78rem' }}>Agent</InputLabel>
+            <Select
+              label="Agent"
+              value={selectedAgent?.name ?? ''}
+              onChange={e => { const a = deployed.find(x => x.name === e.target.value); if (a) setSelectedAgent(a) }}
+              sx={{ fontSize:'0.8rem' }}
+              renderValue={v => {
+                const a = deployed.find(x => x.name === v)
+                const [c,e_] = a ? getSeeds(a.name) : [0,0]
+                return (
+                  <Box sx={{ display:'flex', alignItems:'center', gap:0.75 }}>
+                    {a && <AgentAvatar name={a.name} c={c} e={e_} size={18} />}
+                    <Typography variant="caption" fontWeight={600} noWrap>{v}</Typography>
+                  </Box>
+                )
+              }}
+            >
+              {deployed.map(a => {
+                const [c,e_] = getSeeds(a.name)
+                return (
+                  <MenuItem key={a.name} value={a.name} sx={{ gap:1 }}>
+                    <AgentAvatar name={a.name} c={c} e={e_} size={20} />
+                    <Box sx={{ minWidth:0 }}>
+                      <Typography variant="body2" fontWeight={600} noWrap>{a.name}</Typography>
+                      <Typography variant="caption" fontFamily="monospace" color="text.secondary" sx={{ fontSize:'0.6rem' }}>{a.service_account_id?.slice(-10)}</Typography>
+                    </Box>
+                  </MenuItem>
+                )
+              })}
+            </Select>
+          </FormControl>
+          {selectedAgent && (
+            <Box sx={{ display:'flex', alignItems:'center', gap:0.5, mt:0.75 }}>
+              <Tooltip title="Randomize avatar">
+                <IconButton size="small" onClick={() => setSeeds(p => ({...p, [selectedAgent.name]:[Math.floor(Math.random()*8),Math.floor(Math.random()*8)]}))}>
+                  <CasinoIcon sx={{ fontSize:13 }} />
+                </IconButton>
+              </Tooltip>
+              <Tooltip title="Open in Studio">
+                <IconButton size="small" component="a" href={`${STUDIO}/projects/${saId}`} target="_blank">
+                  <OpenInNewIcon sx={{ fontSize:13 }} />
+                </IconButton>
+              </Tooltip>
+              <Typography variant="caption" fontFamily="monospace" color="text.secondary" sx={{ fontSize:'0.6rem', ml:'auto', overflow:'hidden', textOverflow:'ellipsis' }}>
+                {saId.slice(-14)}
+              </Typography>
+            </Box>
+          )}
         </Box>
-        <List dense disablePadding sx={{ px:1, py:0.5, overflowY:'auto', flex:1 }}>
-          {deployed.map(a => {
-            const [c,e] = getSeeds(a.name)
-            return (
-              <ListItemButton key={a.name} selected={selectedAgent?.name===a.name}
-                onClick={() => setSelectedAgent(a)}
-                sx={{ borderRadius:1.5, mb:0.25, gap:0.75, '&.Mui-selected':{ bgcolor:'primary.main', color:'primary.contrastText' } }}>
-                <AgentAvatar name={a.name} c={c} e={e} size={22} />
-                <ListItemText primary={a.name} secondary={a.service_account_id?.slice(-6)}
-                  primaryTypographyProps={{ fontSize:'0.73rem', fontWeight:600, noWrap:true }}
-                  secondaryTypographyProps={{ fontSize:'0.58rem', fontFamily:'monospace' }} />
-              </ListItemButton>
-            )
-          })}
-        </List>
-      </Box>
-
-      {/* ── Col 2: Run list (240px) ── */}
-      <Box sx={{ width:240, flexShrink:0, borderRight:1, borderColor:'divider', display:'flex', flexDirection:'column', bgcolor:'background.paper' }}>
-        {selectedAgent && (
-          <Box sx={{ px:1.5, py:1, borderBottom:1, borderColor:'divider', display:'flex', alignItems:'center', gap:0.75 }}>
-            <AgentAvatar name={selectedAgent.name} c={ci} e={ei} size={24} />
-            <Typography variant="caption" fontWeight={700} noWrap sx={{ flex:1 }}>{selectedAgent.name}</Typography>
-            <Tooltip title="Randomize avatar">
-              <IconButton size="small" onClick={() => setSeeds(p => ({...p, [selectedAgent.name]:[Math.floor(Math.random()*8),Math.floor(Math.random()*8)]}))}>
-                <CasinoIcon sx={{ fontSize:14 }} />
-              </IconButton>
-            </Tooltip>
-            <Tooltip title="Open in Studio">
-              <IconButton size="small" component="a" href={`${STUDIO}/projects/${saId}`} target="_blank">
-                <OpenInNewIcon sx={{ fontSize:14 }} />
-              </IconButton>
-            </Tooltip>
-          </Box>
-        )}
         <Box sx={{ flex:1, overflowY:'auto' }}>
           {!selectedAgent && <Box sx={{ p:1.5 }}><Typography variant="caption" color="text.secondary">Select an agent</Typography></Box>}
           {selectedAgent && historyItems.length===0 && (
