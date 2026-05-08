@@ -1,4 +1,4 @@
-"""Write and read structured audit events in MinIO audit-logs bucket."""
+"""Write and read structured events across MinIO audit-logs, agent-artifacts, and specs buckets."""
 
 import json
 import os
@@ -55,6 +55,47 @@ def emit_build(name: str, owner: str, action: str = "generate_agent") -> None:
             "target": name,
         },
     )
+
+
+def _put(bucket: str, key: str, body: bytes, content_type: str = "application/json") -> None:
+    """Write an object to any MinIO bucket. Fails silently."""
+    try:
+        _s3().put_object(Bucket=bucket, Key=key, Body=body, ContentType=content_type)
+    except Exception:
+        pass
+
+
+def write_agent_artifact(
+    name: str,
+    version: str,
+    agent_code: str,
+    spec_yaml: str,
+    metadata: dict,
+) -> None:
+    """Write compiled agent artifacts to minio://agent-artifacts/<name>/<version>/."""
+    prefix = f"{name}/{version}"
+    _put("agent-artifacts", f"{prefix}/agent.py", agent_code.encode(), "text/x-python")
+    _put("agent-artifacts", f"{prefix}/spec.yaml", spec_yaml.encode(), "text/yaml")
+    _put("agent-artifacts", f"{prefix}/metadata.json",
+         json.dumps({**metadata, "written_at": datetime.now(timezone.utc).isoformat()}).encode())
+
+
+def write_agent_spec(name: str, version: str, spec_yaml: str) -> None:
+    """Write agent spec to minio://specs/agents/<name>/<version>/spec.yaml."""
+    key = f"agents/{name}/{version}/spec.yaml"
+    _put("specs", key, spec_yaml.encode(), "text/yaml")
+
+
+def write_agent_tombstone(name: str, version: str, service_account_id: str) -> None:
+    """Mark agent as undeployed in minio://agent-artifacts/<name>/<version>/metadata.json."""
+    prefix = f"{name}/{version}"
+    _put("agent-artifacts", f"{prefix}/metadata.json",
+         json.dumps({
+             "name": name, "version": version,
+             "service_account_id": service_account_id,
+             "status": "undeployed",
+             "undeployed_at": datetime.now(timezone.utc).isoformat(),
+         }).encode())
 
 
 def read_agent_run_events(

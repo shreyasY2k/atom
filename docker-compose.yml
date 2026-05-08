@@ -153,7 +153,64 @@ services:
     ports: ["4317:4317", "4318:4318"]
     volumes: ["./otel/config.yaml:/etc/otel-collector-config.yaml:ro"]
     command: ["--config=/etc/otel-collector-config.yaml"]
+    depends_on: [tempo]
     networks: [agentnet]
+
+  # ============================================================
+  # OBSERVABILITY STACK — Loki + Tempo + Grafana + Alloy
+  # ============================================================
+  loki:
+    image: grafana/loki:2.9.8
+    container_name: loki
+    restart: unless-stopped
+    ports: ["3100:3100"]
+    volumes:
+      - ./loki/config.yaml:/etc/loki/config.yaml:ro
+      - loki-data:/loki
+    command: ["-config.file=/etc/loki/config.yaml"]
+    networks: [agentnet]
+
+  tempo:
+    image: grafana/tempo:2.4.2
+    container_name: tempo
+    restart: unless-stopped
+    ports: ["3200:3200"]
+    volumes:
+      - ./tempo/config.yaml:/etc/tempo/config.yaml:ro
+      - tempo-data:/var/tempo
+    command: ["-config.file=/etc/tempo/config.yaml"]
+    networks: [agentnet]
+
+  grafana:
+    image: grafana/grafana:10.4.3
+    container_name: grafana
+    restart: unless-stopped
+    ports: ["3001:3000"]
+    environment:
+      - GF_AUTH_ANONYMOUS_ENABLED=true
+      - GF_AUTH_ANONYMOUS_ORG_ROLE=Admin
+      - GF_AUTH_DISABLE_LOGIN_FORM=true
+      - GF_FEATURE_TOGGLES_ENABLE=traceqlEditor metricsSummary
+      - GF_SERVER_ROOT_URL=http://localhost:3001
+      - GF_LOG_LEVEL=warn
+    volumes:
+      - grafana-data:/var/lib/grafana
+      - ./grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./grafana/dashboards:/var/lib/grafana/dashboards:ro
+    depends_on: [loki, tempo]
+    networks: [agentnet]
+
+  alloy:
+    image: grafana/alloy:v1.3.1
+    container_name: alloy
+    restart: unless-stopped
+    volumes:
+      - ./alloy/config.alloy:/etc/alloy/config.alloy:ro
+      - /var/run/docker.sock:/var/run/docker.sock
+    command: ["run", "--server.http.listen-addr=0.0.0.0:12345", "/etc/alloy/config.alloy"]
+    depends_on: [loki, tempo]
+    networks: [agentnet]
+    privileged: true   # required for Docker socket access on some hosts
 
   # ============================================================
   # MEMORY (ReMe, built from source)
@@ -335,6 +392,9 @@ volumes:
   minio-data:
   sandbox-workspace:
   builder-workdir:
+  loki-data:
+  tempo-data:
+  grafana-data:
 
 networks:
   agentnet:

@@ -1,0 +1,13 @@
+apiVersion: 1
+
+providers:
+  - name: atom-platform
+    orgId: 1
+    folder: ATOM Agent Platform
+    folderUid: atom-platform
+    type: file
+    disableDeletion: false
+    updateIntervalSeconds: 30
+    allowUiUpdates: true
+    options:
+      path: /var/lib/grafana/dashboards

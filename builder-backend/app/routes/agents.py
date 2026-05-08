@@ -11,7 +11,7 @@ import yaml
 from fastapi import APIRouter, HTTPException
 
 from app.core import audit, codegen, identity, registry_db
-from app.core.container import build_and_run, container_healthy
+from app.core.container import LocalDeployManager, WORK_DIR, AGENT_PORT, container_healthy
 from app.core.schema import AgentSpec
 from pydantic import ValidationError
 
@@ -112,7 +112,7 @@ def deploy_agent(name: str):
         "spec_hash": spec_hash, "code_hash": chash, "status": "deploying",
     })
 
-    # 3b. Build + run container
+    # 3b. Build + run container via LocalDeployManager
     from app.core.container import STUDIO_URL
     env = {
         **_AGENT_ENV_BASE,
@@ -122,8 +122,18 @@ def deploy_agent(name: str):
         "REME_URL": REME_URL,
         "STUDIO_URL": STUDIO_URL,
     }
+    deploy_mgr = LocalDeployManager(
+        workdir=str(WORK_DIR / "agents" / f"{name}-{spec.metadata.version}")
+    )
     try:
-        endpoint = build_and_run(name, spec.metadata.version, code, env)
+        deploy_result = deploy_mgr.deploy(
+            name=name,
+            version=spec.metadata.version,
+            agent_code=code,
+            port=AGENT_PORT,
+            env=env,
+        )
+        endpoint = deploy_result["endpoint"]
     except Exception as e:
         # Revoke key to avoid orphaned keys
         try:
@@ -161,9 +171,20 @@ def deploy_agent(name: str):
     }
     registry_db.upsert(record)
 
-    # 6. Audit
+    # 6. Audit events
     audit.emit_deploy(name=name, service_account_id=svc_id, version=spec.metadata.version)
     audit.emit_build(name=name, owner=spec.metadata.owner)
+
+    # 7. Persist artifacts and spec to MinIO
+    spec_yaml_text = yaml.dump(spec_dict, sort_keys=False, allow_unicode=True)
+    audit.write_agent_artifact(
+        name=name,
+        version=spec.metadata.version,
+        agent_code=code,
+        spec_yaml=spec_yaml_text,
+        metadata={k: v for k, v in record.items() if k != "virtual_key"},
+    )
+    audit.write_agent_spec(name=name, version=spec.metadata.version, spec_yaml=spec_yaml_text)
 
     return {k: v for k, v in record.items() if k != "virtual_key"}
 

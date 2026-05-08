@@ -367,7 +367,8 @@ Task 04c: Corrections and extensions (skills → agent roles migration, reasonin
 - [x] Schema validates `agentscope_skills` against allowlist; rejects `"open"` reasoning_mode
 - [x] Builder skill emits role-file load, prescribed/guided patterns, free-text adapter, agentscope_skills
 - [x] `agentscope_skills` package with real web_search created
-- [x] `LocalDeployManager` wrapper added to `container.py`
+- [x] `LocalDeployManager` wrapper class added to `container.py` (interface correct)
+- [ ] **INCOMPLETE** — `deploy_agent` route still calls `build_and_run()` directly; `LocalDeployManager` wrapper exists but is NOT used. Fix deferred to 04d.
 - [x] `POST /agents/{name}/invoke` returns `{result, run_id}`
 - [x] `GET /agents/{name}/runs/{run_id}/events` endpoint reads MinIO events in time window
 - [x] Builder UI Test tab: chat, mode badge, sample prompts, trace pane, Studio link
@@ -401,4 +402,72 @@ Task 04c: Corrections and extensions (skills → agent roles migration, reasonin
   And to builder-backend Dockerfile similarly.
 
 ### What's next
-Task 05: ATS workflow end-to-end — three demo paths reliable, audit visible, rehearsal-ready
+Task 04d: Runtime fix + MinIO population + Full observability (Alloy/Loki/Tempo/Grafana)
+
+---
+
+## Session 04d — Runtime Fix, MinIO Population, and Observability Stack
+**Date**: 2026-05-08
+**Status**: IN PROGRESS
+
+### Pre-session audit findings
+1. **LocalDeployManager not wired**: `deploy_agent` in `agents.py` still calls `build_and_run()` directly. `LocalDeployManager` wrapper exists in `container.py` but unused. 4 existing agent containers are healthy and do not need to be restarted (functionally identical).
+2. **MinIO buckets empty**: `agent-artifacts`, `specs`, `workflow-artifacts`, `uploaded-documents` all empty. Only `audit-logs` populated. The `minio-init` service creates the buckets correctly but no service writes to 4 of them.
+3. **No observability backend**: OTEL collector exports only to Studio + debug console. No Loki, Tempo, or Grafana. Traces and logs lost on restart.
+
+See `docs/tasks/04d-runtime-minio-observability.md` for full task spec.
+
+### What was done
+
+**Part A — LocalDeployManager wired:**
+- `builder-backend/app/routes/agents.py`: `deploy_agent` now instantiates `LocalDeployManager` and calls `deploy_mgr.deploy()` instead of `build_and_run()` directly
+- `builder-backend/app/routes/registry.py`: `delete_agent` now calls `deploy_mgr.undeploy()` instead of `stop_and_remove()` directly
+- Existing 4 agent containers are unchanged (functionally identical; no restart needed)
+
+**Part B — MinIO buckets populated:**
+- `builder-backend/app/core/audit.py`: added `write_agent_artifact()`, `write_agent_spec()`, `write_agent_tombstone()`, `_put()` helper
+- `builder-backend/app/routes/agents.py`: calls `write_agent_artifact()` + `write_agent_spec()` after successful deploy
+- `builder-backend/app/routes/registry.py`: calls `write_agent_tombstone()` on undeploy
+- `workflow-backend/app/core/audit.py`: added `write_workflow_spec()`, `write_run_result()`, `_put()` helper
+- `workflow-backend/app/routes/workflows.py`: calls `write_workflow_spec()` on `PUT /spec`
+- `workflow-backend/app/routes/runs.py`: `_persist_run_artifacts()` background task — subscribes to event bus, writes `result.json` + `events.json` to `workflow-artifacts/<name>/<run_id>/` on completion
+- Verified: kyc-refresh redeploy populated `agent-artifacts/kyc-refresh/1.0.0/` (3 files) and `specs/agents/kyc-refresh/1.0.0/spec.yaml`
+
+**Part C — Full observability stack:**
+- New services in docker-compose.yml: `loki` (3100), `tempo` (3200), `grafana` (3001), `alloy`
+- New volumes: `loki-data`, `tempo-data`, `grafana-data`
+- Config files: `loki/config.yaml`, `tempo/config.yaml`, `alloy/config.alloy`
+- Grafana provisioning: `grafana/provisioning/datasources/datasources.yaml` (Loki + Tempo + Prometheus auto-wired), `grafana/provisioning/dashboards/dashboards.yaml`
+- Pre-built dashboard: `grafana/dashboards/platform-overview.json` (all-containers log stream + traces panel)
+- `otel/config.yaml`: added `otlp/tempo` exporter; traces now flow OTEL collector → Tempo; Studio exporter kept
+- otel-collector now depends_on: [tempo]
+- All services healthy: Loki ready, Tempo ready, Grafana 200, Alloy running
+
+### DoD checklist
+- [x] `deploy_agent` uses `LocalDeployManager.deploy()` not `build_and_run()` directly
+- [x] `delete_agent` uses `LocalDeployManager.undeploy()` not `stop_and_remove()` directly
+- [x] New deploy writes agent.py + spec.yaml + metadata.json to `agent-artifacts/`
+- [x] New deploy writes spec to `specs/agents/`
+- [x] Workflow spec save writes to `specs/workflows/`
+- [x] Completed workflow run writes result + events to `workflow-artifacts/`
+- [x] Loki healthy (port 3100)
+- [x] Tempo healthy (port 3200)
+- [x] Grafana healthy (port 3001), anonymous admin access
+- [x] Alloy running, collecting Docker logs
+- [x] OTEL collector exports traces to Tempo
+- [x] Grafana datasources provisioned (Loki + Tempo auto-wired, no manual setup)
+- [x] Platform Overview dashboard deployed
+- [ ] workflow-artifacts populated (pending — need a new workflow run after rebuild)
+- [ ] Alloy log delivery to Loki verified with live query (pending — check in Grafana after stack settles)
+
+### Notes for Task 05
+- Grafana at http://localhost:3001 — anonymous admin, no login required
+- Loki: `{compose_project="mphasis-agent-platform"}` shows all platform logs
+- Tempo: trace search works once OTEL traces start flowing from workflow runs
+- agent-artifacts bucket path: `<name>/<version>/agent.py|spec.yaml|metadata.json`
+- specs bucket path: `agents/<name>/<version>/spec.yaml` and `workflows/<name>/<version>/<ts>.yaml`
+- workflow-artifacts bucket path: `<workflow_name>/<run_id>/result.json|events.json`
+- uploaded-documents bucket: exists, write path deferred to file-upload feature
+
+### What's next
+Task 05: ATS workflow end-to-end — three demo paths reliable, full audit trail, rehearsal-ready

@@ -1,0 +1,122 @@
+{
+  "title": "ATOM Agent Platform — Overview",
+  "uid": "atom-overview",
+  "tags": ["atom", "platform"],
+  "timezone": "browser",
+  "schemaVersion": 39,
+  "refresh": "30s",
+  "time": { "from": "now-3h", "to": "now" },
+  "panels": [
+    {
+      "id": 1,
+      "title": "Platform Services — Log Volume",
+      "type": "logs",
+      "gridPos": { "x": 0, "y": 0, "w": 24, "h": 8 },
+      "datasource": { "uid": "loki", "type": "loki" },
+      "targets": [
+        {
+          "expr": "{compose_project=\"mphasis-agent-platform\"} | json | line_format \"[{{.service}}] {{.event}} {{.run_id}}\"",
+          "legendFormat": "",
+          "refId": "A"
+        }
+      ],
+      "options": {
+        "dedupStrategy": "none",
+        "enableLogDetails": true,
+        "showTime": true,
+        "sortOrder": "Descending",
+        "wrapLogMessage": true
+      }
+    },
+    {
+      "id": 2,
+      "title": "Builder Backend — Log Stream",
+      "type": "logs",
+      "gridPos": { "x": 0, "y": 8, "w": 12, "h": 8 },
+      "datasource": { "uid": "loki", "type": "loki" },
+      "targets": [
+        {
+          "expr": "{service=\"builder-backend\"}",
+          "refId": "A"
+        }
+      ],
+      "options": {
+        "enableLogDetails": true,
+        "showTime": true,
+        "sortOrder": "Descending",
+        "wrapLogMessage": false
+      }
+    },
+    {
+      "id": 3,
+      "title": "Workflow Backend — Log Stream",
+      "type": "logs",
+      "gridPos": { "x": 12, "y": 8, "w": 12, "h": 8 },
+      "datasource": { "uid": "loki", "type": "loki" },
+      "targets": [
+        {
+          "expr": "{service=\"workflow-backend\"}",
+          "refId": "A"
+        }
+      ],
+      "options": {
+        "enableLogDetails": true,
+        "showTime": true,
+        "sortOrder": "Descending",
+        "wrapLogMessage": false
+      }
+    },
+    {
+      "id": 4,
+      "title": "LiteLLM — Log Stream",
+      "type": "logs",
+      "gridPos": { "x": 0, "y": 16, "w": 12, "h": 8 },
+      "datasource": { "uid": "loki", "type": "loki" },
+      "targets": [
+        {
+          "expr": "{service=\"litellm\"}",
+          "refId": "A"
+        }
+      ],
+      "options": {
+        "enableLogDetails": true,
+        "showTime": true,
+        "sortOrder": "Descending",
+        "wrapLogMessage": false
+      }
+    },
+    {
+      "id": 5,
+      "title": "Agent Containers — Log Stream",
+      "type": "logs",
+      "gridPos": { "x": 12, "y": 16, "w": 12, "h": 8 },
+      "datasource": { "uid": "loki", "type": "loki" },
+      "targets": [
+        {
+          "expr": "{container=~\"agent-.*\"}",
+          "refId": "A"
+        }
+      ],
+      "options": {
+        "enableLogDetails": true,
+        "showTime": true,
+        "sortOrder": "Descending",
+        "wrapLogMessage": false
+      }
+    },
+    {
+      "id": 6,
+      "title": "Distributed Traces — Recent",
+      "type": "traces",
+      "gridPos": { "x": 0, "y": 24, "w": 24, "h": 10 },
+      "datasource": { "uid": "tempo", "type": "tempo" },
+      "targets": [
+        {
+          "queryType": "search",
+          "refId": "A",
+          "limit": 20
+        }
+      ]
+    }
+  ]
+}

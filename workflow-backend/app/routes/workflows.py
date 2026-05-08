@@ -9,7 +9,7 @@ import yaml
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, ValidationError
 
-from app.core import registry_db
+from app.core import audit, registry_db
 from app.core.schema import WorkflowSpec
 from app.core.validator import validate
 
@@ -105,6 +105,9 @@ def save_workflow_spec(name: str, req: SaveSpecRequest):
     p = SPECS_PATH / "workflows" / f"{name}.yaml"
     p.parent.mkdir(parents=True, exist_ok=True)
     p.write_text(req.yaml_text)
+    # Mirror to MinIO specs bucket (non-blocking)
+    version = parsed.get("metadata", {}).get("version", "unknown")
+    audit.write_workflow_spec(name=name, version=version, yaml_text=req.yaml_text)
     return {"saved": True, "name": name, "bytes": len(req.yaml_text)}
 
 

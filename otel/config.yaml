@@ -11,24 +11,41 @@ processors:
     timeout: 1s
     send_batch_size: 256
 
+  # Add resource attributes for easier filtering in Tempo/Loki
+  resource:
+    attributes:
+      - action: upsert
+        key: deployment.environment
+        value: "atom-agent-platform"
+
 exporters:
-  # Studio's tracing endpoint — wire up after confirming Studio's OTEL ingest URL
+  # Tempo — distributed trace storage
+  otlp/tempo:
+    endpoint: tempo:4317
+    tls:
+      insecure: true
+
+  # Studio — AgentScope's own trace UI (keep for Studio compatibility)
   otlphttp/studio:
     endpoint: http://studio:3000/api/otel
     tls:
       insecure: true
 
-  # Console exporter for local debugging
+  # Console — local debug
   debug:
-    verbosity: normal
+    verbosity: detailed
 
 service:
   pipelines:
     traces:
       receivers: [otlp]
-      processors: [batch]
-      exporters: [otlphttp/studio, debug]
+      processors: [batch, resource]
+      exporters: [otlp/tempo, otlphttp/studio]
     metrics:
+      receivers: [otlp]
+      processors: [batch]
+      exporters: [debug]
+    logs:
       receivers: [otlp]
       processors: [batch]
       exporters: [debug]

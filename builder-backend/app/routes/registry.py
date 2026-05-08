@@ -4,7 +4,7 @@ import httpx
 from fastapi import APIRouter, HTTPException
 
 from app.core import audit, identity, registry_db
-from app.core.container import stop_and_remove
+from app.core.container import LocalDeployManager, WORK_DIR
 
 router = APIRouter(prefix="/agents", tags=["registry"])
 
@@ -28,10 +28,13 @@ def delete_agent(name: str):
     if not rec:
         raise HTTPException(404, f"agent {name!r} not found")
 
-    # Stop container
+    # Stop container via LocalDeployManager
     try:
-        stop_and_remove(rec["name"], rec["version"])
-    except Exception as e:
+        deploy_mgr = LocalDeployManager(
+            workdir=str(WORK_DIR / "agents" / f"{rec['name']}-{rec['version']}")
+        )
+        deploy_mgr.undeploy(name=rec["name"], version=rec["version"])
+    except Exception:
         pass  # log but don't block revocation
 
     # Revoke virtual key
@@ -47,6 +50,13 @@ def delete_agent(name: str):
         service_account_id=rec["service_account_id"],
         version=rec["version"],
         action="undeploy_agent",
+    )
+
+    # Write tombstone to agent-artifacts so MinIO reflects current state
+    audit.write_agent_tombstone(
+        name=name,
+        version=rec["version"],
+        service_account_id=rec["service_account_id"],
     )
 
     return {"status": "undeployed", "name": name, "service_account_id": rec["service_account_id"]}

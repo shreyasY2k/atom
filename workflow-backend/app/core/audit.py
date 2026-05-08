@@ -1,4 +1,4 @@
-"""Write structured audit events to MinIO audit-logs bucket."""
+"""Write structured events to MinIO audit-logs, workflow-artifacts, and specs buckets."""
 
 import json
 import os
@@ -55,3 +55,47 @@ def emit_run_event(run_id: str, event_type: str, workflow_name: str) -> None:
         {"run_id": run_id, "type": event_type, "workflow_name": workflow_name,
          "actor_type": "system", "actor_id": "system:workflow-engine"},
     )
+
+
+def _put(bucket: str, key: str, body: bytes, content_type: str = "application/json") -> None:
+    """Write an object to any MinIO bucket. Fails silently."""
+    try:
+        _s3().put_object(Bucket=bucket, Key=key, Body=body, ContentType=content_type)
+    except Exception:
+        pass
+
+
+def write_workflow_spec(name: str, version: str, yaml_text: str) -> None:
+    """Write workflow spec to minio://specs/workflows/<name>/<version>/<ts>.yaml."""
+    now = datetime.now(timezone.utc)
+    key = f"workflows/{name}/{version}/{now.strftime('%Y%m%dT%H%M%S')}.yaml"
+    _put("specs", key, yaml_text.encode(), "text/yaml")
+
+
+def write_run_result(
+    workflow_name: str,
+    run_id: str,
+    status: str,
+    final_context: dict,
+    events: list,
+    started_at: str,
+    duration_ms: int,
+) -> None:
+    """Write run summary and event log to minio://workflow-artifacts/<name>/<run_id>/."""
+    prefix = f"{workflow_name}/{run_id}"
+
+    result = {
+        "run_id": run_id,
+        "workflow_name": workflow_name,
+        "status": status,
+        "started_at": started_at,
+        "completed_at": datetime.now(timezone.utc).isoformat(),
+        "duration_ms": duration_ms,
+        "node_count": len(events),
+        "final_context_keys": list(final_context.keys()),
+        "final_context": final_context,
+    }
+    _put("workflow-artifacts", f"{prefix}/result.json",
+         json.dumps(result, default=str).encode())
+    _put("workflow-artifacts", f"{prefix}/events.json",
+         json.dumps(events, default=str).encode())

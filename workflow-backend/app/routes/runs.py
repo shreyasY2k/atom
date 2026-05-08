@@ -3,6 +3,7 @@
 import asyncio
 import json
 import os
+import time
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
@@ -106,6 +107,9 @@ async def start_run(name: str, payload: dict):
     # Emit run-start audit event
     audit.emit_run_event(run_id, "run_started", name)
 
+    # Background task: collect events and write artifacts when run completes
+    asyncio.create_task(_persist_run_artifacts(run_id, name, now))
+
     # Start Temporal workflow
     await start_workflow(
         workflow_id=run_id,
@@ -148,6 +152,34 @@ async def stream_events(name: str, run_id: str):
                 yield f"data: {json.dumps(event)}\n\n"
 
     return StreamingResponse(_generator(), media_type="text/event-stream")
+
+
+async def _persist_run_artifacts(run_id: str, workflow_name: str, started_at: str) -> None:
+    """Subscribe to SSE events for this run; write result to workflow-artifacts on completion."""
+    t0 = time.time()
+    collected_events: list[dict] = []
+    try:
+        async for event in subscribe(run_id):
+            collected_events.append(event)
+            etype = event.get("event", "")
+            if etype in ("workflow_completed", "workflow_failed"):
+                duration_ms = int((time.time() - t0) * 1000)
+                run_rec = _run_index.get(run_id, {})
+                final_ctx = run_rec.get("input", {})  # best we have without Temporal result
+                status = "completed" if etype == "workflow_completed" else "failed"
+                _run_index[run_id]["status"] = status
+                audit.write_run_result(
+                    workflow_name=workflow_name,
+                    run_id=run_id,
+                    status=status,
+                    final_context=final_ctx,
+                    events=collected_events,
+                    started_at=started_at,
+                    duration_ms=duration_ms,
+                )
+                break
+    except Exception:
+        pass
 
 
 @router.get("/workflows/{name}/runs")
