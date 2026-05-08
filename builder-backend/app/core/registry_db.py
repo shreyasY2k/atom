@@ -1,0 +1,82 @@
+"""SQLite-backed agent registry at /work/registry.db."""
+
+import os
+import sqlite3
+from contextlib import contextmanager
+from pathlib import Path
+
+_DB_PATH = Path(os.environ.get("WORK_DIR", "/work")) / "registry.db"
+
+
+def _init():
+    _DB_PATH.parent.mkdir(parents=True, exist_ok=True)
+    with _conn() as conn:
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS agents (
+                name               TEXT PRIMARY KEY,
+                version            TEXT NOT NULL,
+                service_account_id TEXT NOT NULL,
+                virtual_key        TEXT NOT NULL,
+                owner              TEXT NOT NULL DEFAULT 'user:demo@mphasis.com',
+                deployed_at        TEXT NOT NULL,
+                endpoint           TEXT,
+                container_id       TEXT,
+                spec_hash          TEXT,
+                code_hash          TEXT,
+                status             TEXT NOT NULL DEFAULT 'deployed'
+            )
+        """)
+
+
+@contextmanager
+def _conn():
+    conn = sqlite3.connect(str(_DB_PATH))
+    conn.row_factory = sqlite3.Row
+    try:
+        yield conn
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def upsert(record: dict) -> None:
+    with _conn() as conn:
+        conn.execute("""
+            INSERT INTO agents
+              (name, version, service_account_id, virtual_key, owner,
+               deployed_at, endpoint, container_id, spec_hash, code_hash, status)
+            VALUES
+              (:name, :version, :service_account_id, :virtual_key, :owner,
+               :deployed_at, :endpoint, :container_id, :spec_hash, :code_hash, :status)
+            ON CONFLICT(name) DO UPDATE SET
+              version=excluded.version,
+              service_account_id=excluded.service_account_id,
+              virtual_key=excluded.virtual_key,
+              deployed_at=excluded.deployed_at,
+              endpoint=excluded.endpoint,
+              container_id=excluded.container_id,
+              spec_hash=excluded.spec_hash,
+              code_hash=excluded.code_hash,
+              status=excluded.status
+        """, record)
+
+
+def get(name: str) -> dict | None:
+    with _conn() as conn:
+        row = conn.execute("SELECT * FROM agents WHERE name=?", (name,)).fetchone()
+        return dict(row) if row else None
+
+
+def list_all() -> list[dict]:
+    with _conn() as conn:
+        rows = conn.execute("SELECT * FROM agents ORDER BY deployed_at DESC").fetchall()
+        return [dict(r) for r in rows]
+
+
+def mark_undeployed(name: str) -> None:
+    with _conn() as conn:
+        conn.execute("UPDATE agents SET status='undeployed' WHERE name=?", (name,))
+
+
+# Initialise on import
+_init()

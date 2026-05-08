@@ -1,0 +1,63 @@
+# Asset Reconciliation agent — replaces routine human reconciliation step in ATS.
+# Compares incoming security positions against the customer's records, flags
+# discrepancies, returns a reconciliation report with confidence score.
+
+apiVersion: mphasis.platform/v1
+kind: AgentDeployment
+
+metadata:
+  name: asset-recon
+  domain: banking-securities-ops
+  version: 1.0.0
+  description: >
+    Reconcile incoming asset transfer positions against customer records.
+    Identify mismatches in CUSIP, quantity, lot dates. Flag for human
+    review when discrepancies exceed thresholds.
+  owner: mphasis-bfsi-platform-team
+
+spec:
+  agents:
+    - name: recon-analyst
+      role: standalone
+      agent_role_file: agent-roles/ats/asset-recon.role.md
+      reasoning_mode: prescribed
+      model: gemini-3.1-pro
+      temperature: 1.0
+      reasoning_effort: medium
+      max_iterations: 6
+      tools:
+        - get_customer_positions
+        - get_security_master
+        - check_position_lots
+      input_schema:
+        type: object
+        required: [transfer_id, securities]
+        properties:
+          transfer_id:
+            type: string
+            description: "Transfer identifier, e.g. XFER-100442-001"
+          securities:
+            type: array
+            description: "List of securities with cusip and quantity"
+      sample_prompts:
+        - "Reconcile transfer XFER-100442-001 with 40 units of 912828ZQ6"
+        - "Check positions for transfer XFER-200119-001"
+        - "Reconcile XFER-300577-001"
+      memory:
+        type: short_term
+        cross_conversation:
+          enabled: true
+          kind: task
+          task_key: "asset-recon-patterns"
+
+  flow:
+    type: standalone
+
+  audit:
+    log_to: minio://audit-logs/agent/asset-recon
+    retention_days: 90
+
+  deployment:
+    runtime: agentscope
+    sandbox: base
+    replicas: 1

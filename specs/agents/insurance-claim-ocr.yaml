@@ -1,0 +1,99 @@
+# Reference spec — Insurance Claim OCR Intake
+# Document Extractor (Maker) + Coverage Validator (Checker).
+# Demonstrates: OCR tool call, document parsing via Gemini Flash,
+# policy lookup, coverage validation, fraud signals, cross-conversation memory.
+
+apiVersion: mphasis.platform/v1
+kind: AgentDeployment
+
+metadata:
+  name: insurance-claim-ocr
+  domain: insurance-claims
+  version: 1.0.0
+  description: >
+    Insurance claim intake from a scanned document. Maker extracts the
+    document via OCR, parses repair items and totals, looks up the policy,
+    drafts a structured claim record. Checker independently verifies
+    arithmetic, applies coverage rules, runs fraud-pattern signals,
+    approves or flags issues.
+  owner: mphasis-ai-platform-team
+
+spec:
+  agents:
+    - name: document-extractor
+      role: maker
+      agent_role_file: agent-roles/insurance/document-extractor-maker.role.md
+      reasoning_mode: prescribed
+      model: gemini-3.1-pro
+      temperature: 1.0
+      reasoning_effort: medium
+      max_iterations: 8
+      tools:
+        - extract_document_text
+        - parse_repair_estimate
+        - lookup_policy
+        - get_claims_history
+      input_schema:
+        type: object
+        required: [sample_id]
+        properties:
+          sample_id:
+            type: string
+            description: "Pre-staged sample document ID, e.g. auto-repair-windshield"
+          policy_number:
+            type: string
+            description: "Policy number if known, e.g. POL-882-447-AC"
+      sample_prompts:
+        - "Process claim document auto-repair-windshield"
+        - "Extract and validate claim from auto-repair-collision"
+      memory:
+        type: short_term
+        # Personal memory: this claimant has been seen before
+        cross_conversation:
+          enabled: true
+          kind: personal
+          identity_field: policyholder.id
+
+    - name: coverage-validator
+      role: checker
+      agent_role_file: agent-roles/insurance/coverage-validator-checker.role.md
+      reasoning_mode: prescribed
+      model: gemini-3.1-pro
+      temperature: 1.0
+      reasoning_effort: high
+      max_iterations: 8
+      tools:
+        # Read tools the Maker also has (independent verification)
+        - extract_document_text
+        - lookup_policy
+        - get_claims_history
+        # Checker-exclusive tools (separation of duties)
+        - verify_arithmetic
+        - check_coverage
+        - get_red_flag_signals
+      memory:
+        type: short_term
+        # Task memory: patterns learned across past claim reviews
+        cross_conversation:
+          enabled: true
+          kind: task
+          task_key: "insurance-claim-ocr-review"
+
+  flow:
+    type: maker-checker
+    handoff:
+      from: document-extractor
+      to: coverage-validator
+      condition: maker_completed
+    revision_loop:
+      enabled: true
+      max_revisions: 2
+
+  audit:
+    log_to: minio://audit-logs/insurance-claim-ocr
+    retention_days: 90
+
+  deployment:
+    runtime: agentscope
+    sandbox: base
+    replicas: 1

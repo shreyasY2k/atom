@@ -1,0 +1,88 @@
+# Reference spec — Treasury Daily Liquidity Briefing
+# Maker-checker pattern. Gemini-only stack. Memory-enabled via ReMe.
+
+apiVersion: mphasis.platform/v1
+kind: AgentDeployment
+
+metadata:
+  name: treasury-liquidity-briefing
+  domain: banking-treasury
+  version: 1.0.0
+  description: >
+    Daily liquidity position briefing for US bank treasury, produced via
+    maker-checker pattern. Maker drafts the brief; Checker independently
+    verifies LCR math and HQLA cap compliance.
+  owner: mphasis-ai-platform-team
+
+spec:
+  agents:
+    - name: liquidity-analyst
+      role: maker
+      agent_role_file: agent-roles/treasury/liquidity-analyst-maker.role.md
+      reasoning_mode: prescribed
+      model: gemini-3.1-pro
+      temperature: 1.0
+      reasoning_effort: medium
+      max_iterations: 8
+      tools:
+        - get_overnight_positions
+        - get_market_data
+        - compute_lcr
+        - get_trailing_metrics
+      input_schema:
+        type: object
+        required: []
+        properties:
+          as_of_date:
+            type: string
+            description: "Date for the briefing in YYYY-MM-DD format (defaults to today)"
+      sample_prompts:
+        - "Generate today's liquidity briefing"
+        - "Produce the daily LCR report"
+        - "What's our liquidity position today?"
+      memory:
+        type: short_term
+        cross_conversation:
+          enabled: true
+          kind: task
+          task_key: "treasury-liquidity-briefing-maker"
+
+    - name: risk-reviewer
+      role: checker
+      agent_role_file: agent-roles/treasury/risk-reviewer-checker.role.md
+      reasoning_mode: prescribed
+      model: gemini-3.1-pro
+      temperature: 1.0
+      reasoning_effort: high
+      max_iterations: 8
+      tools:
+        - get_overnight_positions
+        - get_market_data
+        - compute_lcr
+        # Checker-exclusive tool (separation of duties)
+        - validate_hqla_composition
+      memory:
+        type: short_term
+        cross_conversation:
+          enabled: true
+          kind: task
+          task_key: "treasury-liquidity-briefing-checker"
+
+  flow:
+    type: maker-checker
+    handoff:
+      from: liquidity-analyst
+      to: risk-reviewer
+      condition: maker_completed
+    revision_loop:
+      enabled: true
+      max_revisions: 2
+
+  audit:
+    log_to: minio://audit-logs/treasury-liquidity-briefing
+    retention_days: 90
+
+  deployment:
+    runtime: agentscope
+    sandbox: base
+    replicas: 1

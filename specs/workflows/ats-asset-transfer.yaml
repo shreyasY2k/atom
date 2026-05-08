@@ -1,0 +1,220 @@
+# Reference workflow — Asset Transfer Service (ATS) for US bank securities ops
+#
+# Real-world shape: ACATS-style transfer between two custodians, simplified
+# for stage. NINE nodes. Two of them (KYC, asset reconciliation) start as
+# human_task in the "before" state and are replaced with agent nodes during
+# the demo.
+#
+# Three demo paths:
+#   1. Routine ($40K transfer)         — both agents fire, one human at end
+#   2. High-value ($1.2M transfer)     — decision branches to compliance human
+#   3. KYC low-confidence              — KYC agent confidence < 0.85, routes to human
+
+apiVersion: mphasis.platform/v1
+kind: WorkflowDeployment
+
+metadata:
+  name: ats-asset-transfer
+  domain: banking-securities-ops
+  version: 1.0.0
+  description: >
+    Asset Transfer Service workflow for US bank securities operations.
+    Receives an inbound transfer request, refreshes KYC, screens for
+    sanctions, branches by amount, reconciles assets (or routes for
+    compliance review), submits SWIFT/DTC instruction, captures human
+    final approval, audits.
+  owner: mphasis-bfsi-platform-team
+
+  layout:
+    nodes:
+      receive-request:   { x: 300, y: 0 }
+      kyc-refresh:       { x: 100, y: 140 }
+      kyc-human-review:  { x: 560, y: 140 }
+      ofac-screen:       { x: 100, y: 280 }
+      amount-decision:   { x: 100, y: 420 }
+      compliance-review: { x: -100, y: 560 }
+      asset-recon:       { x: 320, y: 560 }
+      swift-submit:      { x: 100, y: 700 }
+      final-accept:      { x: 100, y: 840 }
+      notify:            { x: 100, y: 980 }
+
+  sample_inputs:
+    - label: "Routine $40K"
+      input:
+        transfer_id: "XFER-RT-001"
+        customer_id: "CUST-100442"
+        amount_usd: 40000
+        securities:
+          - cusip: "912828ZQ6"
+            quantity: 40
+        destination:
+          custodian: "JPMorgan"
+          account: "ACC-JPM-9934"
+    - label: "High-value $1.2M"
+      input:
+        transfer_id: "XFER-HV-001"
+        customer_id: "CUST-200119"
+        amount_usd: 1200000
+        securities:
+          - cusip: "912810RW0"
+            quantity: 1240
+        destination:
+          custodian: "Goldman"
+          account: "ACC-GS-4421"
+    - label: "Stale doc"
+      input:
+        transfer_id: "XFER-SD-001"
+        customer_id: "CUST-300577"
+        amount_usd: 49000
+        securities:
+          - cusip: "912828ZQ6"
+            quantity: 50
+        destination:
+          custodian: "Citibank"
+          account: "ACC-CITI-7711"
+
+spec:
+  input_schema:
+    type: object
+    required: [transfer_id, customer_id, amount_usd, securities, destination]
+    properties:
+      transfer_id:    { type: string }
+      customer_id:    { type: string }
+      amount_usd:     { type: number }
+      securities:     { type: array }
+      destination:    { type: object }
+
+  nodes:
+
+    - id: receive-request
+      label: "Receive transfer request"
+      type: http
+      method: POST
+      url_template: "http://incoming-queue:8099/transfers"
+      body_template:
+        transfer_id: "{{ ctx.input.transfer_id }}"
+      output_capture: receive_result
+      next: kyc-refresh
+
+    - id: kyc-refresh
+      label: "KYC refresh"
+      type: agent
+      agent_ref:
+        name: kyc-refresh
+        version: latest
+      input_mapping:
+        customer_id: "ctx.input.customer_id"
+      output_capture: kyc_result
+      confidence_threshold: 0.75
+      fallback_node: kyc-human-review
+      next: ofac-screen
+
+    - id: kyc-human-review
+      label: "KYC human review (low-confidence)"
+      type: human_task
+      assignee_group: ops
+      task_template:
+        title: "KYC needs human review for {{ ctx.input.customer_id }}"
+        description: >
+          The KYC agent returned confidence {{ ctx.kyc_result.confidence }}.
+          Threshold is 0.85. Please review the agent's draft KYC and
+          accept, reject, or edit.
+        actions: [accept, reject, edit]
+      sla_seconds: 7200
+      output_capture: kyc_human_decision
+      next: ofac-screen
+
+    - id: ofac-screen
+      label: "OFAC sanctions screening"
+      type: http
+      method: POST
+      url_template: "http://ofac-svc:8096/screen"
+      body_template:
+        customer_id: "{{ ctx.input.customer_id }}"
+        destination: "{{ ctx.input.destination }}"
+      output_capture: ofac_result
+      timeout_seconds: 10
+      next: amount-decision
+
+    - id: amount-decision
+      label: "Routine vs high-value?"
+      type: decision
+      expression: "ctx.input.amount_usd > 250000"
+      branches:
+        true: compliance-review
+        false: asset-recon
+
+    - id: asset-recon
+      label: "Asset reconciliation (routine)"
+      type: agent
+      agent_ref:
+        name: asset-recon
+        version: latest
+      input_mapping:
+        transfer_id: "ctx.input.transfer_id"
+        securities: "ctx.input.securities"
+      output_capture: recon_result
+      confidence_threshold: 0.80
+      fallback_node: compliance-review
+      next: swift-submit
+
+    - id: compliance-review
+      label: "Compliance review (high-value or fallback)"
+      type: human_task
+      assignee_group: compliance
+      task_template:
+        title: "Compliance review needed: transfer {{ ctx.input.transfer_id }}"
+        description: >
+          Transfer of ${{ ctx.input.amount_usd }} requires compliance review.
+          KYC: {{ ctx.kyc_result }}. OFAC: {{ ctx.ofac_result }}.
+        actions: [accept, reject, edit]
+      sla_seconds: 14400
+      output_capture: compliance_decision
+      next: swift-submit
+
+    - id: swift-submit
+      label: "Submit SWIFT/DTC instruction"
+      type: http
+      method: POST
+      url_template: "http://swift-gw:8097/instructions"
+      body_template:
+        transfer_id: "{{ ctx.input.transfer_id }}"
+        amount_usd: "{{ ctx.input.amount_usd }}"
+        securities: "{{ ctx.input.securities }}"
+        destination: "{{ ctx.input.destination }}"
+      output_capture: swift_result
+      timeout_seconds: 30
+      retry: { max_attempts: 3, backoff: exponential }
+      next: final-accept
+
+    - id: final-accept
+      label: "Final accept / override"
+      type: human_task
+      assignee_group: ops
+      task_template:
+        title: "Final approval: transfer {{ ctx.input.transfer_id }}"
+        description: >
+          Workflow has executed. Review the full audit trail and accept,
+          reject, or edit. SWIFT instruction: {{ ctx.swift_result }}.
+        actions: [accept, reject, edit]
+      sla_seconds: 1800
+      output_capture: final_decision
+      next: notify
+
+    - id: notify
+      label: "Audit + notify"
+      type: http
+      method: POST
+      url_template: "http://incoming-queue:8099/transfers/{{ ctx.input.transfer_id }}/complete"
+      body_template:
+        final_decision: "{{ ctx.final_decision }}"
+      output_capture: notify_result
+      next: null  # terminal
+
+  audit:
+    log_to: minio://audit-logs/workflow/ats-asset-transfer
+    retention_days: 90
+
+  deployment:
+    runtime: temporal
+    task_queue: ats-task-queue

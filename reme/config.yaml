@@ -1,0 +1,47 @@
+# ReMe service config.
+# All LLM and embedding calls route through LiteLLM at http://litellm:4000.
+# Storage backend is Postgres (reme-db service in compose).
+# Vector store is local Chroma for V1; upgrade path to pgvector or Qdrant in Phase 2.
+
+mode: service
+
+llm:
+  # ReMe uses OpenAI-compatible client; LiteLLM presents this surface.
+  provider: openai
+  base_url: ${OPENAI_BASE_URL}     # http://litellm:4000/v1
+  api_key:  ${OPENAI_API_KEY}      # the LiteLLM master key
+  model:    ${REME_LLM_MODEL}      # gemini-3-flash (alias defined in litellm/config.yaml)
+
+embedding:
+  provider: openai
+  base_url: ${OPENAI_BASE_URL}
+  api_key:  ${OPENAI_API_KEY}
+  model:    ${REME_EMBEDDING_MODEL}    # gemini-embedding
+
+storage:
+  metadata:
+    type: postgres
+    url:  ${REME_DB_URL}
+  vector:
+    type: chroma
+    path: /app/.reme/chroma
+
+retrieval:
+  hybrid:
+    vector_weight: 0.7
+    bm25_weight: 0.3
+    min_score: 0.4
+    top_n: 10
+
+memory_kinds:
+  personal:
+    enabled: true
+    description: "Cross-session memory tied to a user/claimant identity (e.g., 'this claimant has had 3 prior claims')."
+  task:
+    enabled: true
+    description: "Pattern memory across runs of the same task (e.g., 'invoices from this repair shop tend to have inflated parts pricing')."
+
+server:
+  host: 0.0.0.0
+  port: 8002
+  log_level: info

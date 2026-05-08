@@ -1,0 +1,11 @@
+*, *::before, *::after { box-sizing: border-box; }
+html, body, #root { height: 100%; margin: 0; padding: 0; }
+body { font-family: Roboto, "Helvetica Neue", Arial, sans-serif; }
+.react-flow__container { height: 100%; }
+
+/* Node running state */
+@keyframes node-pulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(124, 58, 237, 0.4); }
+  50% { box-shadow: 0 0 0 8px rgba(124, 58, 237, 0); }
+}
+.node-running { animation: node-pulse 1.5s ease-in-out infinite; }

@@ -1,0 +1,105 @@
+# LiteLLM gateway config — single chokepoint for ALL model + MCP + tool calls.
+# Gemini-only stack. Audit logs flow to MinIO (object-locked). Traces flow to OTEL → Studio.
+#
+# IMPORTANT: Gemini 3 models default temperature=1.0 in LiteLLM.
+# Lower values cause issues per Google's guidance. Determinism comes from
+# pinned model snapshots + structured output + reasoning_effort, not temperature.
+
+model_list:
+
+  # Reasoning-heavy: Maker drafting, Checker verification, Builder code-gen
+  - model_name: gemini-3.1-pro
+    litellm_params:
+      model: gemini/gemini-3.1-pro-preview
+      api_key: os.environ/GEMINI_API_KEY
+
+  # Fast/light: extraction, simple structuring, low-stakes summarization
+  - model_name: gemini-3-flash
+    litellm_params:
+      model: gemini/gemini-3-flash-preview
+      api_key: os.environ/GEMINI_API_KEY
+
+  # Embedding model (used by ReMe for vector similarity)
+  - model_name: gemini-embedding
+    litellm_params:
+      model: gemini/gemini-embedding-2
+      api_key: os.environ/GEMINI_API_KEY
+
+litellm_settings:
+  # Every successful and failed call audited to MinIO via S3-compatible callback.
+  success_callback: ["s3"]
+  failure_callback: ["s3"]
+  s3_callback_params:
+    s3_bucket_name: audit-logs
+    s3_region_name: us-east-1
+    s3_endpoint_url: http://minio:9000
+    s3_aws_access_key_id: os.environ/AWS_ACCESS_KEY_ID
+    s3_aws_secret_access_key: os.environ/AWS_SECRET_ACCESS_KEY
+
+  # OTEL traces -> collector -> Studio
+  callbacks: ["otel"]
+  drop_params: True
+
+# Tool-permission guardrails: enforced at the gateway, regardless of agent code.
+# This is the second line of defense behind the per-agent allowlist in the spec.
+guardrails:
+  - guardrail_name: "treasury-tool-policy"
+    litellm_params:
+      guardrail: tool_permission
+      mode: "post_call"
+      rules:
+        - id: "checker-only-validate-hqla"
+          tool_name: "^validate_hqla_composition$"
+          decision: "allow"
+        - id: "allow-treasury-reads"
+          tool_name: "^(get_overnight_positions|get_market_data|compute_lcr|get_trailing_metrics)$"
+          decision: "allow"
+      default_action: "deny"
+      on_disallowed_action: "block"
+
+  - guardrail_name: "insurance-tool-policy"
+    litellm_params:
+      guardrail: tool_permission
+      mode: "post_call"
+      rules:
+        # Maker tools
+        - id: "allow-ocr-extract"
+          tool_name: "^(extract_document_text|parse_repair_estimate)$"
+          decision: "allow"
+        # Both agents can read policy + claims history
+        - id: "allow-policy-reads"
+          tool_name: "^(lookup_policy|get_claims_history)$"
+          decision: "allow"
+        # Checker-exclusive: arithmetic + coverage validation + fraud signals
+        - id: "checker-only-coverage"
+          tool_name: "^(verify_arithmetic|check_coverage|get_red_flag_signals)$"
+          decision: "allow"
+      default_action: "deny"
+      on_disallowed_action: "block"
+
+  - guardrail_name: "ats-kyc-tool-policy"
+    litellm_params:
+      guardrail: tool_permission
+      mode: "post_call"
+      rules:
+        - id: "allow-kyc-reads"
+          tool_name: "^(get_customer_profile|get_kyc_documents|get_external_screening)$"
+          decision: "allow"
+      default_action: "deny"
+      on_disallowed_action: "block"
+
+  - guardrail_name: "ats-recon-tool-policy"
+    litellm_params:
+      guardrail: tool_permission
+      mode: "post_call"
+      rules:
+        - id: "allow-recon-reads"
+          tool_name: "^(get_customer_positions|get_security_master|check_position_lots)$"
+          decision: "allow"
+      default_action: "deny"
+      on_disallowed_action: "block"
+
+general_settings:
+  master_key: os.environ/LITELLM_MASTER_KEY
+  database_url: os.environ/DATABASE_URL
+  enforce_user_param: True

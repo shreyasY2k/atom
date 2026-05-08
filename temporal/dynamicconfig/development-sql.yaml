@@ -1,0 +1,4 @@
+# Minimal Temporal dynamic config for development with PostgreSQL backend.
+system.forceSearchAttributesCacheRefreshOnRead:
+  - value: true
+    constraints: {}

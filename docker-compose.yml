@@ -1,0 +1,341 @@
+# Mphasis Agent Platform — full Phase 1 stack
+# ==============================================
+# Two surfaces: Agent Builder + Workflow Composer.
+# Engine: Temporal for workflows, AgentScope Runtime for agents.
+# Gemini-only. AgentScope/ReMe/Studio built from source.
+
+services:
+
+  # ============================================================
+  # GATEWAY LAYER
+  # ============================================================
+  litellm:
+    image: ghcr.io/berriai/litellm:main-stable
+    container_name: litellm
+    restart: unless-stopped
+    ports: ["4000:4000"]
+    environment:
+      - LITELLM_MASTER_KEY=${LITELLM_MASTER_KEY:-sk-master-change-me}
+      - LITELLM_SALT_KEY=${LITELLM_SALT_KEY:-sk-salt-change-me}
+      - DATABASE_URL=postgresql://litellm:litellm@litellm-db:5432/litellm
+      - STORE_MODEL_IN_DB=True
+      - GEMINI_API_KEY=${GEMINI_API_KEY:-}
+      - AWS_ACCESS_KEY_ID=${MINIO_ACCESS_KEY:-minioadmin}
+      - AWS_SECRET_ACCESS_KEY=${MINIO_SECRET_KEY:-minioadmin}
+      - AWS_REGION_NAME=us-east-1
+      - LITELLM_LOG=INFO
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4318
+    volumes:
+      - ./litellm/config.yaml:/app/config.yaml:ro
+    command: ["--config", "/app/config.yaml", "--port", "4000", "--num_workers", "2"]
+    depends_on:
+      litellm-db: { condition: service_healthy }
+      minio-init: { condition: service_completed_successfully }
+    networks: [agentnet]
+
+  litellm-db:
+    image: postgres:16
+    container_name: litellm-db
+    restart: unless-stopped
+    environment:
+      - POSTGRES_USER=litellm
+      - POSTGRES_PASSWORD=litellm
+      - POSTGRES_DB=litellm
+    volumes: ["litellm-db-data:/var/lib/postgresql/data"]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U litellm"]
+      interval: 5s
+      retries: 10
+    networks: [agentnet]
+
+  # ============================================================
+  # WORKFLOW ENGINE — Temporal (official image)
+  # ============================================================
+  temporal:
+    image: temporalio/auto-setup:1.25.0
+    container_name: temporal
+    restart: unless-stopped
+    ports: ["7233:7233"]
+    environment:
+      - DB=postgres12
+      - DB_PORT=5432
+      - POSTGRES_USER=temporal
+      - POSTGRES_PWD=temporal
+      - POSTGRES_SEEDS=temporal-db
+      - DYNAMIC_CONFIG_FILE_PATH=/etc/temporal/config/dynamicconfig/development-sql.yaml
+    volumes:
+      - ./temporal/dynamicconfig:/etc/temporal/config/dynamicconfig:ro
+    depends_on:
+      temporal-db: { condition: service_healthy }
+    networks: [agentnet]
+
+  temporal-db:
+    image: postgres:16
+    container_name: temporal-db
+    restart: unless-stopped
+    environment:
+      - POSTGRES_USER=temporal
+      - POSTGRES_PASSWORD=temporal
+      - POSTGRES_DB=temporal
+    volumes: ["temporal-db-data:/var/lib/postgresql/data"]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U temporal"]
+      interval: 5s
+      retries: 10
+    networks: [agentnet]
+
+  temporal-ui:
+    image: temporalio/ui:2.31.0
+    container_name: temporal-ui
+    restart: unless-stopped
+    ports: ["8233:8080"]
+    environment:
+      - TEMPORAL_ADDRESS=temporal:7233
+      - TEMPORAL_CORS_ORIGINS=http://localhost:5173
+    depends_on:
+      - temporal
+    networks: [agentnet]
+
+  # ============================================================
+  # STORAGE
+  # ============================================================
+  minio:
+    image: minio/minio:latest
+    container_name: minio
+    restart: unless-stopped
+    ports: ["9000:9000", "9001:9001"]
+    environment:
+      - MINIO_ROOT_USER=${MINIO_ACCESS_KEY:-minioadmin}
+      - MINIO_ROOT_PASSWORD=${MINIO_SECRET_KEY:-minioadmin}
+    volumes: ["minio-data:/data"]
+    command: server /data --console-address ":9001"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 10s
+      retries: 5
+    networks: [agentnet]
+
+  minio-init:
+    image: minio/mc:latest
+    container_name: minio-init
+    depends_on:
+      minio: { condition: service_healthy }
+    entrypoint: >
+      /bin/sh -c "
+      mc alias set local http://minio:9000 ${MINIO_ACCESS_KEY:-minioadmin} ${MINIO_SECRET_KEY:-minioadmin};
+      mc mb --with-lock local/audit-logs || true;
+      mc retention set --default COMPLIANCE 90d local/audit-logs || true;
+      mc mb local/agent-artifacts || true;
+      mc mb local/workflow-artifacts || true;
+      mc mb local/specs || true;
+      mc mb local/uploaded-documents || true;
+      echo 'minio buckets ready';
+      "
+    networks: [agentnet]
+
+  # ============================================================
+  # OBSERVABILITY (built from source)
+  # ============================================================
+  studio:
+    build:
+      context: ./dockerfiles/agentscope-studio
+      args:
+        STUDIO_GIT_REF: ${AGENTSCOPE_STUDIO_GIT_REF:-main}
+    container_name: studio
+    restart: unless-stopped
+    ports: ["3000:3000"]
+    networks: [agentnet]
+
+  otel-collector:
+    image: otel/opentelemetry-collector-contrib:latest
+    container_name: otel-collector
+    restart: unless-stopped
+    ports: ["4317:4317", "4318:4318"]
+    volumes: ["./otel/config.yaml:/etc/otel-collector-config.yaml:ro"]
+    command: ["--config=/etc/otel-collector-config.yaml"]
+    networks: [agentnet]
+
+  # ============================================================
+  # MEMORY (ReMe, built from source)
+  # ============================================================
+  reme:
+    build:
+      context: ./dockerfiles/reme
+      args:
+        REME_GIT_REF: ${REME_GIT_REF:-v0.3.1.8}
+    container_name: reme
+    restart: unless-stopped
+    ports: ["8002:8002"]
+    environment:
+      - OPENAI_BASE_URL=http://litellm:4000/v1
+      - OPENAI_API_KEY=${LITELLM_MASTER_KEY:-sk-master-change-me}
+      - REME_DB_URL=postgresql://reme:reme@reme-db:5432/reme
+      - REME_VECTOR_STORE=chroma
+      - REME_EMBEDDING_MODEL=gemini-embedding
+      - REME_LLM_MODEL=gemini-3-flash
+    volumes:
+      - reme-data:/app/.reme
+      - ./reme/config.yaml:/app/config.yaml:ro
+    depends_on:
+      - litellm
+      - reme-db
+    networks: [agentnet]
+
+  reme-db:
+    image: postgres:16
+    container_name: reme-db
+    restart: unless-stopped
+    environment:
+      - POSTGRES_USER=reme
+      - POSTGRES_PASSWORD=reme
+      - POSTGRES_DB=reme
+    volumes: ["reme-db-data:/var/lib/postgresql/data"]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U reme"]
+      interval: 5s
+      retries: 10
+    networks: [agentnet]
+
+  # ============================================================
+  # AGENT RUNTIME (built from source)
+  # ============================================================
+  runtime-sandbox:
+    build:
+      context: ./dockerfiles/agentscope-runtime-sandbox
+      args:
+        AGENTSCOPE_RUNTIME_GIT_REF: ${AGENTSCOPE_RUNTIME_GIT_REF:-main}
+    container_name: runtime-sandbox
+    restart: unless-stopped
+    ports: ["8001:8000"]
+    environment:
+      - CONTAINER_DEPLOYMENT=docker
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - sandbox-workspace:/workspace
+    networks: [agentnet]
+
+  # ============================================================
+  # MOCK SERVICES — original BFSI mocks
+  # ============================================================
+  treasury-dw:    { build: { context: ./mocks/treasury_dw }, container_name: treasury-dw, ports: ["8090:8090"], networks: [agentnet], restart: unless-stopped }
+  market-data:    { build: { context: ./mocks/market_data }, container_name: market-data, ports: ["8091:8091"], networks: [agentnet], restart: unless-stopped }
+  lcr-engine:     { build: { context: ./mocks/lcr_engine }, container_name: lcr-engine, ports: ["8092:8092"], networks: [agentnet], restart: unless-stopped }
+  fnol-svc:       { build: { context: ./mocks/fnol_svc }, container_name: fnol-svc, ports: ["8093:8093"], networks: [agentnet], restart: unless-stopped }
+  ocr-svc:
+    build: { context: ./mocks/ocr_svc }
+    container_name: ocr-svc
+    ports: ["8094:8094"]
+    volumes: ["./samples/claim-documents:/app/samples:ro"]
+    networks: [agentnet]
+    restart: unless-stopped
+
+  # ============================================================
+  # MOCK SERVICES — ATS workflow
+  # ============================================================
+  kyc-svc:        { build: { context: ./mocks/kyc_svc }, container_name: kyc-svc, ports: ["8095:8095"], networks: [agentnet], restart: unless-stopped }
+  ofac-svc:       { build: { context: ./mocks/ofac_svc }, container_name: ofac-svc, ports: ["8096:8096"], networks: [agentnet], restart: unless-stopped }
+  swift-gw:       { build: { context: ./mocks/swift_gw }, container_name: swift-gw, ports: ["8097:8097"], networks: [agentnet], restart: unless-stopped }
+  task-queue:        { build: { context: ./mocks/task_queue },    container_name: task-queue,    ports: ["8098:8098"], networks: [agentnet], restart: unless-stopped }
+  securities-ops:    { build: { context: ./mocks/securities_ops }, container_name: securities-ops, ports: ["8099:8099"], networks: [agentnet], restart: unless-stopped }
+  fraud-svc:         { build: { context: ./mocks/fraud_svc }, container_name: fraud-svc, ports: ["8102:8102"], networks: [agentnet], restart: unless-stopped }
+
+  # ============================================================
+  # PLATFORM
+  # ============================================================
+  builder-backend:
+    build:
+      context: .
+      dockerfile: builder-backend/Dockerfile
+    container_name: builder-backend
+    restart: unless-stopped
+    ports: ["8080:8080"]
+    environment:
+      - LITELLM_BASE_URL=http://litellm:4000
+      - LITELLM_MASTER_KEY=${LITELLM_MASTER_KEY:-sk-master-change-me}
+      - MINIO_ENDPOINT=minio:9000
+      - MINIO_ACCESS_KEY=${MINIO_ACCESS_KEY:-minioadmin}
+      - MINIO_SECRET_KEY=${MINIO_SECRET_KEY:-minioadmin}
+      - REME_URL=http://reme:8002
+      - RUNTIME_SANDBOX_URL=http://runtime-sandbox:8000
+      - SKILLS_PATH=/app/skills
+      - AGENT_ROLES_PATH=/app/agent-roles
+      - AGENTSCOPE_SKILLS_PATH=/app/packages/agentscope_skills
+      - SPECS_PATH=/app/specs
+      # Mock service URLs available to deployed agents
+      - TREASURY_DW_URL=http://treasury-dw:8090
+      - MARKET_DATA_URL=http://market-data:8091
+      - LCR_ENGINE_URL=http://lcr-engine:8092
+      - FNOL_SVC_URL=http://fnol-svc:8093
+      - OCR_SVC_URL=http://ocr-svc:8094
+      - KYC_SVC_URL=http://kyc-svc:8095
+      - OFAC_SVC_URL=http://ofac-svc:8096
+      - SWIFT_GW_URL=http://swift-gw:8097
+      - SECURITIES_OPS_URL=http://securities-ops:8099
+      - FRAUD_SVC_URL=http://fraud-svc:8102
+      - STUDIO_URL=http://studio:3000
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ./skills:/app/skills
+      - ./agent-roles:/app/agent-roles
+      - ./packages:/app/packages
+      - ./specs:/app/specs
+      - builder-workdir:/work
+    depends_on:
+      - litellm
+      - minio
+      - reme
+    networks: [agentnet]
+
+  workflow-backend:
+    build: { context: ./workflow-backend }
+    container_name: workflow-backend
+    restart: unless-stopped
+    ports: ["8081:8081"]
+    environment:
+      - TEMPORAL_HOST=temporal:7233
+      - TEMPORAL_NAMESPACE=default
+      - LITELLM_BASE_URL=http://litellm:4000
+      - LITELLM_MASTER_KEY=${LITELLM_MASTER_KEY:-sk-master-change-me}
+      - MINIO_ENDPOINT=minio:9000
+      - MINIO_ACCESS_KEY=${MINIO_ACCESS_KEY:-minioadmin}
+      - MINIO_SECRET_KEY=${MINIO_SECRET_KEY:-minioadmin}
+      - BUILDER_BACKEND_URL=http://builder-backend:8080
+      - TASK_QUEUE_URL=http://task-queue:8098
+      - SPECS_PATH=/app/specs
+      - SKILLS_PATH=/app/skills
+    volumes:
+      - ./specs:/app/specs
+      - ./skills:/app/skills:ro
+    depends_on:
+      - temporal
+      - builder-backend
+      - task-queue
+    networks: [agentnet]
+
+  frontend:
+    build: { context: ./frontend }
+    container_name: frontend
+    restart: unless-stopped
+    ports: ["5173:5173"]
+    environment:
+      - VITE_BUILDER_API_URL=http://localhost:8080
+      - VITE_WORKFLOW_API_URL=http://localhost:8081
+      - VITE_STUDIO_URL=http://localhost:3000
+      - VITE_TEMPORAL_UI_URL=http://localhost:8233
+    depends_on:
+      - builder-backend
+      - workflow-backend
+    networks: [agentnet]
+
+volumes:
+  litellm-db-data:
+  temporal-db-data:
+  reme-db-data:
+  reme-data:
+  minio-data:
+  sandbox-workspace:
+  builder-workdir:
+
+networks:
+  agentnet:
+    driver: bridge

@@ -1,0 +1,67 @@
+apiVersion: mphasis.platform/v1
+kind: AgentDeployment
+
+metadata:
+  name: transaction-anomaly-triage
+  domain: banking-fraud
+  version: 1.0.0
+  description: >
+    Investigate a flagged transaction to determine whether it is genuinely
+    anomalous. Guided reasoning mode — the agent decides which signals to
+    investigate and in what order. Demonstrates agentscope_skills integration
+    (web_search for unfamiliar merchant lookup).
+  owner: mphasis-bfsi-platform-team
+
+spec:
+  agents:
+    - name: fraud-investigator
+      role: standalone
+      agent_role_file: agent-roles/banking-fraud/transaction-anomaly-triage.role.md
+      reasoning_mode: guided
+      model: gemini-3.1-pro
+      temperature: 1.0
+      reasoning_effort: high
+      max_iterations: 8
+      tools:
+        - get_transaction_history
+        - get_customer_baseline
+        - get_peer_segment_stats
+      agentscope_skills:
+        - web_search
+      input_schema:
+        type: object
+        required: [transaction_id, customer_id, merchant, amount]
+        properties:
+          transaction_id:
+            type: string
+            description: "Transaction identifier, e.g. TXN-CUST100442-001"
+          customer_id:
+            type: string
+            description: "Customer identifier, e.g. CUST-100442"
+          merchant:
+            type: string
+            description: "Merchant name as it appears on the transaction"
+          amount:
+            type: number
+            description: "Transaction amount in USD"
+          channel:
+            type: string
+            description: "Transaction channel: online | in-store | ATM"
+      sample_prompts:
+        - "Investigate transaction TXN-CUST100442-001 — $4,800 at 'Zephyr Digital LLC'"
+        - "Triage flagged transaction TXN-CUST200119-002 — $12,000 wire to an offshore account"
+        - "Is TXN-CUST300577-003 a false positive? $95 at unfamiliar merchant"
+      memory:
+        type: short_term
+
+  flow:
+    type: standalone
+
+  audit:
+    log_to: minio://audit-logs/agent/transaction-anomaly-triage
+    retention_days: 90
+
+  deployment:
+    runtime: agentscope
+    sandbox: base
+    replicas: 1
