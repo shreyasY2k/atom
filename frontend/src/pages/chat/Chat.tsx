@@ -414,15 +414,6 @@ export default function Chat() {
   })
   const runs = runsData?.runs ?? []
 
-  // Also get traces from tRPC as supplementary data (OTEL spans not linked to runs)
-  const { data: tracesData } = useQuery({
-    queryKey: ['studio-traces', saId],
-    queryFn: () => studioGet<{ data: { list: StudioTrace[] } }>(`/trpc/getTraces?input=${encodeURIComponent(JSON.stringify({ pagination:{ page:1, pageSize:50 } }))}`),
-    enabled: !!saId,
-    refetchInterval: 15000,
-  })
-  const traces = tracesData?.data?.list ?? []
-
   const [selectedRunId, setSelectedRunId] = useState<string | null>(null)
 
   const [input, setInput] = useState('')
@@ -430,7 +421,6 @@ export default function Chat() {
   const fileRef = useRef<HTMLInputElement>(null)
   const [attachment, setAttachment] = useState<File | null>(null)
   const { on: voiceOn, toggle: voiceToggle, ok: voiceOk } = useVoice(t => setInput(p => p ? p+' '+t : t))
-  const [ttsActive, setTtsActive] = useState(false)
 
   const sendMessage = async (text: string) => {
     if ((!text.trim() && !attachment) || !selectedAgent || loading) return
@@ -438,7 +428,7 @@ export default function Chat() {
     try {
       await builderApi.invokeAgent(selectedAgent.name, { text: text.trim(), ...(attachment?.name ? { file_name: attachment.name } : {}) })
       setAttachment(null)
-      setTimeout(() => refetchRuns(), 3000) // refresh runs after 3s
+      setTimeout(() => refetchRuns(), 3000)
     } catch (e) { /* ignore */ }
     finally { setLoading(false) }
   }
@@ -446,15 +436,6 @@ export default function Chat() {
   const samplePrompts: string[] = (selectedAgent as (AgentRecord & { sample_prompts?: string[] }) | null)?.sample_prompts ?? []
   const studioProjectUrl = `${STUDIO_DIRECT}/projects/${saId}`
   const [ci, ei] = selectedAgent ? getSeeds(selectedAgent.name) : [0, 0]
-
-  const fmtTime = (ts: string) => {
-    // ts could be ISO string or nanoseconds
-    try {
-      if (ts.includes('T')) return new Date(ts).toLocaleTimeString()
-      const ms = Number(BigInt(ts) / BigInt(1_000_000))
-      return new Date(ms).toLocaleTimeString()
-    } catch { return ts.slice(0, 16) }
-  }
 
   const fmtAge = (ts: string) => {
     try {
@@ -466,13 +447,10 @@ export default function Chat() {
     } catch { return '' }
   }
 
-  // Combined run list: Studio runs + OTEL traces (deduplicated by id)
-  const combinedItems: { id: string; name: string; status: string; time: string; type: 'run' | 'trace'; totalTokens?: number; spanCount?: number }[] = [
-    ...runs.map(r => ({ id: r.id, name: r.name, status: r.status, time: r.timestamp, type: 'run' as const })),
-    ...traces
-      .filter(t => !runs.some(r => r.id === t.traceId))
-      .map(t => ({ id: t.traceId, name: t.traceName, status: t.status === 1 ? 'finished' : 'running', time: t.startTime, type: 'trace' as const, totalTokens: t.totalTokens, spanCount: t.spanCount })),
-  ]
+  // Only show runs from Socket.io — already filtered by service_account_id (project).
+  // Do NOT add unfiltered tRPC traces; they contain all agents.
+  const combinedItems: { id: string; name: string; status: string; time: string; totalTokens?: number }[] =
+    runs.map(r => ({ id: r.id, name: r.name, status: r.status, time: r.timestamp }))
 
   return (
     <Box sx={{ display:'flex', height:'100%' }}>
@@ -533,7 +511,7 @@ export default function Chat() {
           )}
           {combinedItems.map(item => {
             const sel = selectedRunId === item.id
-            const dotColor = item.status === 'finished' || item.status === '1' ? '#3B6D11' : item.status === 'running' ? '#534AB7' : '#b91c1c'
+            const dotColor = item.status === 'finished' ? '#3B6D11' : item.status === 'running' ? '#534AB7' : '#b91c1c'
             return (
               <Box key={item.id} component="button" onClick={() => setSelectedRunId(sel ? null : item.id)}
                 sx={{
@@ -551,22 +529,15 @@ export default function Chat() {
                     sx={{ flex:1, minWidth:0, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap', fontSize:'0.72rem' }}>
                     {item.name}
                   </Typography>
-                  <Chip label={item.type} size="small" variant="outlined"
+                  <Chip label={item.status} size="small" variant="outlined"
                     sx={{ height:14, fontSize:'0.55rem', flexShrink:0,
-                      color: item.type === 'run' ? '#534AB7' : '#185FA5',
-                      borderColor: item.type === 'run' ? '#534AB7' : '#185FA5',
+                      color: item.status === 'finished' ? '#3B6D11' : '#534AB7',
+                      borderColor: item.status === 'finished' ? '#3B6D11' : '#534AB7',
                     }} />
                 </Box>
-                <Box sx={{ display:'flex', gap:1.5, mt:0.25 }}>
-                  <Typography variant="caption" color={sel ? 'primary.contrastText' : 'text.secondary'} sx={{ fontSize:'0.62rem', opacity:0.85 }}>
-                    {fmtAge(item.time)}
-                  </Typography>
-                  {item.totalTokens != null && (
-                    <Typography variant="caption" color={sel ? 'primary.contrastText' : 'text.secondary'} sx={{ fontSize:'0.62rem', opacity:0.85 }}>
-                      {item.totalTokens.toLocaleString()} tokens
-                    </Typography>
-                  )}
-                </Box>
+                <Typography variant="caption" color={sel ? 'primary.contrastText' : 'text.secondary'} sx={{ fontSize:'0.62rem', opacity:0.85, mt:0.25 }}>
+                  {fmtAge(item.time)}
+                </Typography>
               </Box>
             )
           })}
