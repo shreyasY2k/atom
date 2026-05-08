@@ -1,24 +1,21 @@
-import React, { useEffect, useRef, useState } from 'react'
+import React, { useState } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import MonacoEditor from '@monaco-editor/react'
 import {
-  Alert, Avatar, Box, Button, Chip, CircularProgress, Collapse,
-  IconButton, InputBase, MenuItem, Paper, Select, Stack, TextField,
-  ToggleButton, ToggleButtonGroup, Tooltip, Typography,
+  Alert, Box, Button, Chip, CircularProgress,
+  MenuItem, Paper, Select, Stack, TextField,
+  ToggleButton, ToggleButtonGroup, Typography,
 } from '@mui/material'
 import AutoFixHighIcon from '@mui/icons-material/AutoFixHigh'
 import TerminalIcon from '@mui/icons-material/Terminal'
 import CodeIcon from '@mui/icons-material/Code'
 import CheckCircleOutlineIcon from '@mui/icons-material/CheckCircleOutline'
-import SendIcon from '@mui/icons-material/Send'
-import SmartToyIcon from '@mui/icons-material/SmartToy'
-import ExpandMoreIcon from '@mui/icons-material/ExpandMore'
-import ExpandLessIcon from '@mui/icons-material/ExpandLess'
-import OpenInNewIcon from '@mui/icons-material/OpenInNew'
+import ChatIcon from '@mui/icons-material/Chat'
 import { builderApi } from '../../api/builder'
-import type { AgentRecord, TraceEvent } from '../../types'
+import type { AgentRecord } from '../../types'
 
-type Mode = 'ai' | 'cli' | 'yaml' | 'test'
+type Mode = 'ai' | 'cli' | 'yaml'
 
 const TEMPLATES: Record<string, string> = {
   kyc: `apiVersion: mphasis.platform/v1
@@ -90,6 +87,7 @@ spec:
 // ── AI Builder mode ─────────────────────────────────────────────────────────
 
 function AIMode() {
+  const navigate = useNavigate()
   const qc = useQueryClient()
   const [prose, setProse] = useState('')
   const [specYaml, setSpecYaml] = useState('')
@@ -193,6 +191,15 @@ function AIMode() {
           <Typography variant="caption" fontFamily="monospace" color="text.secondary" display="block" sx={{ mt: 0.5 }}>
             owner: {deployResult.owner} · endpoint: {deployResult.endpoint}
           </Typography>
+          <Button
+            size="small"
+            variant="outlined"
+            startIcon={<ChatIcon />}
+            onClick={() => navigate(`/chat?agent=${deployResult.name}`)}
+            sx={{ mt: 1.5 }}
+          >
+            Test in Chat →
+          </Button>
         </Paper>
       )}
     </Stack>
@@ -202,6 +209,7 @@ function AIMode() {
 // ── CLI Scaffold mode ────────────────────────────────────────────────────────
 
 function CLIMode() {
+  const navigate = useNavigate()
   const { data } = useQuery({ queryKey: ['agents'], queryFn: builderApi.listAgents })
   const qc = useQueryClient()
   const deploy = useMutation({
@@ -237,15 +245,23 @@ function CLIMode() {
                     <Chip label={record.service_account_id} size="small" sx={{ fontFamily: 'monospace', bgcolor: '#4a148c', color: '#ce93d8', fontSize: '0.6rem', height: 18 }} />
                   )}
                 </Box>
-                <Button
-                  size="small"
-                  variant="contained"
-                  onClick={() => deploy.mutate(name)}
-                  disabled={deploy.isPending}
-                  startIcon={deploy.isPending && deploy.variables === name ? <CircularProgress size={11} color="inherit" /> : undefined}
-                >
-                  {record?.status === 'deployed' ? 'Redeploy' : 'Deploy'}
-                </Button>
+                <Box sx={{ display: 'flex', gap: 0.75 }}>
+                  <Button
+                    size="small"
+                    variant="contained"
+                    onClick={() => deploy.mutate(name)}
+                    disabled={deploy.isPending}
+                    startIcon={deploy.isPending && deploy.variables === name ? <CircularProgress size={11} color="inherit" /> : undefined}
+                  >
+                    {record?.status === 'deployed' ? 'Redeploy' : 'Deploy'}
+                  </Button>
+                  {record?.status === 'deployed' && (
+                    <Button size="small" variant="outlined" startIcon={<ChatIcon />}
+                      onClick={() => navigate(`/chat?agent=${name}`)}>
+                      Test
+                    </Button>
+                  )}
+                </Box>
               </Paper>
             )
           })}
@@ -317,328 +333,7 @@ function YAMLMode() {
   )
 }
 
-// ── Test Mode (chat + inline trace) ──────────────────────────────────────────
-
-interface TestMessage {
-  id: string
-  role: 'user' | 'agent'
-  content: string
-  raw?: Record<string, unknown>
-  runId?: string
-  isError?: boolean
-  durationMs?: number
-}
-
-function formatResult(raw: Record<string, unknown>): string {
-  if (typeof raw.raw_output === 'string') return raw.raw_output
-  if (raw.confidence != null && raw.recommendation) {
-    const lines = [`**Confidence:** ${(Number(raw.confidence) * 100).toFixed(0)}%  **Recommendation:** \`${raw.recommendation}\``]
-    if (raw.customer_id) lines.push(`**Customer:** ${raw.customer_id}`)
-    if (Array.isArray(raw.issues_found) && raw.issues_found.length)
-      lines.push(`**Issues:** ${(raw.issues_found as Record<string, string>[]).map((i) => `${i.code}(${i.severity})`).join(', ')}`)
-    if (raw.notes_for_reviewer) lines.push(`**Notes:** ${raw.notes_for_reviewer}`)
-    return lines.join('\n')
-  }
-  return JSON.stringify(raw, null, 2)
-}
-
-function RichText({ text }: { text: string }) {
-  if (!text.includes('**')) return <Typography variant="body2" component="pre" sx={{ whiteSpace: 'pre-wrap', fontFamily: 'inherit', m: 0 }}>{text}</Typography>
-  return (
-    <Box>
-      {text.split('\n').map((line, i) => {
-        const parts = line.split(/(\*\*[^*]+\*\*)/g)
-        return (
-          <div key={i}>
-            {parts.map((p, j) => p.startsWith('**') && p.endsWith('**')
-              ? <strong key={j}>{p.slice(2, -2)}</strong>
-              : <span key={j}>{p}</span>)}
-          </div>
-        )
-      })}
-    </Box>
-  )
-}
-
-function TracePane({ runId, agentName }: { runId: string; agentName: string }) {
-  const [open, setOpen] = useState(false)
-  const { data, isLoading } = useQuery({
-    queryKey: ['trace', agentName, runId],
-    queryFn: () => builderApi.getRunEvents(agentName, runId),
-    enabled: open,
-    staleTime: Infinity,
-  })
-  const events: TraceEvent[] = data?.events ?? []
-  const llmCount = events.filter((e) => e.event_type === 'llm_call').length
-  const toolCount = events.filter((e) => e.event_type === 'tool_call').length
-  const totalMs = events.reduce((s, e) => s + (e.duration_ms ?? 0), 0)
-
-  return (
-    <Box sx={{ mt: 0.75 }}>
-      <Box
-        component="button"
-        onClick={() => setOpen((v) => !v)}
-        sx={{
-          display: 'flex', alignItems: 'center', gap: 0.75,
-          background: 'none', border: 'none', cursor: 'pointer',
-          color: 'text.secondary', fontSize: '0.72rem', p: 0,
-          '&:hover': { color: 'text.primary' },
-        }}
-      >
-        {open ? <ExpandLessIcon sx={{ fontSize: 14 }} /> : <ExpandMoreIcon sx={{ fontSize: 14 }} />}
-        Trace
-        {(llmCount > 0 || toolCount > 0) && (
-          <Typography variant="caption" color="text.secondary">
-            · {llmCount} LLM call{llmCount !== 1 ? 's' : ''} · {toolCount} tool call{toolCount !== 1 ? 's' : ''}{totalMs > 0 ? ` · ${(totalMs / 1000).toFixed(1)}s` : ''}
-          </Typography>
-        )}
-      </Box>
-      <Collapse in={open}>
-        {isLoading && <Typography variant="caption" color="text.secondary" sx={{ pl: 2 }}>Loading trace…</Typography>}
-        {!isLoading && events.length === 0 && (
-          <Typography variant="caption" color="text.secondary" sx={{ pl: 2 }}>
-            No trace events found (run may be too recent or MinIO indexing in progress).
-          </Typography>
-        )}
-        <Box sx={{ mt: 0.75, display: 'flex', flexDirection: 'column', gap: 0.5, pl: 1 }}>
-          {events.map((ev, i) => (
-            <Box key={i} sx={{ display: 'flex', gap: 1.5, alignItems: 'flex-start', py: 0.5, px: 1, borderLeft: 2, borderColor: ev.event_type === 'tool_call' ? 'primary.light' : 'secondary.light', bgcolor: 'action.hover', borderRadius: '0 4px 4px 0' }}>
-              <Chip
-                label={ev.event_type === 'tool_call' ? 'TOOL' : 'LLM'}
-                size="small"
-                color={ev.event_type === 'tool_call' ? 'primary' : 'secondary'}
-                variant="outlined"
-                sx={{ height: 18, fontSize: '0.6rem', flexShrink: 0 }}
-              />
-              <Box sx={{ flex: 1, minWidth: 0 }}>
-                <Typography variant="caption" fontFamily="monospace" sx={{ display: 'block' }}>
-                  {ev.event_type === 'tool_call' ? ev.tool_name ?? 'tool' : ev.model ?? 'llm'}
-                </Typography>
-                {(ev.input_tokens != null || ev.output_tokens != null) && (
-                  <Typography variant="caption" color="text.secondary" sx={{ fontSize: '0.65rem' }}>
-                    {ev.input_tokens ?? '?'} in · {ev.output_tokens ?? '?'} out
-                  </Typography>
-                )}
-              </Box>
-              {ev.duration_ms != null && (
-                <Typography variant="caption" color="text.secondary" sx={{ flexShrink: 0, fontSize: '0.65rem' }}>
-                  {ev.duration_ms}ms
-                </Typography>
-              )}
-            </Box>
-          ))}
-        </Box>
-      </Collapse>
-    </Box>
-  )
-}
-
-function TestMode({ initialAgent }: { initialAgent?: string }) {
-  const { data } = useQuery({ queryKey: ['agents'], queryFn: builderApi.listAgents })
-  const deployed = (data?.agents ?? []).filter((a) => a.status === 'deployed')
-  const [selectedName, setSelectedName] = useState(initialAgent ?? deployed[0]?.name ?? '')
-  const selected = deployed.find((a) => a.name === selectedName) ?? null
-
-  useEffect(() => {
-    if (!selectedName && deployed.length > 0) setSelectedName(deployed[0].name)
-  }, [deployed, selectedName])
-
-  const [messages, setMessages] = useState<TestMessage[]>([])
-  const [input, setInput] = useState('')
-  const [loading, setLoading] = useState(false)
-  const bottomRef = useRef<HTMLDivElement>(null)
-
-  useEffect(() => { bottomRef.current?.scrollIntoView({ behavior: 'smooth' }) }, [messages])
-
-  // Clear history when agent changes
-  useEffect(() => { setMessages([]) }, [selectedName])
-
-  const send = async (text: string) => {
-    if (!text.trim() || !selected || loading) return
-    setMessages((prev) => [...prev, { id: Date.now().toString(), role: 'user', content: text }])
-    setInput('')
-    setLoading(true)
-    const t0 = Date.now()
-    try {
-      const { result, run_id } = await builderApi.invokeAgent(selected.name, { text })
-      const raw = result as Record<string, unknown>
-      setMessages((prev) => [...prev, {
-        id: (Date.now() + 1).toString(),
-        role: 'agent',
-        content: formatResult(raw),
-        raw,
-        runId: run_id,
-        durationMs: Date.now() - t0,
-      }])
-    } catch (e) {
-      setMessages((prev) => [...prev, {
-        id: (Date.now() + 1).toString(),
-        role: 'agent',
-        content: `Error: ${String(e)}`,
-        isError: true,
-        durationMs: Date.now() - t0,
-      }])
-    } finally {
-      setLoading(false)
-    }
-  }
-
-  const studioUrl = `${window.location.protocol}//${window.location.hostname}:3000`
-  const reasoningMode = (selected as AgentRecord & { reasoning_mode?: string })?.reasoning_mode ?? 'prescribed'
-  const samplePrompts: string[] = (selected as AgentRecord & { sample_prompts?: string[] })?.sample_prompts ?? []
-
-  if (deployed.length === 0) {
-    return (
-      <Box sx={{ py: 6, textAlign: 'center' }}>
-        <Typography variant="body2" color="text.secondary">
-          No deployed agents yet. Use AI Builder or CLI Scaffold to deploy one first.
-        </Typography>
-      </Box>
-    )
-  }
-
-  return (
-    <Box sx={{ display: 'flex', flexDirection: 'column', height: 520 }}>
-      {/* Header */}
-      <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5, mb: 1.5 }}>
-        <Select
-          size="small"
-          value={selectedName}
-          onChange={(e) => setSelectedName(e.target.value)}
-          sx={{ minWidth: 200, fontSize: '0.8rem' }}
-        >
-          {deployed.map((a) => (
-            <MenuItem key={a.name} value={a.name} sx={{ fontSize: '0.8rem' }}>
-              {a.name}
-            </MenuItem>
-          ))}
-        </Select>
-        {selected && (
-          <>
-            <Chip
-              label={reasoningMode}
-              size="small"
-              variant="outlined"
-              sx={{
-                fontSize: '0.65rem', height: 20,
-                color: reasoningMode === 'guided' ? 'primary.main' : 'text.secondary',
-                borderColor: reasoningMode === 'guided' ? 'primary.main' : 'divider',
-              }}
-            />
-            <Typography variant="caption" fontFamily="monospace" color="text.secondary" sx={{ fontSize: '0.62rem', flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-              {selected.service_account_id}
-            </Typography>
-            <Tooltip title="Open in AgentScope Studio (engineer view)">
-              <IconButton size="small" component="a" href={studioUrl} target="_blank" rel="noopener">
-                <OpenInNewIcon sx={{ fontSize: 14 }} />
-              </IconButton>
-            </Tooltip>
-          </>
-        )}
-      </Box>
-
-      {/* Sample prompts */}
-      {samplePrompts.length > 0 && (
-        <Box sx={{ display: 'flex', gap: 0.75, flexWrap: 'wrap', mb: 1 }}>
-          {samplePrompts.map((p) => (
-            <Chip
-              key={p}
-              label={p}
-              size="small"
-              variant="outlined"
-              onClick={() => send(p)}
-              sx={{ cursor: 'pointer', fontSize: '0.7rem', height: 22, maxWidth: 260, overflow: 'hidden', textOverflow: 'ellipsis' }}
-            />
-          ))}
-        </Box>
-      )}
-
-      {/* Messages */}
-      <Box sx={{ flex: 1, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 0 }}>
-        {messages.length === 0 && (
-          <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '100%', gap: 1.5, textAlign: 'center' }}>
-            <Avatar sx={{ width: 40, height: 40, bgcolor: 'primary.dark' }}>
-              <SmartToyIcon sx={{ fontSize: 20 }} />
-            </Avatar>
-            <Typography variant="caption" color="text.secondary">
-              Type a message or click a sample prompt to invoke this agent.
-            </Typography>
-          </Box>
-        )}
-        {messages.map((msg) => (
-          <Box key={msg.id}>
-            {msg.role === 'user' ? (
-              <Box sx={{ display: 'flex', justifyContent: 'flex-end', mb: 1 }}>
-                <Paper sx={{ bgcolor: 'primary.main', color: 'primary.contrastText', px: 2, py: 1, borderRadius: '16px 16px 4px 16px', maxWidth: '72%' }}>
-                  <Typography variant="body2">{msg.content}</Typography>
-                </Paper>
-              </Box>
-            ) : (
-              <Box sx={{ display: 'flex', gap: 1, mb: 1.5, alignItems: 'flex-start' }}>
-                <Avatar sx={{ width: 26, height: 26, bgcolor: msg.isError ? 'error.dark' : 'primary.dark', flexShrink: 0 }}>
-                  <SmartToyIcon sx={{ fontSize: 14 }} />
-                </Avatar>
-                <Box sx={{ flex: 1, minWidth: 0 }}>
-                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 0.5 }}>
-                    <Typography variant="caption" fontWeight={600}>{selected?.name ?? 'agent'}</Typography>
-                    <Chip
-                      label={reasoningMode}
-                      size="small"
-                      sx={{ height: 16, fontSize: '0.58rem', color: reasoningMode === 'guided' ? 'primary.main' : 'text.secondary', bgcolor: reasoningMode === 'guided' ? 'primary.50' : 'action.hover' }}
-                    />
-                    {msg.durationMs != null && (
-                      <Typography variant="caption" color="text.secondary">{msg.durationMs}ms</Typography>
-                    )}
-                  </Box>
-                  <Paper
-                    variant="outlined"
-                    sx={{ px: 2, py: 1.25, borderRadius: '4px 16px 16px 16px', bgcolor: msg.isError ? '#fef2f2' : 'background.paper', borderColor: msg.isError ? 'error.light' : 'divider' }}
-                  >
-                    <Typography variant="body2" component="div"><RichText text={msg.content} /></Typography>
-                  </Paper>
-                  {msg.runId && selected && (
-                    <TracePane runId={msg.runId} agentName={selected.name} />
-                  )}
-                </Box>
-              </Box>
-            )}
-          </Box>
-        ))}
-        {loading && (
-          <Box sx={{ display: 'flex', gap: 1, mb: 1, alignItems: 'center' }}>
-            <Avatar sx={{ width: 26, height: 26, bgcolor: 'primary.dark' }}>
-              <CircularProgress size={12} color="inherit" />
-            </Avatar>
-            <Paper variant="outlined" sx={{ px: 1.5, py: 0.75, borderRadius: '4px 16px 16px 16px', display: 'flex', gap: 0.5 }}>
-              {[0, 120, 240].map((d) => (
-                <Box key={d} sx={{ width: 5, height: 5, borderRadius: '50%', bgcolor: 'text.disabled', animation: 'bounce 1s ease-in-out infinite', animationDelay: `${d}ms`, '@keyframes bounce': { '0%,100%': { transform: 'translateY(0)' }, '50%': { transform: 'translateY(-4px)' } } }} />
-              ))}
-            </Paper>
-          </Box>
-        )}
-        <div ref={bottomRef} />
-      </Box>
-
-      {/* Input */}
-      <Paper variant="outlined" sx={{ display: 'flex', alignItems: 'flex-end', gap: 0.5, px: 1.5, py: 0.75, borderRadius: 2.5, mt: 1 }}>
-        <InputBase
-          multiline
-          maxRows={3}
-          fullWidth
-          value={input}
-          onChange={(e) => setInput(e.target.value)}
-          onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(input) } }}
-          placeholder={selected ? `Ask ${selected.name} anything… (Enter to send)` : 'Select an agent above'}
-          disabled={!selected || loading}
-          sx={{ fontSize: '0.875rem' }}
-        />
-        <IconButton size="small" color="primary" onClick={() => send(input)} disabled={!input.trim() || !selected || loading}>
-          <SendIcon fontSize="small" />
-        </IconButton>
-      </Paper>
-    </Box>
-  )
-}
+// ── (Test mode removed — use /chat?agent=<name> for agent testing) ───────────
 
 // ── Main Builder ─────────────────────────────────────────────────────────────
 
@@ -665,15 +360,11 @@ export default function Builder() {
         <ToggleButton value="yaml" sx={{ gap: 0.75, px: 2 }}>
           <CodeIcon fontSize="small" /> Edit YAML
         </ToggleButton>
-        <ToggleButton value="test" sx={{ gap: 0.75, px: 2 }}>
-          <SmartToyIcon fontSize="small" /> Test ▶
-        </ToggleButton>
       </ToggleButtonGroup>
 
       {mode === 'ai' && <AIMode />}
       {mode === 'cli' && <CLIMode />}
       {mode === 'yaml' && <YAMLMode />}
-      {mode === 'test' && <TestMode />}
     </Box>
   )
 }

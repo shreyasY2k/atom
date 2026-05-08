@@ -14,14 +14,27 @@ export interface AgentRecord {
   sample_prompts?: string[]
 }
 
+export interface TraceMessage {
+  role: string
+  content: string
+}
+
+export interface TraceToolCall {
+  name: string
+  arguments: string
+}
+
 export interface TraceEvent {
   event_type: 'llm_call' | 'tool_call'
   model?: string
   input_tokens?: number
   output_tokens?: number
   duration_ms?: number
-  timestamp?: string
+  timestamp?: number
   tool_name?: string
+  messages?: TraceMessage[]
+  response_content?: string
+  tool_calls?: TraceToolCall[]
 }
 
 // ---- Workflow types ----

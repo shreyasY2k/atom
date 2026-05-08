@@ -258,25 +258,77 @@ def get_run_events(name: str, run_id: str):
         completed_at=run["completed_at"],
     )
 
-    # Normalise to a frontend-friendly shape
     normalized = []
     for ev in events:
-        model = ev.get("model") or ev.get("litellm_params", {}).get("model", "unknown")
-        input_tokens = ev.get("usage", {}).get("prompt_tokens") or ev.get("promptTokens")
-        output_tokens = ev.get("usage", {}).get("completion_tokens") or ev.get("completionTokens")
-        duration_ms = ev.get("duration") or ev.get("endTime") and (
-            (datetime.fromisoformat(ev["endTime"]) - datetime.fromisoformat(ev["startTime"])).total_seconds() * 1000
-            if ev.get("startTime") else None
-        )
+        model = ev.get("model") or "unknown"
+        # LiteLLM S3 callback stores token counts at top level
+        input_tokens = ev.get("prompt_tokens") or ev.get("promptTokens")
+        output_tokens = ev.get("completion_tokens") or ev.get("completionTokens")
+
+        # Calculate duration from start/end timestamps (Unix float)
+        duration_ms = None
+        t0, t1 = ev.get("startTime"), ev.get("endTime")
+        if t0 and t1:
+            try:
+                duration_ms = int((float(t1) - float(t0)) * 1000)
+            except Exception:
+                pass
+
+        # Extract prompt messages (content may be list of blocks or plain string)
+        raw_messages = ev.get("messages", [])
+        messages = []
+        for m in raw_messages:
+            role = m.get("role", "")
+            content = m.get("content", "")
+            # Normalise content blocks to plain text for display
+            if isinstance(content, list):
+                text_parts = [
+                    block.get("text", "") for block in content
+                    if isinstance(block, dict) and block.get("type") == "text"
+                ]
+                content = "\n".join(text_parts)
+            messages.append({"role": role, "content": content})
+
+        # Extract response content from the `response` field
+        response_content = ""
+        tool_calls: list[dict] = []
+        resp = ev.get("response")
+        if isinstance(resp, dict):
+            choices = resp.get("choices") or []
+        elif isinstance(resp, str):
+            response_content = resp
+            choices = []
+        else:
+            choices = []
+
+        if choices and isinstance(choices, list):
+            msg = choices[0].get("message", {})
+            rc = msg.get("content") or ""
+            if isinstance(rc, list):
+                rc = "\n".join(
+                    b.get("text", "") for b in rc
+                    if isinstance(b, dict) and b.get("type") == "text"
+                )
+            response_content = rc or ""
+            for tc in (msg.get("tool_calls") or []):
+                fn = tc.get("function", {})
+                tool_calls.append({
+                    "name": fn.get("name", ""),
+                    "arguments": fn.get("arguments", "{}"),
+                })
+
         event_type = "tool_call" if ev.get("call_type") == "function" else "llm_call"
         normalized.append({
             "event_type": event_type,
             "model": model,
             "input_tokens": input_tokens,
             "output_tokens": output_tokens,
-            "duration_ms": int(duration_ms) if duration_ms else None,
-            "timestamp": ev.get("startTime") or ev.get("timestamp"),
+            "duration_ms": duration_ms,
+            "timestamp": ev.get("startTime"),
             "tool_name": ev.get("function_name"),
+            "messages": messages,                # full prompt context
+            "response_content": response_content[:800],  # truncated for UI
+            "tool_calls": tool_calls,
         })
 
     return {"run_id": run_id, "events": normalized, "raw_count": len(events)}

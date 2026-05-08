@@ -134,13 +134,17 @@ def read_agent_run_events(
                             try:
                                 body = s3.get_object(Bucket="audit-logs", Key=obj["Key"])["Body"].read()
                                 event = json.loads(body)
-                                # Filter: only this agent's calls (by virtual key alias)
-                                alias = (
-                                    event.get("user_api_key_alias")
-                                    or event.get("metadata", {}).get("actor_id")
-                                    or event.get("actor_id", "")
-                                )
-                                if service_account_id not in str(alias):
+                                # Filter: match by end_user (LiteLLM sets this to SERVICE_ACCOUNT_ID)
+                                # or by user_api_key_alias if set.  At least one must match.
+                                end_user = event.get("end_user") or ""
+                                alias = event.get("user_api_key_alias") or ""
+                                meta = event.get("metadata") or {}
+                                actor = meta.get("actor_id", "") if isinstance(meta, dict) else ""
+                                if not (
+                                    service_account_id in end_user
+                                    or service_account_id in alias
+                                    or service_account_id in actor
+                                ):
                                     continue
                                 # Time filter
                                 ts = event.get("startTime") or event.get("timestamp", "")
