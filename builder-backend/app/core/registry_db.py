@@ -33,7 +33,9 @@ def _init():
                 service_account_id TEXT NOT NULL,
                 started_at         TEXT NOT NULL,
                 completed_at       TEXT,
-                status             TEXT NOT NULL DEFAULT 'running'
+                status             TEXT NOT NULL DEFAULT 'running',
+                user_message       TEXT,
+                agent_response     TEXT
             )
         """)
 
@@ -91,12 +93,18 @@ def mark_undeployed(name: str) -> None:
 def upsert_run(run: dict) -> None:
     with _conn() as conn:
         conn.execute("""
-            INSERT INTO agent_runs (run_id, agent_name, service_account_id, started_at, completed_at, status)
-            VALUES (:run_id, :agent_name, :service_account_id, :started_at, :completed_at, :status)
+            INSERT INTO agent_runs (run_id, agent_name, service_account_id, started_at, completed_at, status, user_message, agent_response)
+            VALUES (:run_id, :agent_name, :service_account_id, :started_at, :completed_at, :status, :user_message, :agent_response)
             ON CONFLICT(run_id) DO UPDATE SET
               completed_at=excluded.completed_at,
-              status=excluded.status
-        """, run)
+              status=excluded.status,
+              user_message=COALESCE(excluded.user_message, agent_runs.user_message),
+              agent_response=COALESCE(excluded.agent_response, agent_runs.agent_response)
+        """, {
+            "user_message": None,
+            "agent_response": None,
+            **run,
+        })
 
 
 def get_run(run_id: str) -> dict | None:
@@ -110,6 +118,16 @@ def list_runs(agent_name: str, limit: int = 50) -> list[dict]:
         rows = conn.execute(
             "SELECT * FROM agent_runs WHERE agent_name=? ORDER BY started_at DESC LIMIT ?",
             (agent_name, limit)
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+
+def list_all_runs(limit: int = 200) -> list[dict]:
+    """List all runs across all agents, newest first."""
+    with _conn() as conn:
+        rows = conn.execute(
+            "SELECT * FROM agent_runs ORDER BY started_at DESC LIMIT ?",
+            (limit,)
         ).fetchall()
         return [dict(r) for r in rows]
 

@@ -1,23 +1,22 @@
 /**
- * ATOM Agent Platform — Chat Interface
+ * ATOM Agent Platform — Chat
  *
- * Layout matches AgentScope Studio:
- *  Left (220px)   : Deployed agent list
- *  Center (flex)  : Chat conversation, grouped by run
- *  Right (360px)  : Data View panel — opens on message click
- *                   Tabs: Statistics | Messages | Trace
+ * Calls AgentScope Studio tRPC APIs directly at localhost:3000/trpc/
+ * to show the same data Studio shows: projects, traces (runs), and span details.
  *
- * Features (matching Studio):
- *  - Content blocks: text/markdown, thinking (collapsible), tool_use, tool_result
- *  - Randomize avatar per agent
- *  - Voice input  (browser SpeechRecognition, no model)
- *  - Voice TTS    (browser speechSynthesis reads agent response aloud)
- *  - Template inputs from sample_prompts
- *  - Trace panel with statistics, full message context, span-style trace
+ * Layout matches Studio exactly:
+ *   Left   : project/agent list (getProjects)
+ *   Center : run/trace list for selected agent (getTraces)
+ *            + conversation when run selected (gen_ai spans)
+ *   Right  : trace detail panel (getTrace spans)
+ *
+ * One addition not in Studio: chat input at bottom that calls our
+ * builder-backend /invoke endpoint, which then auto-registers with Studio
+ * via agentscope.init() + our _register_with_studio() helper.
  */
 import React, { useCallback, useEffect, useRef, useState } from 'react'
-import { useSearchParams } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
+import { useSearchParams } from 'react-router-dom'
 import {
   Avatar, Box, Chip, CircularProgress, Collapse,
   Divider, IconButton, InputBase, List, ListItemButton,
@@ -28,763 +27,582 @@ import AttachFileIcon from '@mui/icons-material/AttachFile'
 import MicIcon from '@mui/icons-material/Mic'
 import MicOffIcon from '@mui/icons-material/MicOff'
 import VolumeUpIcon from '@mui/icons-material/VolumeUp'
-import VolumeOffIcon from '@mui/icons-material/VolumeOff'
-import CloseIcon from '@mui/icons-material/Close'
-import CasinoIcon from '@mui/icons-material/Casino'
-import OpenInNewIcon from '@mui/icons-material/OpenInNew'
+import SmartToyIcon from '@mui/icons-material/SmartToy'
+import PersonIcon from '@mui/icons-material/Person'
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore'
 import ExpandLessIcon from '@mui/icons-material/ExpandLess'
+import OpenInNewIcon from '@mui/icons-material/OpenInNew'
+import CasinoIcon from '@mui/icons-material/Casino'
 import SparklesIcon from '@mui/icons-material/AutoAwesome'
 import BuildIcon from '@mui/icons-material/Build'
 import { builderApi } from '../../api/builder'
-import type { AgentRecord, TraceEvent } from '../../types'
+import type { AgentRecord } from '../../types'
 
-// ── Constants ─────────────────────────────────────────────────────────────────
+// ── Studio tRPC API ───────────────────────────────────────────────────────────
 
-const AVATAR_COLORS = [
-  '#534AB7', '#185FA5', '#854F0B', '#3B6D11', '#B54708', '#107569',
-  '#6941C6', '#C11574', '#1570EF', '#0E9384',
-]
+const STUDIO_URL = `http://${window.location.hostname}:3000`
 
-const AVATAR_EMOJIS = ['🤖', '🦾', '🧠', '⚡', '🔬', '🛡️', '💡', '🔭', '🎯', '⚙️']
-
-// ── Types ─────────────────────────────────────────────────────────────────────
-
-interface RunMessage {
-  id: string
-  role: 'user' | 'agent'
-  content: string
-  raw?: Record<string, unknown>
-  runId?: string
-  agentName?: string
-  svcId?: string
-  reasoningMode?: string
-  durationMs?: number
-  isError?: boolean
-  attachmentName?: string
-  attachmentPreview?: string | null
+async function studioQuery<T>(procedure: string, input: object): Promise<T> {
+  const url = `${STUDIO_URL}/trpc/${procedure}?input=${encodeURIComponent(JSON.stringify(input))}`
+  const r = await fetch(url)
+  if (!r.ok) throw new Error(`Studio tRPC ${procedure} failed: ${r.status}`)
+  const d = await r.json()
+  if (d.error) throw new Error(d.error.message)
+  return d.result?.data as T
 }
 
-interface Run {
-  runId: string
-  messages: RunMessage[]
-  startedAt: number
+interface StudioProject {
+  project: string
+  running: number
+  pending: number
+  finished: number
+  total: number
+  createdAt: string
+}
+
+interface StudioTrace {
+  traceId: string
+  traceName: string
+  startTime: string
+  endTime: string
+  status: number
+  spanCount: number
+  totalTokens: number
+}
+
+interface Span {
+  spanId: string
+  parentSpanId: string
+  name: string
+  startTimeUnixNano: string
+  endTimeUnixNano: string
+  attributes: Record<string, unknown>
+}
+
+interface TraceDetail {
+  traceId: string
+  spans: Span[]
 }
 
 // ── Avatar ────────────────────────────────────────────────────────────────────
 
-function AgentAvatar({ name, colorIdx, emojiIdx, size = 32 }: {
-  name: string; colorIdx: number; emojiIdx: number; size?: number
-}) {
-  const color = AVATAR_COLORS[colorIdx % AVATAR_COLORS.length]
-  const emoji = AVATAR_EMOJIS[emojiIdx % AVATAR_EMOJIS.length]
+const AVATAR_COLORS = ['#534AB7','#185FA5','#854F0B','#3B6D11','#B54708','#107569','#6941C6','#C11574']
+const AVATAR_EMOJIS = ['🤖','🦾','🧠','⚡','🔬','🛡️','💡','🔭']
+
+function AgentAvatar({ name, colorIdx, emojiIdx, size = 30 }: { name: string; colorIdx: number; emojiIdx: number; size?: number }) {
   return (
-    <Avatar sx={{ width: size, height: size, bgcolor: color, flexShrink: 0, fontSize: size * 0.45 }}>
-      {emoji}
+    <Avatar sx={{ width: size, height: size, bgcolor: AVATAR_COLORS[colorIdx % AVATAR_COLORS.length], flexShrink: 0, fontSize: size * 0.4 }}>
+      {AVATAR_EMOJIS[emojiIdx % AVATAR_EMOJIS.length]}
     </Avatar>
   )
 }
 
-// ── Markdown ──────────────────────────────────────────────────────────────────
+// ── Markdown (simple) ─────────────────────────────────────────────────────────
 
 function Markdown({ text }: { text: string }) {
   const lines = text.split('\n')
   const out: React.ReactNode[] = []
   let i = 0
-  const inline = (s: string): React.ReactNode[] =>
-    s.split(/(\*\*[^*]+\*\*|`[^`]+`)/g).map((p, j) => {
-      if (p.startsWith('**') && p.endsWith('**')) return <strong key={j}>{p.slice(2, -2)}</strong>
-      if (p.startsWith('`') && p.endsWith('`'))
-        return <Box key={j} component="code" sx={{ fontFamily: 'monospace', fontSize: '0.85em', bgcolor: 'action.selected', px: 0.4, borderRadius: 0.5 }}>{p.slice(1, -1)}</Box>
-      return <span key={j}>{p}</span>
-    })
-
+  const inline = (s: string) => s.split(/(\*\*[^*]+\*\*|`[^`]+`)/g).map((p, j) => {
+    if (p.startsWith('**') && p.endsWith('**')) return <strong key={j}>{p.slice(2,-2)}</strong>
+    if (p.startsWith('`') && p.endsWith('`')) return <Box key={j} component="code" sx={{ fontFamily:'monospace', fontSize:'0.85em', bgcolor:'action.selected', px:0.4, borderRadius:0.5 }}>{p.slice(1,-1)}</Box>
+    return <span key={j}>{p}</span>
+  })
   while (i < lines.length) {
     const l = lines[i]
     if (l.startsWith('```')) {
       const code: string[] = []; i++
       while (i < lines.length && !lines[i].startsWith('```')) { code.push(lines[i]); i++ }
-      out.push(<Box key={i} component="pre" sx={{ bgcolor: 'grey.100', p: 1.5, borderRadius: 1, my: 0.5, overflow: 'auto', fontSize: '0.78rem', fontFamily: 'monospace', m: 0 }}>{code.join('\n')}</Box>)
+      out.push(<Box key={i} component="pre" sx={{ bgcolor:'grey.100', p:1.5, borderRadius:1, my:0.5, overflow:'auto', fontSize:'0.78rem', fontFamily:'monospace', m:0 }}>{code.join('\n')}</Box>)
       i++; continue
     }
-    if (l.startsWith('#')) {
-      const lvl = l.match(/^#+/)?.[0].length ?? 1
-      out.push(<Typography key={i} variant={lvl === 1 ? 'h6' : 'subtitle1'} fontWeight={600} sx={{ mt: 0.75, mb: 0.25 }}>{inline(l.replace(/^#+\s*/, ''))}</Typography>)
-      i++; continue
-    }
-    if (l.match(/^[-*]\s/)) {
-      out.push(<Box key={i} sx={{ display: 'flex', gap: 0.75, mb: 0.25 }}><Box component="span" sx={{ color: 'text.secondary' }}>•</Box><Typography variant="body2" component="span">{inline(l.replace(/^[-*]\s/, ''))}</Typography></Box>)
-      i++; continue
-    }
-    if (l.trim() === '') { out.push(<Box key={i} sx={{ height: 4 }} />); i++; continue }
-    out.push(<Typography key={i} variant="body2" component="div" sx={{ mb: 0.2 }}>{inline(l)}</Typography>)
+    if (l.trim() === '') { out.push(<Box key={i} sx={{ height:4 }} />); i++; continue }
+    out.push(<Typography key={i} variant="body2" component="div" sx={{ mb:0.2 }}>{inline(l)}</Typography>)
     i++
   }
   return <Box>{out}</Box>
 }
 
-// ── Collapsible block (Thinking, Tool) ────────────────────────────────────────
+// ── Span tree (replaces our custom trace panel) ────────────────────────────────
 
-function CollapsibleBlock({
-  icon, title, defaultOpen = false, children,
-}: {
-  icon: React.ReactNode; title: string; defaultOpen?: boolean; children: React.ReactNode
-}) {
-  const [open, setOpen] = useState(defaultOpen)
+function SpanRow({ span, allSpans, depth = 0 }: { span: Span; allSpans: Span[]; depth?: number }) {
+  const [open, setOpen] = useState(depth === 0)
+  const children = allSpans.filter(s => s.parentSpanId === span.spanId)
+  const attrs = span.attributes as Record<string, Record<string, unknown>>
+  const genAi = attrs?.gen_ai || {}
+  const agentName = (genAi?.agent as Record<string, unknown>)?.name as string | undefined
+  const model = (genAi?.model as Record<string, unknown>)?.name as string | undefined
+  const inputMsg = ((genAi?.input as Record<string, unknown>)?.messages as unknown[])
+  const outputMsg = ((genAi?.output as Record<string, unknown>)?.messages as unknown[])
+  const durationNs = BigInt(span.endTimeUnixNano) - BigInt(span.startTimeUnixNano)
+  const durationMs = Number(durationNs / BigInt(1_000_000))
+  const isLLM = span.name.startsWith('chat_completion') || span.name.includes('llm')
+  const isAgent = span.name.startsWith('invoke_agent')
+  const isTool = span.name.startsWith('call_tool') || span.name.includes('tool')
+
+  const color = isAgent ? '#534AB7' : isLLM ? '#185FA5' : isTool ? '#854F0B' : '#94a3b8'
+
   return (
-    <Box sx={{ border: 1, borderColor: 'divider', borderRadius: 1, overflow: 'hidden', my: 0.5 }}>
+    <Box>
       <Box
         component="button"
         onClick={() => setOpen(v => !v)}
         sx={{
-          display: 'flex', alignItems: 'center', gap: 0.75, width: '100%', textAlign: 'left',
-          background: 'action.hover', border: 'none', cursor: 'pointer',
-          px: 1.25, py: 0.75, bgcolor: 'action.hover',
-          '&:hover': { bgcolor: 'action.selected' },
+          display:'flex', alignItems:'center', gap:0.75, width:'100%', textAlign:'left',
+          background:'none', border:'none', cursor:'pointer', pl: depth * 2 + 0.75, pr:0.75, py:0.5,
+          borderRadius:1, '&:hover': { bgcolor:'action.hover' },
         }}
       >
-        {icon}
-        <Typography variant="caption" fontWeight={600} sx={{ flex: 1 }}>{title}</Typography>
-        {open ? <ExpandLessIcon sx={{ fontSize: 14 }} /> : <ExpandMoreIcon sx={{ fontSize: 14 }} />}
+        <Box sx={{ width:6, height:6, borderRadius:'50%', bgcolor:color, flexShrink:0 }} />
+        <Typography variant="caption" fontFamily="monospace" fontWeight={isAgent ? 700 : 400} sx={{ flex:1, minWidth:0, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap', fontSize:'0.72rem', color }}>
+          {agentName || model || span.name.split(' ').slice(-1)[0]}
+        </Typography>
+        {durationMs > 0 && <Typography variant="caption" color="text.secondary" sx={{ fontSize:'0.62rem', flexShrink:0 }}>{durationMs < 1000 ? `${durationMs}ms` : `${(durationMs/1000).toFixed(1)}s`}</Typography>}
+        {children.length > 0 && (open ? <ExpandLessIcon sx={{ fontSize:12 }} /> : <ExpandMoreIcon sx={{ fontSize:12 }} />)}
       </Box>
+
       <Collapse in={open}>
-        <Box sx={{ p: 1.25, borderTop: 1, borderColor: 'divider', bgcolor: 'background.default' }}>
-          {children}
-        </Box>
+        {/* Show input/output messages for agent spans */}
+        {(inputMsg || outputMsg) && (
+          <Box sx={{ ml: depth * 2 + 1.5, mr:1, mb:0.5 }}>
+            {Array.isArray(inputMsg) && inputMsg.slice(-2).map((m: unknown, mi) => {
+              const msg = m as Record<string, unknown>
+              const parts = (msg.parts as {content?: string}[] | undefined) || []
+              const text = parts.map(p => p.content || '').join('').trim()
+              if (!text || text.length < 3) return null
+              return (
+                <Box key={mi} sx={{ mb:0.25 }}>
+                  <Chip label={String(msg.role || 'user')} size="small" sx={{ height:14, fontSize:'0.58rem', mb:0.25 }} />
+                  <Typography variant="caption" fontFamily="monospace" sx={{ display:'block', fontSize:'0.68rem', color:'text.secondary', ml:0.5, whiteSpace:'pre-wrap', maxHeight:100, overflow:'hidden' }}>
+                    {text.slice(0, 300)}{text.length > 300 ? '…' : ''}
+                  </Typography>
+                </Box>
+              )
+            })}
+            {Array.isArray(outputMsg) && outputMsg.slice(0,1).map((m: unknown, mi) => {
+              const msg = m as Record<string, unknown>
+              const parts = (msg.parts as {content?: string}[] | undefined) || []
+              const text = parts.map(p => p.content || '').join('').trim()
+              if (!text) return null
+              return (
+                <Box key={`out-${mi}`} sx={{ borderTop:1, borderColor:'divider', pt:0.25, mt:0.25 }}>
+                  <Chip label="→ response" size="small" sx={{ height:14, fontSize:'0.58rem', mb:0.25, bgcolor:'rgba(59,109,17,0.1)' }} />
+                  <Typography variant="caption" fontFamily="monospace" sx={{ display:'block', fontSize:'0.68rem', color:'text.primary', ml:0.5, whiteSpace:'pre-wrap', maxHeight:150, overflow:'hidden' }}>
+                    {text.slice(0, 400)}{text.length > 400 ? '…' : ''}
+                  </Typography>
+                </Box>
+              )
+            })}
+          </Box>
+        )}
+        {children.map(child => <SpanRow key={child.spanId} span={child} allSpans={allSpans} depth={depth + 1} />)}
       </Collapse>
     </Box>
   )
 }
 
-// ── Format agent output ───────────────────────────────────────────────────────
+function TraceDetailView({ traceId }: { traceId: string }) {
+  const [tab, setTab] = useState(0)
+  const { data, isLoading } = useQuery({
+    queryKey: ['studio-trace', traceId],
+    queryFn: () => studioQuery<TraceDetail>('getTrace', { traceId }),
+    staleTime: Infinity,
+  })
 
-function formatOutput(raw: Record<string, unknown>): string {
-  if (typeof raw.raw_output === 'string') return raw.raw_output
-  if (raw.confidence != null && raw.recommendation) {
-    const c = (Number(raw.confidence) * 100).toFixed(0)
-    const lines = [`**Confidence:** ${c}%  **Recommendation:** \`${raw.recommendation}\``]
-    if (raw.customer_id) lines.push(`**Customer:** ${raw.customer_id}`)
-    const issues = raw.issues_found as { code: string; severity: string }[] | undefined
-    if (Array.isArray(issues) && issues.length) lines.push(`**Issues:** ${issues.map(i => `${i.code}(${i.severity})`).join(', ')}`)
-    if (raw.notes_for_reviewer) lines.push(`**Notes:** ${raw.notes_for_reviewer}`)
-    return lines.join('\n')
-  }
-  if (raw.transfer_id && raw.securities_count != null) {
-    const lines = [`**Transfer:** \`${raw.transfer_id}\`  **Confidence:** ${(Number(raw.confidence ?? 0) * 100).toFixed(0)}%  **Rec:** \`${raw.recommendation}\``]
-    const issues = raw.issues as { code: string; severity: string }[] | undefined
-    if (Array.isArray(issues) && issues.length) lines.push(`**Issues:** ${issues.map(i => `${i.code}(${i.severity})`).join(', ')}`)
-    return lines.join('\n')
-  }
-  return JSON.stringify(raw, null, 2)
-}
+  const spans = data?.spans ?? []
+  const roots = spans.filter(s => !s.parentSpanId || !spans.find(p => p.spanId === s.parentSpanId))
+  const totalMs = spans.length ? (() => {
+    const t0 = BigInt(spans[0].startTimeUnixNano)
+    const t1 = spans.reduce((m, s) => BigInt(s.endTimeUnixNano) > m ? BigInt(s.endTimeUnixNano) : m, t0)
+    return Number((t1 - t0) / BigInt(1_000_000))
+  })() : 0
 
-// ── Data View: Statistics tab ─────────────────────────────────────────────────
-
-function StatisticsTab({ events }: { events: TraceEvent[] }) {
-  const llm = events.filter(e => e.event_type === 'llm_call')
-  const tools = events.filter(e => e.event_type === 'tool_call')
-  const totalIn = llm.reduce((s, e) => s + (e.input_tokens ?? 0), 0)
-  const totalOut = llm.reduce((s, e) => s + (e.output_tokens ?? 0), 0)
-  const totalMs = events.reduce((s, e) => s + (e.duration_ms ?? 0), 0)
-  const models = [...new Set(llm.map(e => e.model).filter(Boolean))]
-
-  const Row = ({ label, value }: { label: string; value: string | number }) => (
-    <Box sx={{ display: 'flex', justifyContent: 'space-between', py: 0.5, borderBottom: 1, borderColor: 'divider' }}>
-      <Typography variant="caption" color="text.secondary">{label}</Typography>
-      <Typography variant="caption" fontWeight={600} fontFamily="monospace">{value}</Typography>
-    </Box>
-  )
-
-  const Section = ({ title, children }: { title: string; children: React.ReactNode }) => (
-    <Box sx={{ mb: 2 }}>
-      <Typography variant="caption" fontWeight={700} color="text.secondary" sx={{ textTransform: 'uppercase', letterSpacing: '0.07em', display: 'block', mb: 0.5 }}>{title}</Typography>
-      {children}
-    </Box>
-  )
+  const llmSpans = spans.filter(s => s.name.startsWith('chat_completion'))
+  const totalTokens = llmSpans.reduce((s, sp) => {
+    const usage = ((sp.attributes as Record<string,Record<string,unknown>>)?.gen_ai?.usage || {}) as Record<string, number>
+    return s + (usage.total_tokens || 0)
+  }, 0)
 
   return (
-    <Box sx={{ p: 2, overflowY: 'auto', height: '100%' }}>
-      <Section title="Run">
-        <Row label="LLM calls" value={llm.length} />
-        <Row label="Tool calls" value={tools.length} />
-        <Row label="Total latency" value={totalMs < 1000 ? `${totalMs}ms` : `${(totalMs / 1000).toFixed(1)}s`} />
-      </Section>
-      <Section title="Tokens">
-        <Row label="Input (prompt)" value={totalIn.toLocaleString()} />
-        <Row label="Output (completion)" value={totalOut.toLocaleString()} />
-        <Row label="Total" value={(totalIn + totalOut).toLocaleString()} />
-      </Section>
-      {models.length > 0 && (
-        <Section title="Models">
-          {models.map(m => <Row key={m} label={m ?? ''} value={llm.filter(e => e.model === m).length + ' calls'} />)}
-        </Section>
+    <Box sx={{ height:'100%', display:'flex', flexDirection:'column' }}>
+      <Tabs value={tab} onChange={(_, v) => setTab(v)} sx={{ borderBottom:1, borderColor:'divider', minHeight:36 }}>
+        <Tab label="Run" sx={{ fontSize:'0.7rem', minHeight:36, py:0, textTransform:'uppercase' }} />
+        <Tab label="Trace" sx={{ fontSize:'0.7rem', minHeight:36, py:0, textTransform:'uppercase' }} />
+      </Tabs>
+      <Box sx={{ flex:1, overflow:'auto' }}>
+        {isLoading && <Box sx={{ p:2 }}><CircularProgress size={18} /></Box>}
+
+        {/* Run tab — statistics */}
+        {tab === 0 && !isLoading && (
+          <Box sx={{ p:2 }}>
+            <Box sx={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:1.5, mb:2 }}>
+              {[
+                { label:'Spans', value: spans.length },
+                { label:'LLM calls', value: llmSpans.length },
+                { label:'Total time', value: totalMs < 1000 ? `${totalMs}ms` : `${(totalMs/1000).toFixed(1)}s` },
+                { label:'Total tokens', value: totalTokens.toLocaleString() },
+              ].map(({ label, value }) => (
+                <Paper key={label} variant="outlined" sx={{ p:1.25, borderRadius:1.5 }}>
+                  <Typography variant="caption" color="text.secondary" display="block">{label}</Typography>
+                  <Typography variant="body2" fontWeight={700} fontFamily="monospace">{value}</Typography>
+                </Paper>
+              ))}
+            </Box>
+            <Typography variant="caption" color="text.secondary" fontFamily="monospace" display="block" sx={{ wordBreak:'break-all' }}>
+              {traceId}
+            </Typography>
+          </Box>
+        )}
+
+        {/* Trace tab — span tree */}
+        {tab === 1 && !isLoading && (
+          <Box sx={{ p:1 }}>
+            {roots.length === 0 && <Typography variant="caption" color="text.secondary" sx={{ p:1, display:'block' }}>No spans found.</Typography>}
+            {roots.map(r => <SpanRow key={r.spanId} span={r} allSpans={spans} depth={0} />)}
+          </Box>
+        )}
+      </Box>
+    </Box>
+  )
+}
+
+// ── Conversation view for a selected trace ────────────────────────────────────
+
+function ConversationView({ traceId, agentName }: { traceId: string; agentName: string }) {
+  const { data } = useQuery({
+    queryKey: ['studio-trace', traceId],
+    queryFn: () => studioQuery<TraceDetail>('getTrace', { traceId }),
+    staleTime: Infinity,
+  })
+
+  const spans = data?.spans ?? []
+  // The root span has the full input/output
+  const rootSpan = spans.find(s => !s.parentSpanId || !spans.find(p => p.spanId === s.parentSpanId))
+  if (!rootSpan) return null
+
+  const attrs = rootSpan.attributes as Record<string, Record<string, unknown>>
+  const genAi = attrs?.gen_ai || {}
+  const inputMsgs = ((genAi?.input as Record<string,unknown>)?.messages as unknown[]) || []
+  const outputMsgs = ((genAi?.output as Record<string,unknown>)?.messages as unknown[]) || []
+  const userInput = inputMsgs.find((m: unknown) => (m as Record<string,unknown>).role === 'user')
+  const agentOutput = outputMsgs.find((m: unknown) => (m as Record<string,unknown>).role === 'assistant')
+  const userText = ((userInput as Record<string,unknown>)?.parts as {content?:string}[] | undefined)?.[0]?.content || ''
+  const agentText = ((agentOutput as Record<string,unknown>)?.parts as {content?:string}[] | undefined)?.[0]?.content || ''
+
+  // Try to parse agent text as JSON for nice display
+  let displayText = agentText
+  try {
+    const parsed = JSON.parse(agentText)
+    if (parsed.confidence != null) {
+      const c = (Number(parsed.confidence)*100).toFixed(0)
+      displayText = `**Confidence:** ${c}%  **Recommendation:** \`${parsed.recommendation}\`\n${parsed.notes_for_reviewer ? `**Notes:** ${parsed.notes_for_reviewer}` : ''}`
+    }
+  } catch { /* use raw text */ }
+
+  return (
+    <Box sx={{ display:'flex', flexDirection:'column', gap:1.5 }}>
+      {/* User */}
+      {userText && (
+        <Box sx={{ display:'flex', justifyContent:'flex-end', gap:1, alignItems:'flex-end' }}>
+          <Paper sx={{ maxWidth:'72%', bgcolor:'primary.main', color:'primary.contrastText', px:2, py:1.25, borderRadius:'18px 18px 4px 18px' }}>
+            <Typography variant="body2">{userText.slice(0,300)}</Typography>
+          </Paper>
+          <Avatar sx={{ width:28, height:28, bgcolor:'grey.300', flexShrink:0, fontSize:14 }}>👤</Avatar>
+        </Box>
+      )}
+      {/* Agent */}
+      {agentText && (
+        <Box sx={{ display:'flex', gap:1, alignItems:'flex-start' }}>
+          <Avatar sx={{ width:28, height:28, bgcolor:'#534AB7', flexShrink:0, fontSize:14 }}>🤖</Avatar>
+          <Box sx={{ flex:1, minWidth:0 }}>
+            <Typography variant="caption" fontWeight={700} display="block" sx={{ mb:0.5 }}>{agentName}</Typography>
+            <Paper variant="outlined" sx={{ px:2, py:1.5, borderRadius:'4px 18px 18px 18px' }}>
+              <Markdown text={displayText} />
+            </Paper>
+          </Box>
+        </Box>
       )}
     </Box>
   )
 }
 
-// ── Data View: Messages tab ───────────────────────────────────────────────────
+// ── Voice ─────────────────────────────────────────────────────────────────────
 
-function MessagesTab({ events }: { events: TraceEvent[] }) {
-  const llmEvents = events.filter(e => e.event_type === 'llm_call')
-  if (llmEvents.length === 0) return (
-    <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%' }}>
-      <Typography variant="caption" color="text.secondary">No message data — trace events may still be indexing.</Typography>
-    </Box>
-  )
-  return (
-    <Box sx={{ p: 1.5, overflowY: 'auto', height: '100%' }}>
-      {llmEvents.map((ev, ci) => (
-        <Box key={ci} sx={{ mb: 2 }}>
-          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 0.75 }}>
-            <Chip label={`Call ${ci + 1}`} size="small" sx={{ height: 18, fontSize: '0.6rem', bgcolor: 'rgba(83,74,183,0.1)', color: '#534AB7' }} />
-            <Typography variant="caption" color="text.secondary">{ev.model} · {ev.input_tokens ?? '?'}↑ {ev.output_tokens ?? '?'}↓ · {ev.duration_ms ?? '?'}ms</Typography>
-          </Box>
-          {ev.messages?.map((m, mi) => (
-            <Box key={mi} sx={{ mb: 1 }}>
-              {m.role === 'system' ? (
-                <CollapsibleBlock icon={<SparklesIcon sx={{ fontSize: 13, color: '#534AB7' }} />} title={`System prompt`} defaultOpen={ci === 0 && mi === 0}>
-                  <Typography variant="caption" fontFamily="monospace" sx={{ display: 'block', whiteSpace: 'pre-wrap', fontSize: '0.68rem', color: 'text.secondary', maxHeight: 180, overflow: 'auto' }}>
-                    {m.content.slice(0, 600)}{m.content.length > 600 ? '…' : ''}
-                  </Typography>
-                </CollapsibleBlock>
-              ) : (
-                <Box>
-                  <Chip label={m.role} size="small" sx={{ height: 14, fontSize: '0.58rem', mb: 0.25, bgcolor: m.role === 'user' ? 'rgba(24,95,165,0.1)' : 'rgba(59,109,17,0.1)' }} />
-                  <Typography variant="caption" fontFamily="monospace" sx={{ display: 'block', fontSize: '0.7rem', whiteSpace: 'pre-wrap', color: 'text.primary', ml: 0.5, maxHeight: 120, overflow: 'auto' }}>
-                    {m.content.slice(0, 400)}{m.content.length > 400 ? '…' : ''}
-                  </Typography>
-                </Box>
-              )}
-            </Box>
-          ))}
-          {ev.response_content && (
-            <Box sx={{ borderTop: 1, borderColor: 'divider', pt: 0.75, mt: 0.5 }}>
-              <Chip label="→ response" size="small" sx={{ height: 14, fontSize: '0.58rem', mb: 0.25, bgcolor: 'rgba(59,109,17,0.1)' }} />
-              <Typography variant="caption" fontFamily="monospace" sx={{ display: 'block', fontSize: '0.7rem', whiteSpace: 'pre-wrap', color: 'text.primary', ml: 0.5, maxHeight: 150, overflow: 'auto' }}>
-                {ev.response_content}
-              </Typography>
-            </Box>
-          )}
-          {ev.tool_calls && ev.tool_calls.length > 0 && (
-            <CollapsibleBlock icon={<BuildIcon sx={{ fontSize: 13, color: '#854F0B' }} />} title={`Tool calls (${ev.tool_calls.length})`}>
-              {ev.tool_calls.map((tc, ti) => (
-                <Box key={ti} sx={{ mb: 0.5 }}>
-                  <Typography variant="caption" fontFamily="monospace" fontWeight={600}>{tc.name}</Typography>
-                  <Typography variant="caption" fontFamily="monospace" sx={{ display: 'block', color: 'text.secondary', fontSize: '0.68rem' }}>
-                    {tc.arguments.slice(0, 200)}
-                  </Typography>
-                </Box>
-              ))}
-            </CollapsibleBlock>
-          )}
-        </Box>
-      ))}
-    </Box>
-  )
-}
-
-// ── Data View: Trace tab ──────────────────────────────────────────────────────
-
-function TraceTab({ events }: { events: TraceEvent[] }) {
-  if (events.length === 0) return (
-    <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%' }}>
-      <Typography variant="caption" color="text.secondary">No trace spans found.</Typography>
-    </Box>
-  )
-  const totalMs = events.reduce((s, e) => s + (e.duration_ms ?? 0), 0)
-  return (
-    <Box sx={{ p: 1.5, overflowY: 'auto', height: '100%' }}>
-      {/* Timeline bar */}
-      <Box sx={{ mb: 2 }}>
-        <Typography variant="caption" color="text.secondary" display="block" sx={{ mb: 0.5 }}>Span timeline (total {totalMs < 1000 ? `${totalMs}ms` : `${(totalMs / 1000).toFixed(1)}s`})</Typography>
-        <Box sx={{ height: 8, borderRadius: 1, bgcolor: 'action.hover', position: 'relative', overflow: 'hidden' }}>
-          {events.filter(e => e.duration_ms).map((ev, i) => {
-            const w = totalMs > 0 ? (ev.duration_ms! / totalMs) * 100 : 0
-            const offset = totalMs > 0 ? (events.slice(0, i).reduce((s, e) => s + (e.duration_ms ?? 0), 0) / totalMs) * 100 : 0
-            return (
-              <Box key={i} sx={{ position: 'absolute', left: `${offset}%`, width: `${w}%`, height: '100%', bgcolor: ev.event_type === 'llm_call' ? '#534AB7' : '#854F0B', opacity: 0.7 }} />
-            )
-          })}
-        </Box>
-        <Box sx={{ display: 'flex', gap: 1, mt: 0.5 }}>
-          <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}><Box sx={{ width: 8, height: 8, borderRadius: 0.5, bgcolor: '#534AB7' }} /><Typography variant="caption" color="text.secondary" sx={{ fontSize: '0.62rem' }}>LLM</Typography></Box>
-          <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}><Box sx={{ width: 8, height: 8, borderRadius: 0.5, bgcolor: '#854F0B' }} /><Typography variant="caption" color="text.secondary" sx={{ fontSize: '0.62rem' }}>Tool</Typography></Box>
-        </Box>
-      </Box>
-      {/* Span list */}
-      {events.map((ev, i) => (
-        <Box key={i} sx={{ display: 'flex', alignItems: 'center', gap: 1, py: 0.5, borderBottom: 1, borderColor: 'divider' }}>
-          <Box sx={{ width: 8, height: 8, borderRadius: '50%', bgcolor: ev.event_type === 'llm_call' ? '#534AB7' : '#854F0B', flexShrink: 0 }} />
-          <Typography variant="caption" fontFamily="monospace" sx={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontSize: '0.7rem' }}>
-            {ev.event_type === 'llm_call' ? (ev.model ?? 'llm') : (ev.tool_name ?? ev.tool_calls?.[0]?.name ?? 'tool')}
-          </Typography>
-          {ev.input_tokens != null && <Typography variant="caption" color="text.secondary" sx={{ fontSize: '0.62rem', flexShrink: 0 }}>{ev.input_tokens}↑{ev.output_tokens}↓</Typography>}
-          {ev.duration_ms != null && <Typography variant="caption" color="text.secondary" sx={{ fontSize: '0.62rem', flexShrink: 0 }}>{ev.duration_ms < 1000 ? `${ev.duration_ms}ms` : `${(ev.duration_ms / 1000).toFixed(1)}s`}</Typography>}
-        </Box>
-      ))}
-    </Box>
-  )
-}
-
-// ── Data View panel ───────────────────────────────────────────────────────────
-
-function DataView({
-  runId, agentName, onClose,
-}: {
-  runId: string | null; agentName: string; onClose: () => void
-}) {
-  const [tab, setTab] = useState(0)
-  const [events, setEvents] = useState<TraceEvent[]>([])
-  const [loading, setLoading] = useState(false)
-
-  useEffect(() => {
-    if (!runId || !agentName) return
-    setLoading(true)
-    builderApi.getRunEvents(agentName, runId)
-      .then(d => setEvents(d.events))
-      .catch(() => setEvents([]))
-      .finally(() => setLoading(false))
-  }, [runId, agentName])
-
-  return (
-    <Box sx={{
-      width: 360, flexShrink: 0, borderLeft: 1, borderColor: 'divider',
-      display: 'flex', flexDirection: 'column', bgcolor: 'background.paper', height: '100%',
-    }}>
-      <Box sx={{ px: 1.5, py: 1, borderBottom: 1, borderColor: 'divider', display: 'flex', alignItems: 'center', gap: 1 }}>
-        <Typography variant="caption" fontWeight={700} sx={{ flex: 1 }}>Data View</Typography>
-        <Typography variant="caption" fontFamily="monospace" color="text.secondary" sx={{ fontSize: '0.62rem', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: 120 }}>{runId?.slice(-12)}</Typography>
-        <IconButton size="small" onClick={onClose}><CloseIcon sx={{ fontSize: 14 }} /></IconButton>
-      </Box>
-      <Tabs value={tab} onChange={(_, v) => setTab(v)} sx={{ borderBottom: 1, borderColor: 'divider', minHeight: 36 }}>
-        <Tab label="Statistics" sx={{ fontSize: '0.7rem', minHeight: 36, py: 0 }} />
-        <Tab label="Messages" sx={{ fontSize: '0.7rem', minHeight: 36, py: 0 }} />
-        <Tab label="Trace" sx={{ fontSize: '0.7rem', minHeight: 36, py: 0 }} />
-      </Tabs>
-      <Box sx={{ flex: 1, overflow: 'hidden', position: 'relative' }}>
-        {loading && (
-          <Box sx={{ position: 'absolute', top: 8, right: 8 }}>
-            <CircularProgress size={12} />
-          </Box>
-        )}
-        {tab === 0 && <StatisticsTab events={events} />}
-        {tab === 1 && <MessagesTab events={events} />}
-        {tab === 2 && <TraceTab events={events} />}
-      </Box>
-    </Box>
-  )
-}
-
-// ── Message bubble ────────────────────────────────────────────────────────────
-
-function MessageBubble({
-  msg, colorIdx, emojiIdx, isSelected, onClick,
-}: {
-  msg: RunMessage; colorIdx: number; emojiIdx: number
-  isSelected: boolean; onClick: () => void
-}) {
-  const [ttsActive, setTtsActive] = useState(false)
-
-  const speakText = useCallback(() => {
-    if (!window.speechSynthesis) return
-    if (ttsActive) {
-      window.speechSynthesis.cancel()
-      setTtsActive(false)
-      return
-    }
-    const u = new SpeechSynthesisUtterance(msg.content.replace(/\*\*/g, '').replace(/`/g, ''))
-    u.rate = 1.0
-    u.onend = () => setTtsActive(false)
-    window.speechSynthesis.speak(u)
-    setTtsActive(true)
-  }, [msg.content, ttsActive])
-
-  if (msg.role === 'user') {
-    return (
-      <Box sx={{ display: 'flex', justifyContent: 'flex-end', mb: 1.5, gap: 1, alignItems: 'flex-end' }}>
-        <Box sx={{ maxWidth: '72%' }}>
-          {msg.attachmentPreview && <Box component="img" src={msg.attachmentPreview} sx={{ maxHeight: 150, borderRadius: 1, border: 1, borderColor: 'divider', display: 'block', mb: 0.5, ml: 'auto' }} />}
-          {msg.attachmentName && !msg.attachmentPreview && (
-            <Box sx={{ mb: 0.5, display: 'flex', justifyContent: 'flex-end' }}>
-              <Chip icon={<AttachFileIcon />} label={msg.attachmentName} size="small" variant="outlined" />
-            </Box>
-          )}
-          <Paper sx={{ bgcolor: 'primary.main', color: 'primary.contrastText', px: 2, py: 1.25, borderRadius: '18px 18px 4px 18px' }}>
-            <Typography variant="body2">{msg.content}</Typography>
-          </Paper>
-        </Box>
-        <Avatar sx={{ width: 28, height: 28, bgcolor: 'grey.300', flexShrink: 0, fontSize: 14 }}>👤</Avatar>
-      </Box>
-    )
-  }
-
-  return (
-    <Box
-      sx={{ display: 'flex', gap: 1, mb: 2, alignItems: 'flex-start', cursor: 'pointer' }}
-      onClick={onClick}
-    >
-      <AgentAvatar name={msg.agentName ?? 'agent'} colorIdx={colorIdx} emojiIdx={emojiIdx} />
-      <Box sx={{ flex: 1, minWidth: 0 }}>
-        {/* Header */}
-        <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.75, mb: 0.5, flexWrap: 'wrap' }}>
-          <Typography variant="caption" fontWeight={700}>{msg.agentName ?? 'agent'}</Typography>
-          {msg.reasoningMode && (
-            <Chip label={msg.reasoningMode} size="small" variant="outlined"
-              sx={{ height: 16, fontSize: '0.58rem', color: msg.reasoningMode === 'guided' ? 'primary.main' : 'text.secondary' }} />
-          )}
-          {msg.svcId && (
-            <Chip label={msg.svcId.slice(-10)} size="small"
-              sx={{ fontFamily: 'monospace', height: 16, fontSize: '0.58rem', bgcolor: 'rgba(83,74,183,0.08)', color: '#534AB7' }} />
-          )}
-          {msg.durationMs != null && <Typography variant="caption" color="text.secondary">{msg.durationMs < 1000 ? `${msg.durationMs}ms` : `${(msg.durationMs / 1000).toFixed(1)}s`}</Typography>}
-          <Box sx={{ flexGrow: 1 }} />
-          <Tooltip title={ttsActive ? 'Stop speaking' : 'Read aloud (browser TTS)'}>
-            <IconButton size="small" onClick={(e) => { e.stopPropagation(); speakText() }}
-              sx={{ color: ttsActive ? 'primary.main' : 'text.secondary', p: 0.25 }}>
-              {ttsActive ? <VolumeOffIcon sx={{ fontSize: 14 }} /> : <VolumeUpIcon sx={{ fontSize: 14 }} />}
-            </IconButton>
-          </Tooltip>
-        </Box>
-
-        {/* Bubble */}
-        <Paper
-          variant="outlined"
-          sx={{
-            px: 2, py: 1.5,
-            borderRadius: '4px 18px 18px 18px',
-            bgcolor: isSelected ? 'rgba(83,74,183,0.04)' : (msg.isError ? '#fef2f2' : 'background.paper'),
-            borderColor: isSelected ? '#534AB7' : (msg.isError ? 'error.light' : 'divider'),
-            transition: 'border-color 0.1s, background-color 0.1s',
-          }}
-        >
-          <Markdown text={msg.content} />
-          {msg.raw && (
-            <Box sx={{ mt: 0.5, borderTop: 1, borderColor: 'divider', pt: 0.5 }}>
-              <Typography variant="caption" color="text.secondary" sx={{ fontSize: '0.62rem' }}>
-                Click to view full trace in Data View →
-              </Typography>
-            </Box>
-          )}
-        </Paper>
-      </Box>
-    </Box>
-  )
-}
-
-// ── Voice input hook ──────────────────────────────────────────────────────────
-
-function useVoiceInput(onTranscript: (t: string) => void) {
+function useVoice(onText: (t: string) => void) {
   const [listening, setListening] = useState(false)
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const recRef = useRef<any>(null)
-  const supported = typeof window !== 'undefined' &&
-    ('SpeechRecognition' in window || 'webkitSpeechRecognition' in window)
-
+  const ref = useRef<any>(null)
+  const ok = typeof window !== 'undefined' && ('SpeechRecognition' in window || 'webkitSpeechRecognition' in window)
   const toggle = () => {
-    if (!supported) return
-    if (listening) { recRef.current?.stop(); setListening(false); return }
+    if (!ok) return
+    if (listening) { ref.current?.stop(); setListening(false); return }
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const SR = (window as any).webkitSpeechRecognition ?? (window as any).SpeechRecognition
     if (!SR) return
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const rec: any = new SR()
-    rec.continuous = false; rec.interimResults = false; rec.lang = 'en-US'
+    const r: any = new SR(); r.continuous=false; r.interimResults=false; r.lang='en-US'
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    rec.onresult = (e: any) => { const t = Array.from(e.results as any[]).map((r: any) => r[0].transcript).join(' '); onTranscript(t) }
-    rec.onend = () => setListening(false); rec.onerror = () => setListening(false)
-    rec.start(); recRef.current = rec; setListening(true)
+    r.onresult = (e: any) => onText(Array.from(e.results as any[]).map((x:any)=>x[0].transcript).join(' '))
+    r.onend = () => setListening(false); r.onerror = () => setListening(false)
+    r.start(); ref.current = r; setListening(true)
   }
-  return { listening, toggle, supported }
+  return { listening, toggle, ok }
 }
 
-// ── Run History (previous invocations for an agent) ──────────────────────────
-
-function RunHistory({
-  agentName, onSelectRun,
-}: {
-  agentName: string
-  onSelectRun: (runId: string) => void
-}) {
-  const { data } = useQuery({
-    queryKey: ['agent-runs', agentName],
-    queryFn: () => builderApi.listAgentRuns(agentName),
-    refetchInterval: 15000,
-  })
-  const runs = data?.runs ?? []
-  if (runs.length === 0) return null
-
-  return (
-    <Box sx={{ mt: 0.75, px: 1 }}>
-      <Typography variant="caption" color="text.secondary" sx={{ fontWeight: 600, fontSize: '0.6rem', textTransform: 'uppercase', letterSpacing: '0.07em', display: 'block', mb: 0.25 }}>
-        Recent runs
-      </Typography>
-      {runs.slice(0, 8).map(r => {
-        const age = Math.floor((Date.now() - new Date(r.started_at).getTime()) / 60000)
-        return (
-          <Box
-            key={r.run_id}
-            component="button"
-            onClick={() => onSelectRun(r.run_id)}
-            sx={{
-              display: 'flex', alignItems: 'center', gap: 0.5, width: '100%',
-              background: 'none', border: 'none', cursor: 'pointer', textAlign: 'left',
-              px: 0.5, py: 0.35, borderRadius: 0.75,
-              '&:hover': { bgcolor: 'action.hover' },
-            }}
-          >
-            <Box sx={{ width: 6, height: 6, borderRadius: '50%', bgcolor: r.status === 'completed' ? '#3B6D11' : r.status === 'error' ? '#b91c1c' : '#534AB7', flexShrink: 0 }} />
-            <Typography variant="caption" fontFamily="monospace" sx={{ fontSize: '0.6rem', flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: 'text.secondary' }}>
-              {r.run_id.slice(-8)}
-            </Typography>
-            <Typography variant="caption" sx={{ fontSize: '0.58rem', color: 'text.disabled', flexShrink: 0 }}>
-              {age < 60 ? `${age}m` : `${Math.floor(age / 60)}h`}
-            </Typography>
-          </Box>
-        )
-      })}
-    </Box>
-  )
-}
-
-// ── Main Chat ─────────────────────────────────────────────────────────────────
+// ── Main ──────────────────────────────────────────────────────────────────────
 
 export default function Chat() {
   const [searchParams] = useSearchParams()
-  const { data } = useQuery({ queryKey: ['agents'], queryFn: builderApi.listAgents })
-  const deployed = (data?.agents ?? []).filter(a => a.status === 'deployed')
+  const { data: agentsData } = useQuery({ queryKey: ['agents'], queryFn: builderApi.listAgents })
+  const deployed = (agentsData?.agents ?? []).filter(a => a.status === 'deployed')
 
-  const [selectedName, setSelectedName] = useState(searchParams.get('agent') ?? '')
-  const selected = deployed.find(a => a.name === selectedName) ?? null
-
-  // Avatar personalisation per agent
-  const [avatarSeeds, setAvatarSeeds] = useState<Record<string, [number, number]>>({})
-  const getSeeds = (name: string): [number, number] => {
-    if (!avatarSeeds[name]) {
-      const c = Math.abs(name.split('').reduce((s, ch) => s + ch.charCodeAt(0), 0)) % AVATAR_COLORS.length
-      const e = Math.abs(name.split('').reduce((s, ch) => s * 31 + ch.charCodeAt(0), 7)) % AVATAR_EMOJIS.length
-      return [c, e]
-    }
-    return avatarSeeds[name]
-  }
-  const randomizeAvatar = (name: string) => {
-    setAvatarSeeds(prev => ({
-      ...prev,
-      [name]: [Math.floor(Math.random() * AVATAR_COLORS.length), Math.floor(Math.random() * AVATAR_EMOJIS.length)],
-    }))
-  }
-
-  useEffect(() => {
-    if (!selectedName && deployed.length > 0) setSelectedName(deployed[0].name)
-  }, [deployed, selectedName])
+  // Agent selection
+  const [selectedAgent, setSelectedAgent] = useState<AgentRecord | null>(null)
   useEffect(() => {
     const p = searchParams.get('agent')
-    if (p) setSelectedName(p)
-  }, [searchParams])
+    if (p) {
+      const found = deployed.find(a => a.name === p)
+      if (found) setSelectedAgent(found)
+    } else if (!selectedAgent && deployed.length > 0) {
+      setSelectedAgent(deployed[0])
+    }
+  }, [deployed, searchParams, selectedAgent])
 
-  const [runs, setRuns] = useState<Run[]>([])
+  // Avatar seeds
+  const [seeds, setSeeds] = useState<Record<string, [number,number]>>({})
+  const getSeeds = (name: string): [number,number] => {
+    if (seeds[name]) return seeds[name]
+    const c = Math.abs(name.split('').reduce((s,ch)=>s+ch.charCodeAt(0),0)) % AVATAR_COLORS.length
+    const e = Math.abs(name.split('').reduce((s,ch)=>s*31+ch.charCodeAt(0),7)) % AVATAR_EMOJIS.length
+    return [c, e]
+  }
+
+  // Studio traces for selected agent
+  const saId = selectedAgent?.service_account_id ?? ''
+  const { data: tracesData, isLoading: tracesLoading } = useQuery({
+    queryKey: ['studio-traces', saId],
+    queryFn: () => studioQuery<{ list: StudioTrace[] }>('getTraces', {
+      pagination: { page: 1, pageSize: 50 },
+      filters: saId ? { project: { value: saId, operator: 'contains' } } : undefined,
+    }),
+    enabled: !!saId,
+    refetchInterval: 10000,
+  })
+  const traces = tracesData?.list ?? []
+
+  const [selectedTraceId, setSelectedTraceId] = useState<string | null>(null)
+
+  // Chat input + invoke
   const [input, setInput] = useState('')
   const [loading, setLoading] = useState(false)
+  const [newMessages, setNewMessages] = useState<{ user: string; agentName: string; traceId?: string }[]>([])
+  const fileRef = useRef<HTMLInputElement>(null)
   const [attachment, setAttachment] = useState<File | null>(null)
-  const [attachPreview, setAttachPreview] = useState<string | null>(null)
-  const [selectedMsgId, setSelectedMsgId] = useState<string | null>(null)
-  const [dataViewOpen, setDataViewOpen] = useState(false)
-  const [historyRunId, setHistoryRunId] = useState<string | null>(null)
+  const { listening, toggle: voiceToggle, ok: voiceOk } = useVoice(t => setInput(p => p ? p+' '+t : t))
 
-  const fileInputRef = useRef<HTMLInputElement>(null)
-  const bottomRef = useRef<HTMLDivElement>(null)
-
-  const { listening, toggle: voiceToggle, supported: voiceOk } = useVoiceInput(t => setInput(p => p ? p + ' ' + t : t))
-
-  // Close chat resets conversation + data view
-  const switchAgent = (name: string) => {
-    setSelectedName(name); setRuns([]); setSelectedMsgId(null); setDataViewOpen(false)
-  }
-
-  useEffect(() => { bottomRef.current?.scrollIntoView({ behavior: 'smooth' }) }, [runs, loading])
-
-  const selectedMsg = runs.flatMap(r => r.messages).find(m => m.id === selectedMsgId) ?? null
-  const studioUrl = `${window.location.protocol}//${window.location.hostname}:3000`
-  const samplePrompts: string[] = (selected as (AgentRecord & { sample_prompts?: string[] }) | null)?.sample_prompts ?? []
-  const [colorIdx, emojiIdx] = selected ? getSeeds(selected.name) : [0, 0]
-
-  const handleSend = async (text: string) => {
-    if ((!text.trim() && !attachment) || !selected || loading) return
-    const userMsg: RunMessage = {
-      id: `u${Date.now()}`, role: 'user',
-      content: text.trim() || `[${attachment?.name}]`,
-      attachmentName: attachment?.name, attachmentPreview: attachPreview,
-    }
-    setInput(''); setAttachment(null); setAttachPreview(null); setLoading(true)
-    const t0 = Date.now()
+  const sendMessage = async (text: string) => {
+    if ((!text.trim() && !attachment) || !selectedAgent || loading) return
+    setInput(''); setLoading(true)
     try {
-      const { result, run_id } = await builderApi.invokeAgent(selected.name, { text: text.trim(), ...(attachment?.name ? { file_name: attachment.name } : {}) })
-      const raw = result as Record<string, unknown>
-      const agentMsg: RunMessage = {
-        id: `a${Date.now() + 1}`, role: 'agent', content: formatOutput(raw), raw,
-        runId: run_id, agentName: selected.name, svcId: selected.service_account_id,
-        reasoningMode: (selected as AgentRecord & { reasoning_mode?: string }).reasoning_mode,
-        durationMs: Date.now() - t0,
-      }
-      setRuns(prev => [...prev, { runId: run_id, messages: [userMsg, agentMsg], startedAt: t0 }])
+      const { run_id } = await builderApi.invokeAgent(selectedAgent.name, { text: text.trim() })
+      setNewMessages(prev => [...prev, { user: text.trim(), agentName: selectedAgent.name, traceId: run_id }])
+      // Refresh traces to pick up the new run from Studio
+      setTimeout(() => setSelectedTraceId(null), 3000)
     } catch (e) {
-      setRuns(prev => [...prev, { runId: `err${Date.now()}`, startedAt: t0, messages: [userMsg, { id: `a${Date.now()}`, role: 'agent', content: `Error: ${String(e)}`, agentName: selected.name, svcId: selected.service_account_id, isError: true, durationMs: Date.now() - t0 }] }])
-    } finally {
-      setLoading(false)
-    }
+      setNewMessages(prev => [...prev, { user: text.trim(), agentName: selectedAgent.name }])
+    } finally { setLoading(false) }
   }
 
-  const handleMsgClick = (msg: RunMessage) => {
-    if (msg.role !== 'agent' || !msg.runId) return
-    setSelectedMsgId(prev => prev === msg.id ? null : msg.id)
-    setHistoryRunId(null)
-    setDataViewOpen(true)
-  }
+  const samplePrompts: string[] = (selectedAgent as (AgentRecord & { sample_prompts?: string[] }) | null)?.sample_prompts ?? []
+  const studioUrl = `${STUDIO_URL}/projects/${saId}`
+  const [ci, ei] = selectedAgent ? getSeeds(selectedAgent.name) : [0, 0]
 
-  const handleHistoryRun = (runId: string) => {
-    setHistoryRunId(runId)
-    setSelectedMsgId(null)
-    setDataViewOpen(true)
+  // Format nanosecond timestamp
+  const fmtTime = (ns: string) => {
+    const ms = Number(BigInt(ns) / BigInt(1_000_000))
+    const d = new Date(ms)
+    return d.toLocaleTimeString()
+  }
+  const fmtAge = (ns: string) => {
+    const ms = Number(BigInt(ns) / BigInt(1_000_000))
+    const diff = Math.floor((Date.now() - ms) / 60000)
+    return diff < 60 ? `${diff}m ago` : `${Math.floor(diff/60)}h ago`
   }
 
   return (
-    <Box sx={{ display: 'flex', height: '100%' }}>
-      {/* Left: agent list */}
-      <Box sx={{ width: 220, flexShrink: 0, borderRight: 1, borderColor: 'divider', display: 'flex', flexDirection: 'column', bgcolor: 'background.paper' }}>
-        <Box sx={{ px: 1.5, py: 1.5, borderBottom: 1, borderColor: 'divider' }}>
-          <Typography variant="caption" color="text.secondary" fontWeight={700} sx={{ textTransform: 'uppercase', letterSpacing: '0.08em' }}>Deployed Agents</Typography>
+    <Box sx={{ display:'flex', height:'100%' }}>
+      {/* ── Left: agent selector ──────────────────────────────── */}
+      <Box sx={{ width:200, flexShrink:0, borderRight:1, borderColor:'divider', display:'flex', flexDirection:'column', bgcolor:'background.paper' }}>
+        <Box sx={{ px:1.5, py:1.5, borderBottom:1, borderColor:'divider' }}>
+          <Typography variant="caption" color="text.secondary" fontWeight={700} sx={{ textTransform:'uppercase', letterSpacing:'0.08em' }}>
+            Agents
+          </Typography>
         </Box>
-        {deployed.length === 0 && <Box sx={{ p: 1.5 }}><Typography variant="caption" color="text.secondary">No agents deployed yet.</Typography></Box>}
-        <List dense disablePadding sx={{ px: 1, py: 0.5, overflowY: 'auto', flex: 1 }}>
+        <List dense disablePadding sx={{ px:1, py:0.5, overflowY:'auto', flex:1 }}>
           {deployed.map(a => {
-            const [ci, ei] = getSeeds(a.name)
-            const mode = (a as AgentRecord & { reasoning_mode?: string }).reasoning_mode
+            const [c, e] = getSeeds(a.name)
             return (
-              <React.Fragment key={a.name}>
-                <ListItemButton selected={selectedName === a.name} onClick={() => switchAgent(a.name)}
-                  sx={{ borderRadius: 1.5, mb: 0.25, gap: 1, '&.Mui-selected': { bgcolor: 'primary.main', color: 'primary.contrastText' } }}>
-                  <AgentAvatar name={a.name} colorIdx={ci} emojiIdx={ei} size={24} />
-                  <ListItemText
-                    primary={<Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
-                      <Typography variant="caption" fontWeight={600} noWrap>{a.name}</Typography>
-                      {mode === 'guided' && <Chip label="G" size="small" sx={{ height: 14, fontSize: '0.55rem' }} />}
-                    </Box>}
-                    secondary={a.service_account_id?.slice(-8)}
-                    secondaryTypographyProps={{ fontSize: '0.6rem', fontFamily: 'monospace' }}
-                  />
-                </ListItemButton>
-                {selectedName === a.name && (
-                  <RunHistory agentName={a.name} onSelectRun={handleHistoryRun} />
-                )}
-              </React.Fragment>
+              <ListItemButton key={a.name} selected={selectedAgent?.name === a.name}
+                onClick={() => { setSelectedAgent(a); setSelectedTraceId(null) }}
+                sx={{ borderRadius:1.5, mb:0.25, gap:0.75, '&.Mui-selected': { bgcolor:'primary.main', color:'primary.contrastText' } }}>
+                <AgentAvatar name={a.name} colorIdx={c} emojiIdx={e} size={22} />
+                <ListItemText primary={a.name} secondary={a.service_account_id?.slice(-8)}
+                  primaryTypographyProps={{ fontSize:'0.75rem', fontWeight:600, noWrap:true }}
+                  secondaryTypographyProps={{ fontSize:'0.6rem', fontFamily:'monospace' }} />
+              </ListItemButton>
             )
           })}
         </List>
       </Box>
 
-      {/* Center: chat */}
-      <Box sx={{ flex: 1, display: 'flex', flexDirection: 'column', minWidth: 0 }}>
+      {/* ── Center: run list + chat ───────────────────────────── */}
+      <Box sx={{ width:320, flexShrink:0, borderRight:1, borderColor:'divider', display:'flex', flexDirection:'column', bgcolor:'background.paper' }}>
         {/* Header */}
-        {selected && (
-          <Box sx={{ px: 2, py: 1, borderBottom: 1, borderColor: 'divider', bgcolor: 'background.paper', display: 'flex', alignItems: 'center', gap: 1 }}>
-            <AgentAvatar name={selected.name} colorIdx={colorIdx} emojiIdx={emojiIdx} size={30} />
-            <Box sx={{ flex: 1, minWidth: 0 }}>
-              <Typography variant="body2" fontWeight={700} noWrap>{selected.name}</Typography>
-              <Typography variant="caption" fontFamily="monospace" color="text.secondary" noWrap sx={{ fontSize: '0.62rem' }}>{selected.service_account_id}</Typography>
+        {selectedAgent && (
+          <Box sx={{ px:1.5, py:1, borderBottom:1, borderColor:'divider', display:'flex', alignItems:'center', gap:1 }}>
+            <AgentAvatar name={selectedAgent.name} colorIdx={ci} emojiIdx={ei} size={26} />
+            <Box sx={{ flex:1, minWidth:0 }}>
+              <Typography variant="caption" fontWeight={700} noWrap>{selectedAgent.name}</Typography>
+              <Typography variant="caption" fontFamily="monospace" color="text.secondary" noWrap sx={{ display:'block', fontSize:'0.6rem' }}>
+                {selectedAgent.service_account_id?.slice(-12)}
+              </Typography>
             </Box>
-            <Tooltip title="Randomize avatar"><IconButton size="small" onClick={() => randomizeAvatar(selected.name)}><CasinoIcon sx={{ fontSize: 16 }} /></IconButton></Tooltip>
-            <Tooltip title="Open in AgentScope Studio"><IconButton size="small" component="a" href={studioUrl} target="_blank"><OpenInNewIcon sx={{ fontSize: 16 }} /></IconButton></Tooltip>
+            <Tooltip title="Randomize avatar">
+              <IconButton size="small" onClick={() => setSeeds(p => ({ ...p, [selectedAgent.name]: [Math.floor(Math.random()*8), Math.floor(Math.random()*8)] }))}>
+                <CasinoIcon sx={{ fontSize:14 }} />
+              </IconButton>
+            </Tooltip>
+            <Tooltip title="Open in Studio">
+              <IconButton size="small" component="a" href={studioUrl} target="_blank"><OpenInNewIcon sx={{ fontSize:14 }} /></IconButton>
+            </Tooltip>
           </Box>
         )}
 
-        {/* Messages */}
-        <Box sx={{ flex: 1, overflowY: 'auto', p: 2 }}>
-          {runs.length === 0 && selected && (
-            <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '100%', textAlign: 'center', gap: 2 }}>
-              <AgentAvatar name={selected.name} colorIdx={colorIdx} emojiIdx={emojiIdx} size={52} />
-              <Box>
-                <Typography variant="h6" fontWeight={600}>{selected.name}</Typography>
-                <Typography variant="body2" color="text.secondary" sx={{ maxWidth: 360, mt: 0.5 }}>
-                  Send a message or click a sample below. Click any agent response to open the Data View panel with trace details.
-                </Typography>
+        {/* Trace list — past runs */}
+        <Box sx={{ flex:1, overflowY:'auto' }}>
+          {!selectedAgent && (
+            <Box sx={{ p:2, textAlign:'center', mt:4 }}>
+              <Typography variant="caption" color="text.secondary">Select an agent to see its runs from Studio</Typography>
+            </Box>
+          )}
+          {selectedAgent && tracesLoading && <Box sx={{ p:2 }}><CircularProgress size={16} /></Box>}
+          {selectedAgent && !tracesLoading && traces.length === 0 && (
+            <Box sx={{ p:2 }}>
+              <Typography variant="caption" color="text.secondary">No runs yet. Send a message below to start.</Typography>
+            </Box>
+          )}
+          {traces.map(t => {
+            const isSelected = selectedTraceId === t.traceId
+            const durationNs = BigInt(t.endTime) - BigInt(t.startTime)
+            const durationMs = Number(durationNs / BigInt(1_000_000))
+            return (
+              <Box key={t.traceId} component="button"
+                onClick={() => setSelectedTraceId(isSelected ? null : t.traceId)}
+                sx={{
+                  display:'flex', flexDirection:'column', width:'100%', textAlign:'left',
+                  px:1.5, py:1, background:'none', border:'none', cursor:'pointer',
+                  borderBottom:1, borderColor:'divider',
+                  bgcolor: isSelected ? 'primary.main' : 'transparent',
+                  color: isSelected ? 'primary.contrastText' : 'text.primary',
+                  '&:hover': { bgcolor: isSelected ? 'primary.main' : 'action.hover' },
+                }}
+              >
+                <Box sx={{ display:'flex', alignItems:'center', gap:0.75 }}>
+                  <Box sx={{ width:6, height:6, borderRadius:'50%', bgcolor: t.status === 1 ? '#3B6D11' : '#b91c1c', flexShrink:0 }} />
+                  <Typography variant="caption" fontFamily="monospace" sx={{ flex:1, minWidth:0, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap', fontSize:'0.72rem', fontWeight:500 }}>
+                    {t.traceName}
+                  </Typography>
+                </Box>
+                <Box sx={{ display:'flex', gap:1, mt:0.25 }}>
+                  <Typography variant="caption" color={isSelected ? 'primary.contrastText' : 'text.secondary'} sx={{ fontSize:'0.62rem', opacity:0.8 }}>
+                    {fmtAge(t.startTime)}
+                  </Typography>
+                  <Typography variant="caption" color={isSelected ? 'primary.contrastText' : 'text.secondary'} sx={{ fontSize:'0.62rem', opacity:0.8 }}>
+                    {t.spanCount} spans · {t.totalTokens.toLocaleString()} tokens · {durationMs < 1000 ? `${durationMs}ms` : `${(durationMs/1000).toFixed(1)}s`}
+                  </Typography>
+                </Box>
               </Box>
-            </Box>
-          )}
-          {runs.map((run, ri) => (
-            <Box key={run.runId}>
-              {ri > 0 && <Divider sx={{ my: 1.5 }}><Typography variant="caption" color="text.secondary" sx={{ fontSize: '0.62rem' }}>Run {ri + 1}</Typography></Divider>}
-              {run.messages.map(msg => (
-                <MessageBubble key={msg.id} msg={msg} colorIdx={colorIdx} emojiIdx={emojiIdx}
-                  isSelected={selectedMsgId === msg.id}
-                  onClick={() => handleMsgClick(msg)} />
-              ))}
-            </Box>
-          ))}
-          {loading && (
-            <Box sx={{ display: 'flex', gap: 1, alignItems: 'center', mb: 1.5 }}>
-              <AgentAvatar name={selectedName} colorIdx={colorIdx} emojiIdx={emojiIdx} size={28} />
-              <Paper variant="outlined" sx={{ px: 1.5, py: 0.75, borderRadius: '4px 16px 16px 16px', display: 'flex', gap: 0.5 }}>
-                {[0, 120, 240].map(d => <Box key={d} sx={{ width: 5, height: 5, borderRadius: '50%', bgcolor: 'text.disabled', animation: 'bounce 1s ease-in-out infinite', animationDelay: `${d}ms`, '@keyframes bounce': { '0%,100%': { transform: 'translateY(0)' }, '50%': { transform: 'translateY(-4px)' } } }} />)}
-              </Paper>
-            </Box>
-          )}
-          <div ref={bottomRef} />
+            )
+          })}
         </Box>
 
         {/* Sample prompts */}
         {samplePrompts.length > 0 && (
-          <Box sx={{ px: 2, py: 0.75, borderTop: 1, borderColor: 'divider', display: 'flex', gap: 0.75, flexWrap: 'wrap', bgcolor: 'background.paper' }}>
-            <Typography variant="caption" color="text.secondary" sx={{ alignSelf: 'center', flexShrink: 0, fontWeight: 600 }}>Templates:</Typography>
+          <Box sx={{ px:1.5, py:0.75, borderTop:1, borderColor:'divider', display:'flex', gap:0.5, flexWrap:'wrap' }}>
             {samplePrompts.map(p => (
               <Chip key={p} label={p} size="small" variant="outlined" onClick={() => setInput(p)}
-                sx={{ cursor: 'pointer', fontSize: '0.7rem', height: 22 }} />
+                sx={{ cursor:'pointer', fontSize:'0.68rem', height:20 }} />
             ))}
           </Box>
         )}
 
-        {/* Attachment preview */}
+        {/* Chat input */}
         {attachment && (
-          <Box sx={{ px: 2, pt: 0.75, display: 'flex', alignItems: 'center', gap: 1 }}>
-            {attachPreview ? <Box component="img" src={attachPreview} sx={{ height: 64, borderRadius: 1, border: 1, borderColor: 'divider' }} /> : null}
-            <Chip icon={<AttachFileIcon />} label={attachment.name} size="small" variant="outlined" onDelete={() => { setAttachment(null); setAttachPreview(null) }} />
+          <Box sx={{ px:1.5, pt:0.5 }}>
+            <Chip icon={<AttachFileIcon />} label={attachment.name} size="small" variant="outlined"
+              onDelete={() => setAttachment(null)} />
           </Box>
         )}
-
-        {/* Input */}
-        <Box sx={{ px: 2, py: 1.5, borderTop: 1, borderColor: 'divider', bgcolor: 'background.paper' }}>
-          <Paper variant="outlined" sx={{ display: 'flex', alignItems: 'flex-end', gap: 0.5, px: 1.5, py: 0.75, borderRadius: 3 }}>
-            <input type="file" ref={fileInputRef} style={{ display: 'none' }} accept="image/*,.pdf" onChange={e => { const f = e.target.files?.[0]; if (!f) return; setAttachment(f); setAttachPreview(f.type.startsWith('image/') ? URL.createObjectURL(f) : null); e.target.value = '' }} />
-            <Tooltip title="Attach file"><span><IconButton size="small" onClick={() => fileInputRef.current?.click()} disabled={!selected || loading} sx={{ color: 'text.secondary' }}><AttachFileIcon fontSize="small" /></IconButton></span></Tooltip>
+        <Box sx={{ px:1.5, py:1, borderTop:1, borderColor:'divider' }}>
+          <Paper variant="outlined" sx={{ display:'flex', alignItems:'flex-end', gap:0.25, px:1, py:0.5, borderRadius:2.5 }}>
+            <input type="file" ref={fileRef} style={{ display:'none' }} accept="image/*,.pdf"
+              onChange={e => { const f=e.target.files?.[0]; if(f) setAttachment(f); e.target.value='' }} />
+            <Tooltip title="Attach">
+              <span><IconButton size="small" onClick={() => fileRef.current?.click()} disabled={!selectedAgent||loading} sx={{ color:'text.secondary' }}><AttachFileIcon sx={{ fontSize:16 }} /></IconButton></span>
+            </Tooltip>
             {voiceOk && (
-              <Tooltip title={listening ? 'Stop recording' : 'Voice input (browser, no model)'}>
-                <IconButton size="small" onClick={voiceToggle} disabled={!selected || loading}
-                  sx={{ color: listening ? 'error.main' : 'text.secondary', animation: listening ? 'pulse 1s ease-in-out infinite' : 'none', '@keyframes pulse': { '0%,100%': { opacity: 1 }, '50%': { opacity: 0.5 } } }}>
-                  {listening ? <MicOffIcon fontSize="small" /> : <MicIcon fontSize="small" />}
+              <Tooltip title={listening ? 'Stop' : 'Voice'}>
+                <IconButton size="small" onClick={voiceToggle} disabled={!selectedAgent||loading}
+                  sx={{ color: listening ? 'error.main' : 'text.secondary' }}>
+                  {listening ? <MicOffIcon sx={{ fontSize:16 }} /> : <MicIcon sx={{ fontSize:16 }} />}
                 </IconButton>
               </Tooltip>
             )}
-            <InputBase multiline maxRows={4} value={input} onChange={e => setInput(e.target.value)}
-              onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend(input) } }}
-              placeholder={!selected ? 'Select an agent…' : listening ? '🎤 Listening…' : 'Message… (Enter to send, Shift+Enter for new line)'}
-              disabled={!selected || loading} sx={{ flex: 1, fontSize: '0.875rem' }} />
-            <IconButton size="small" color="primary" onClick={() => handleSend(input)} disabled={(!input.trim() && !attachment) || !selected || loading}>
-              <SendIcon fontSize="small" />
+            <InputBase multiline maxRows={3} value={input}
+              onChange={e => setInput(e.target.value)}
+              onKeyDown={e => { if(e.key==='Enter' && !e.shiftKey) { e.preventDefault(); sendMessage(input) } }}
+              placeholder={!selectedAgent ? 'Select an agent…' : 'Message…'}
+              disabled={!selectedAgent || loading}
+              sx={{ flex:1, fontSize:'0.8rem' }} />
+            <IconButton size="small" color="primary" onClick={() => sendMessage(input)}
+              disabled={(!input.trim() && !attachment) || !selectedAgent || loading}>
+              {loading ? <CircularProgress size={14} /> : <SendIcon sx={{ fontSize:16 }} />}
             </IconButton>
           </Paper>
         </Box>
       </Box>
 
-      {/* Right: Data View panel */}
-      {dataViewOpen && selectedName && (() => {
-        const runId = historyRunId ?? selectedMsg?.runId ?? null
-        return runId ? (
-          <DataView
-            runId={runId}
-            agentName={selectedName}
-            onClose={() => { setDataViewOpen(false); setSelectedMsgId(null); setHistoryRunId(null) }}
-          />
-        ) : null
-      })()}
+      {/* ── Right: trace detail ───────────────────────────────── */}
+      <Box sx={{ flex:1, display:'flex', flexDirection:'column', minWidth:0 }}>
+        {!selectedTraceId ? (
+          <Box sx={{ display:'flex', alignItems:'center', justifyContent:'center', height:'100%', flexDirection:'column', gap:2 }}>
+            {selectedAgent ? (
+              <>
+                <AgentAvatar name={selectedAgent.name} colorIdx={ci} emojiIdx={ei} size={52} />
+                <Typography variant="h6" fontWeight={600}>{selectedAgent.name}</Typography>
+                <Typography variant="body2" color="text.secondary" sx={{ maxWidth:360, textAlign:'center' }}>
+                  Select a run from the list to see its conversation and trace. Send a message to invoke this agent.
+                </Typography>
+              </>
+            ) : (
+              <Typography variant="body2" color="text.secondary">Select an agent</Typography>
+            )}
+          </Box>
+        ) : (
+          <Box sx={{ display:'flex', height:'100%', minHeight:0 }}>
+            {/* Conversation */}
+            <Box sx={{ flex:1, overflow:'auto', p:2 }}>
+              {selectedAgent && (
+                <ConversationView traceId={selectedTraceId} agentName={selectedAgent.name} />
+              )}
+            </Box>
+            {/* Data View (Statistics + Trace) */}
+            <Box sx={{ width:320, flexShrink:0, borderLeft:1, borderColor:'divider' }}>
+              <TraceDetailView traceId={selectedTraceId} />
+            </Box>
+          </Box>
+        )}
+      </Box>
     </Box>
   )
 }

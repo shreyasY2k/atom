@@ -1,0 +1,36 @@
+apiVersion: mphasis.platform/v1
+kind: AgentDeployment
+metadata:
+  name: kyc-document-extractor
+  domain: banking-kyc
+  version: 1.0.0
+  description: Agent for extracting and reviewing KYC documents.
+  owner: user:demo@mphasis.com
+spec:
+  agents:
+  - name: kyc-extractor
+    role: standalone
+    agent_role_file: agent-roles/banking-kyc/kyc-document-extractor.role.md
+    reasoning_mode: prescribed
+    model: gemini-3.1-pro
+    temperature: 1.0
+    reasoning_effort: medium
+    max_iterations: 6
+    tools:
+    - get_kyc_documents
+    - get_customer_profile
+    memory:
+      type: short_term
+      cross_conversation:
+        enabled: true
+        kind: personal
+        identity_field: input.customer_id
+  flow:
+    type: standalone
+  audit:
+    log_to: minio://audit-logs/agent/kyc-document-extractor
+    retention_days: 90
+  deployment:
+    runtime: agentscope
+    sandbox: base
+    replicas: 1

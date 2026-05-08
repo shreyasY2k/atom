@@ -236,6 +236,12 @@ def invoke_agent(name: str, payload: dict):
         raise HTTPException(502, f"Could not reach agent at {endpoint}: {e}")
 
     completed_at = datetime.now(timezone.utc).isoformat()
+    # Store the actual user message and agent response text for conversation history
+    import json as _json
+    user_text = payload.get("text") or _json.dumps(
+        {k: v for k, v in payload.items() if k != "_run_id"}, default=str
+    )
+    agent_text = _json.dumps(result, default=str) if isinstance(result, dict) else str(result)
     registry_db.upsert_run({
         "run_id": run_id,
         "agent_name": name,
@@ -243,6 +249,8 @@ def invoke_agent(name: str, payload: dict):
         "started_at": started_at,
         "completed_at": completed_at,
         "service_account_id": rec.get("service_account_id", ""),
+        "user_message": user_text[:2000],
+        "agent_response": agent_text[:4000],
     })
 
     # Register run + messages in Studio so all invocations appear in Studio's UI
