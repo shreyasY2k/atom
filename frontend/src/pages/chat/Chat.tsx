@@ -156,9 +156,160 @@ function SpanRow({ span, all, depth = 0 }: { span: Span; all: Span[]; depth?: nu
   )
 }
 
-// ── Data View (right panel: Statistics + Trace tabs) ──────────────────────────
+// ── Collapsible content block (tool call, tool result, system prompt) ─────────
 
-function DataView({ runId, onClose }: { runId: string; onClose: () => void }) {
+function ContentBlock({ title, subtitle, children, defaultOpen = false, accent = '#534AB7' }: {
+  title: string; subtitle?: string; children: React.ReactNode; defaultOpen?: boolean; accent?: string
+}) {
+  const [open, setOpen] = useState(defaultOpen)
+  return (
+    <Box sx={{ border:'1px solid', borderColor:'divider', borderRadius:1.5, overflow:'hidden', mb:1 }}>
+      <Box component="button" onClick={() => setOpen(v => !v)}
+        sx={{ display:'flex', alignItems:'center', gap:0.75, width:'100%', textAlign:'left', background:'none', border:'none', cursor:'pointer', px:1.25, py:0.875, bgcolor:'action.hover', '&:hover':{ bgcolor:'action.selected' } }}>
+        <Box sx={{ width:3, height:16, borderRadius:1, bgcolor:accent, flexShrink:0 }} />
+        <Box sx={{ flex:1, minWidth:0 }}>
+          <Typography variant="caption" fontWeight={600} sx={{ display:'block', fontSize:'0.72rem' }}>{title}</Typography>
+          {subtitle && <Typography variant="caption" color="text.secondary" sx={{ fontSize:'0.65rem' }}>{subtitle}</Typography>}
+        </Box>
+        {open ? <ExpandLessIcon sx={{ fontSize:14 }} /> : <ExpandMoreIcon sx={{ fontSize:14 }} />}
+      </Box>
+      <Collapse in={open}>
+        <Box sx={{ px:1.25, py:1, borderTop:'1px solid', borderColor:'divider', bgcolor:'background.default' }}>
+          {children}
+        </Box>
+      </Collapse>
+    </Box>
+  )
+}
+
+// ── Full conversation reconstructed from spans ────────────────────────────────
+
+function FullConversation({ spans, agentName, c, e }: { spans: Span[]; agentName: string; c: number; e: number }) {
+  if (!spans.length) return <Typography variant="caption" color="text.secondary">No conversation data.</Typography>
+
+  // Sort spans chronologically
+  const sorted = [...spans].sort((a, b) => {
+    try { return Number(BigInt(a.startTimeUnixNano) - BigInt(b.startTimeUnixNano)) } catch { return 0 }
+  })
+
+  // Root span has the overall user input and final output
+  const root = sorted.find(s => !s.parentSpanId || !spans.find(p => p.spanId === s.parentSpanId))
+  const genAiRoot = ((root?.attributes as Record<string,unknown>)?.gen_ai || {}) as Record<string,unknown>
+  const rootInput = ((genAiRoot?.input as Record<string,unknown>)?.messages as unknown[]) || []
+  const userMsg = rootInput.find((m: unknown) => (m as Record<string,unknown>).role === 'user')
+  const userText = ((userMsg as Record<string,unknown>)?.parts as {content?:string}[] | undefined)?.[0]?.content || ''
+
+  // Collect turns: each LLM call and its tool executions
+  const chatSpans = sorted.filter(s => s.name.startsWith('chat ') || s.name.startsWith('chat_'))
+  const toolSpans = sorted.filter(s => s.name.startsWith('execute_tool'))
+
+  const elements: React.ReactNode[] = []
+
+  // User message
+  if (userText) {
+    elements.push(
+      <Box key="user" sx={{ display:'flex', justifyContent:'flex-end', mb:2, gap:1, alignItems:'flex-end' }}>
+        <Paper sx={{ maxWidth:'72%', bgcolor:'primary.main', color:'primary.contrastText', px:2, py:1.25, borderRadius:'18px 18px 4px 18px' }}>
+          <Typography variant="body2">{userText.slice(0, 400)}</Typography>
+        </Paper>
+        <Avatar sx={{ width:28, height:28, bgcolor:'grey.300', flexShrink:0, fontSize:14 }}>👤</Avatar>
+      </Box>
+    )
+  }
+
+  // Agent response container
+  elements.push(
+    <Box key="agent-turn" sx={{ display:'flex', gap:1.25, mb:2, alignItems:'flex-start' }}>
+      <AgentAvatar name={agentName} c={c} e={e} size={28} />
+      <Box sx={{ flex:1, minWidth:0 }}>
+        <Typography variant="caption" fontWeight={700} display="block" sx={{ mb:0.75 }}>{agentName}</Typography>
+
+        {/* For each LLM call: show tool calls and results in order */}
+        {chatSpans.map((chatSpan, ci) => {
+          const genAi = ((chatSpan.attributes as Record<string,Record<string,unknown>>)?.gen_ai || {}) as Record<string,unknown>
+          const outputMsgs = ((genAi?.output as Record<string,unknown>)?.messages as unknown[]) || []
+
+          const turnElements: React.ReactNode[] = []
+
+          outputMsgs.forEach((m: unknown, mi) => {
+            const msg = m as Record<string,unknown>
+            const parts = (msg.parts as Record<string,unknown>[] | undefined) || []
+
+            parts.forEach((part, pi) => {
+              const ptype = part.type as string
+              const key = `chat-${ci}-msg-${mi}-part-${pi}`
+
+              if (ptype === 'thinking') {
+                turnElements.push(
+                  <ContentBlock key={key} title="Thinking" accent="#6941C6" defaultOpen={false}>
+                    <Typography variant="caption" fontFamily="monospace" sx={{ fontSize:'0.68rem', color:'text.secondary', whiteSpace:'pre-wrap', display:'block' }}>
+                      {String(part.thinking || '').slice(0, 500)}
+                    </Typography>
+                  </ContentBlock>
+                )
+              } else if (ptype === 'tool_call') {
+                const toolName = part.name as string || 'tool'
+                const args = part.args as Record<string,unknown> || {}
+                // Find matching execute_tool span for the result
+                const toolResult = toolSpans.find(ts => ts.name.includes(toolName))
+                const toolGenAi = ((toolResult?.attributes as Record<string,Record<string,unknown>>)?.gen_ai || {}) as Record<string,unknown>
+                const resultMsgs = ((toolGenAi?.output as Record<string,unknown>)?.messages as unknown[]) || []
+                const resultText = resultMsgs.flatMap((rm: unknown) =>
+                  ((rm as Record<string,unknown>).parts as {content?:string;type?:string}[] | undefined || [])
+                    .filter(p => p.type === 'text').map(p => p.content || '')
+                ).join('')
+
+                turnElements.push(
+                  <ContentBlock key={key} title={`Tool call: ${toolName}`} accent="#854F0B" defaultOpen={false}>
+                    <Typography variant="caption" color="text.secondary" sx={{ fontSize:'0.65rem' }}>Arguments</Typography>
+                    <Box component="pre" sx={{ fontSize:'0.68rem', fontFamily:'monospace', bgcolor:'action.hover', p:0.75, borderRadius:0.75, mt:0.25, overflow:'auto', maxHeight:80 }}>
+                      {JSON.stringify(args, null, 2)}
+                    </Box>
+                    {resultText && (<>
+                      <Typography variant="caption" color="text.secondary" sx={{ fontSize:'0.65rem', mt:0.75, display:'block' }}>Result</Typography>
+                      <Box component="pre" sx={{ fontSize:'0.68rem', fontFamily:'monospace', bgcolor:'action.hover', p:0.75, borderRadius:0.75, mt:0.25, overflow:'auto', maxHeight:100 }}>
+                        {resultText.slice(0, 400)}
+                      </Box>
+                    </>)}
+                  </ContentBlock>
+                )
+              } else if (ptype === 'text') {
+                // Only show the final text (last chat span)
+                const isLastChat = ci === chatSpans.length - 1
+                if (isLastChat && part.text) {
+                  const text = String(part.text)
+                  let display = text
+                  try {
+                    const parsed = JSON.parse(text)
+                    if (parsed.confidence != null && parsed.recommendation) {
+                      display = JSON.stringify(parsed, null, 2)
+                    }
+                  } catch { /* use raw */ }
+
+                  turnElements.push(
+                    <ContentBlock key={key} title={`${agentName} response`} accent="#3B6D11" defaultOpen={true}>
+                      <Box component="pre" sx={{ fontSize:'0.75rem', fontFamily:'monospace', whiteSpace:'pre-wrap', overflow:'auto', maxHeight:300, m:0, color:'text.primary' }}>
+                        {display}
+                      </Box>
+                    </ContentBlock>
+                  )
+                }
+              }
+            })
+          })
+
+          return <Box key={`chat-${ci}`}>{turnElements}</Box>
+        })}
+      </Box>
+    </Box>
+  )
+
+  return <Box>{elements}</Box>
+}
+
+// ── Data View — RUN / MESSAGE / TRACE tabs (matches Studio) ──────────────────
+
+function DataView({ runId }: { runId: string }) {
   const [tab, setTab] = useState(0)
   const { data, isLoading } = useQuery({
     queryKey: ['studio-spans', runId],
@@ -166,42 +317,157 @@ function DataView({ runId, onClose }: { runId: string; onClose: () => void }) {
     staleTime: 30000,
   })
   const spans = data?.spans ?? []
-  const roots = spans.filter(s => !s.parentSpanId || !spans.find(p => p.spanId === s.parentSpanId))
-  const llm = spans.filter(s => s.name.startsWith('chat_'))
-  const totalTokens = llm.reduce((s, sp) => {
-    const g = ((sp.attributes as Record<string,Record<string,unknown>>)?.gen_ai?.usage as Record<string,number>) || {}
-    return s + (g.total_tokens || 0)
-  }, 0)
+
+  // Stats from spans
+  const roots  = spans.filter(s => !s.parentSpanId || !spans.find(p => p.spanId === s.parentSpanId))
+  const llm    = spans.filter(s => s.name.startsWith('chat ') || s.name.startsWith('chat_'))
+  const tools  = spans.filter(s => s.name.startsWith('execute_tool'))
+
+  const totalIn  = llm.reduce((s, sp) => { const g=((sp.attributes as Record<string,Record<string,unknown>>)?.gen_ai?.usage as Record<string,number>)||{}; return s+(g.input_tokens||g.prompt_tokens||0) }, 0)
+  const totalOut = llm.reduce((s, sp) => { const g=((sp.attributes as Record<string,Record<string,unknown>>)?.gen_ai?.usage as Record<string,number>)||{}; return s+(g.output_tokens||g.completion_tokens||0) }, 0)
+  const totalTok = totalIn + totalOut
+
   const totalMs = spans.length > 0 ? (() => {
     try { const t0=BigInt(spans[0].startTimeUnixNano); const t1=spans.reduce((m,s)=>BigInt(s.endTimeUnixNano)>m?BigInt(s.endTimeUnixNano):m,t0); return Number((t1-t0)/BigInt(1_000_000)) } catch { return 0 }
   })() : 0
 
+  // Model breakdown
+  const modelCounts: Record<string,number> = {}
+  llm.forEach(s => {
+    const model = s.name.replace(/^chat_?/,'').trim() || 'unknown'
+    modelCounts[model] = (modelCounts[model] || 0) + 1
+  })
+  const maxModelCount = Math.max(1, ...Object.values(modelCounts))
+
+  const root = spans.find(s => !s.parentSpanId || !spans.find(p => p.spanId === s.parentSpanId))
+  const rootGenAi = ((root?.attributes as Record<string,unknown>)?.gen_ai || {}) as Record<string,unknown>
+  const projectAttr = ((root?.attributes as Record<string,unknown>)?.agentscope || {}) as Record<string,unknown>
+  const runName = (rootGenAi?.agent as Record<string,unknown>)?.name as string || 'unknown'
+  const projectId = projectAttr?.project as string || ''
+  const tsNs = root?.startTimeUnixNano
+  const tsDate = tsNs ? new Date(Number(BigInt(tsNs)/BigInt(1_000_000))).toLocaleString() : ''
+
+  const Section = ({ title, children }: { title: string; children: React.ReactNode }) => (
+    <Box sx={{ mb:2 }}>
+      <Typography variant="caption" fontWeight={700} color="text.secondary"
+        sx={{ display:'block', mb:0.75, textTransform:'uppercase', letterSpacing:'0.07em', fontSize:'0.62rem' }}>
+        {title}
+      </Typography>
+      {children}
+    </Box>
+  )
+
+  const Row = ({ label, value, mono = false }: { label: string; value: string | number; mono?: boolean }) => (
+    <Box sx={{ display:'flex', justifyContent:'space-between', alignItems:'center', py:0.5, borderBottom:'1px solid', borderColor:'divider' }}>
+      <Typography variant="caption" color="text.secondary" sx={{ fontSize:'0.72rem' }}>{label}</Typography>
+      <Typography variant="caption" fontWeight={600} fontFamily={mono ? 'monospace' : 'inherit'} sx={{ fontSize:'0.72rem' }}>{value}</Typography>
+    </Box>
+  )
+
   return (
-    <Box sx={{ width:280, flexShrink:0, borderLeft:1, borderColor:'divider', display:'flex', flexDirection:'column', bgcolor:'background.paper' }}>
-      <Box sx={{ px:1.5, py:1, borderBottom:1, borderColor:'divider', display:'flex', alignItems:'center', gap:1 }}>
-        <Typography variant="caption" fontWeight={700} sx={{ flex:1, textTransform:'uppercase', letterSpacing:'0.07em', fontSize:'0.65rem' }}>Data View</Typography>
-        <Typography variant="caption" fontFamily="monospace" color="text.secondary" sx={{ fontSize:'0.6rem' }}>{runId.slice(-8)}</Typography>
+    <Box sx={{ width:300, flexShrink:0, borderLeft:1, borderColor:'divider', display:'flex', flexDirection:'column', bgcolor:'background.paper' }}>
+      <Box sx={{ px:1.5, py:1, borderBottom:1, borderColor:'divider' }}>
+        <Typography variant="caption" fontWeight={700} sx={{ textTransform:'uppercase', letterSpacing:'0.07em', fontSize:'0.65rem' }}>
+          Data View
+        </Typography>
+        <Typography variant="caption" color="text.secondary" sx={{ display:'block', fontSize:'0.62rem', mt:0.25 }}>
+          The statistics of the current run instance
+        </Typography>
       </Box>
-      <Tabs value={tab} onChange={(_, v) => setTab(v)} sx={{ borderBottom:1, borderColor:'divider', minHeight:32 }}>
-        <Tab label="RUN" sx={{ fontSize:'0.65rem', minHeight:32, py:0, fontWeight:700 }} />
-        <Tab label="TRACE" sx={{ fontSize:'0.65rem', minHeight:32, py:0, fontWeight:700 }} />
+
+      <Tabs value={tab} onChange={(_, v) => setTab(v)} sx={{ borderBottom:1, borderColor:'divider', minHeight:36, px:1 }}>
+        {['RUN','MESSAGE','TRACE'].map((lbl, idx) => (
+          <Tab key={lbl} label={lbl} value={idx}
+            sx={{ fontSize:'0.68rem', minHeight:36, py:0, fontWeight:700, minWidth:60, px:1.5 }} />
+        ))}
       </Tabs>
-      <Box sx={{ flex:1, overflow:'auto', p:1.5 }}>
-        {isLoading && <CircularProgress size={16} sx={{ m:1 }} />}
+
+      <Box sx={{ flex:1, overflow:'auto' }}>
+        {isLoading && <Box sx={{ p:2 }}><CircularProgress size={16} /></Box>}
+
+        {/* ── RUN tab ── */}
         {tab===0 && !isLoading && (
-          <Box>
-            {[['Spans',spans.length],['LLM calls',llm.length],['Total tokens',totalTokens.toLocaleString()],['Total time',totalMs<1000?`${totalMs}ms`:`${(totalMs/1000).toFixed(1)}s`]].map(([k,v])=>(
-              <Box key={k as string} sx={{ display:'flex', justifyContent:'space-between', py:0.75, borderBottom:1, borderColor:'divider' }}>
-                <Typography variant="caption" color="text.secondary">{k}</Typography>
-                <Typography variant="caption" fontWeight={700} fontFamily="monospace">{v}</Typography>
+          <Box sx={{ p:1.5 }}>
+            {/* Status row */}
+            <Box sx={{ display:'flex', alignItems:'center', gap:1.5, mb:2, p:1.25, bgcolor:'action.hover', borderRadius:1.5 }}>
+              <Box sx={{ textAlign:'center', flex:1 }}>
+                <Typography variant="caption" color="text.secondary" sx={{ display:'block', fontSize:'0.6rem', textTransform:'uppercase' }}>STATUS</Typography>
+                <Chip label="DONE" size="small" color="success" sx={{ height:20, fontSize:'0.65rem', mt:0.25 }} />
               </Box>
-            ))}
+              <Box sx={{ width:'1px', bgcolor:'divider', alignSelf:'stretch' }} />
+              <Box sx={{ textAlign:'center', flex:1 }}>
+                <Typography variant="caption" color="text.secondary" sx={{ display:'block', fontSize:'0.6rem', textTransform:'uppercase' }}>INVOCATIONS</Typography>
+                <Typography variant="body2" fontWeight={700}>{llm.length} Times</Typography>
+              </Box>
+              <Box sx={{ width:'1px', bgcolor:'divider', alignSelf:'stretch' }} />
+              <Box sx={{ textAlign:'center', flex:1 }}>
+                <Typography variant="caption" color="text.secondary" sx={{ display:'block', fontSize:'0.6rem', textTransform:'uppercase' }}>TOKENS</Typography>
+                <Typography variant="body2" fontWeight={700}>{totalTok > 1000 ? `${(totalTok/1000).toFixed(1)}K` : totalTok} Tokens</Typography>
+              </Box>
+            </Box>
+
+            {runName && (
+              <Section title="METADATA">
+                <Row label="Name" value={runName} />
+                {projectId && <Row label="Project" value={projectId.slice(-20)} mono />}
+                {tsDate && <Row label="Timestamp" value={tsDate} />}
+              </Section>
+            )}
+
+            <Section title="INVOCATION">
+              <Row label="Total Times" value={llm.length} />
+              <Row label="Tool Calls" value={tools.length} />
+              <Row label="Total Time" value={totalMs<1000?`${totalMs}ms`:`${(totalMs/1000).toFixed(1)}s`} />
+            </Section>
+
+            {Object.keys(modelCounts).length > 0 && (
+              <Section title="DISTRIBUTION">
+                {Object.entries(modelCounts).map(([model, count]) => (
+                  <Box key={model} sx={{ mb:0.75 }}>
+                    <Typography variant="caption" color="text.secondary" sx={{ fontSize:'0.65rem', display:'block', mb:0.25 }}>
+                      {model.replace('gemini-3.1-pro-preview','gemini-3.1-pro').slice(0,22)}
+                    </Typography>
+                    <Box sx={{ display:'flex', alignItems:'center', gap:1 }}>
+                      <Box sx={{ flex:1, height:6, bgcolor:'action.hover', borderRadius:0.5, overflow:'hidden' }}>
+                        <Box sx={{ width:`${(count/maxModelCount)*100}%`, height:'100%', bgcolor:'primary.main', borderRadius:0.5 }} />
+                      </Box>
+                      <Typography variant="caption" fontFamily="monospace" sx={{ fontSize:'0.62rem', flexShrink:0 }}>{count}</Typography>
+                    </Box>
+                  </Box>
+                ))}
+              </Section>
+            )}
+
+            <Section title="TOKEN">
+              <Row label="Total" value={totalTok.toLocaleString()} />
+              <Row label="Prompt" value={totalIn.toLocaleString()} />
+              <Row label="Completion" value={totalOut.toLocaleString()} />
+              {llm.length > 0 && (<>
+                <Row label="Average" value={(totalTok/llm.length).toFixed(1)} />
+                <Row label="Prompt (Avg)" value={(totalIn/llm.length).toFixed(1)} />
+                <Row label="Completion (Avg)" value={(totalOut/llm.length).toFixed(1)} />
+              </>)}
+            </Section>
           </Box>
         )}
+
+        {/* ── MESSAGE tab — full conversation from spans ── */}
         {tab===1 && !isLoading && (
-          <Box>
-            {roots.length===0 && <Typography variant="caption" color="text.secondary">No trace data yet.</Typography>}
-            {roots.map(r => <SpanRow key={r.spanId} span={r} all={spans} depth={0} />)}
+          <Box sx={{ p:1.5 }}>
+            {spans.length === 0
+              ? <Typography variant="caption" color="text.secondary">No message data.</Typography>
+              : <FullConversation spans={spans} agentName={runName} c={0} e={0} />
+            }
+          </Box>
+        )}
+
+        {/* ── TRACE tab — span tree ── */}
+        {tab===2 && !isLoading && (
+          <Box sx={{ p:1 }}>
+            {roots.length===0
+              ? <Typography variant="caption" color="text.secondary">No trace data yet.</Typography>
+              : roots.map(r => <SpanRow key={r.spanId} span={r} all={spans} depth={0} />)
+            }
           </Box>
         )}
       </Box>
@@ -638,12 +904,12 @@ export default function Chat() {
       </Box>
 
       {/* ── Col 4: Data View (opens when run selected) ── */}
-      {selectedRunId && <DataView runId={selectedRunId} onClose={() => setSelectedRunId(null)} />}
+      {selectedRunId && <DataView runId={selectedRunId} />}
     </Box>
   )
 }
 
-// ── Historical conversation from Studio spans ─────────────────────────────────
+// ── Historical conversation — uses FullConversation from spans ────────────────
 
 function HistoryConversation({ runId, agentName, c, e }: { runId: string; agentName: string; c: number; e: number }) {
   const { data, isLoading } = useQuery({
@@ -651,52 +917,6 @@ function HistoryConversation({ runId, agentName, c, e }: { runId: string; agentN
     queryFn: () => studioGet<{ spans: Span[] }>(`/runs/${runId}/spans`),
     staleTime: 30000,
   })
-  const spans = data?.spans ?? []
-  const root = spans.find(s => !s.parentSpanId || !spans.find(p => p.spanId === s.parentSpanId))
   if (isLoading) return <Box sx={{ display:'flex', justifyContent:'center', py:3 }}><CircularProgress size={20} /></Box>
-  if (!root) return <Typography variant="caption" color="text.secondary" display="block" textAlign="center">No conversation data for this run.</Typography>
-
-  const genAi = ((root.attributes as Record<string,unknown>)?.gen_ai || {}) as Record<string,unknown>
-  const inputM = ((genAi?.input as Record<string,unknown>)?.messages as unknown[]) || []
-  const outputM = ((genAi?.output as Record<string,unknown>)?.messages as unknown[]) || []
-  const userMsg = inputM.find((m: unknown) => (m as Record<string,unknown>).role === 'user')
-  const agentMsg = outputM.find((m: unknown) => (m as Record<string,unknown>).role === 'assistant')
-  const userText = ((userMsg as Record<string,unknown>)?.parts as {content?:string}[])?.[0]?.content || ''
-  const agentText = ((agentMsg as Record<string,unknown>)?.parts as {content?:string}[])?.[0]?.content || ''
-
-  let display = agentText
-  try {
-    const p = JSON.parse(agentText)
-    if (p.confidence != null && p.recommendation) {
-      const c_ = (Number(p.confidence)*100).toFixed(0)
-      const lines = [`**Confidence:** ${c_}%  **Recommendation:** \`${p.recommendation}\``]
-      if (p.customer_id) lines.push(`**Customer:** ${p.customer_id}`)
-      if (p.notes_for_reviewer) lines.push(`**Notes:** ${p.notes_for_reviewer}`)
-      display = lines.join('\n')
-    }
-  } catch { /* use raw */ }
-
-  return (
-    <Box>
-      {userText && (
-        <Box sx={{ display:'flex', justifyContent:'flex-end', mb:1.5, gap:1, alignItems:'flex-end' }}>
-          <Paper sx={{ maxWidth:'72%', bgcolor:'primary.main', color:'primary.contrastText', px:2, py:1.25, borderRadius:'18px 18px 4px 18px' }}>
-            <Typography variant="body2">{userText.slice(0,300)}</Typography>
-          </Paper>
-          <Avatar sx={{ width:28, height:28, bgcolor:'grey.300', flexShrink:0, fontSize:14 }}>👤</Avatar>
-        </Box>
-      )}
-      {display && (
-        <Box sx={{ display:'flex', gap:1.25, mb:1.5, alignItems:'flex-start' }}>
-          <AgentAvatar name={agentName} c={c} e={e} size={28} />
-          <Box sx={{ flex:1, minWidth:0 }}>
-            <Typography variant="caption" fontWeight={700} display="block" sx={{ mb:0.5 }}>{agentName}</Typography>
-            <Paper variant="outlined" sx={{ px:2, py:1.5, borderRadius:'4px 18px 18px 18px', bgcolor:'background.paper' }}>
-              <Markdown text={display} />
-            </Paper>
-          </Box>
-        </Box>
-      )}
-    </Box>
-  )
+  return <FullConversation spans={data?.spans ?? []} agentName={agentName} c={c} e={e} />
 }
