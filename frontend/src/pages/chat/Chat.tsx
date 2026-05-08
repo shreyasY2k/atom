@@ -38,14 +38,15 @@ import BuildIcon from '@mui/icons-material/Build'
 import { builderApi } from '../../api/builder'
 import type { AgentRecord } from '../../types'
 
-// ── Studio tRPC API ───────────────────────────────────────────────────────────
+// ── Studio tRPC API (proxied through builder-backend to avoid CORS) ───────────
 
+const PROXY_BASE = `http://${window.location.hostname}:8080/studio/trpc`
 const STUDIO_URL = `http://${window.location.hostname}:3000`
 
 async function studioQuery<T>(procedure: string, input: object): Promise<T> {
-  const url = `${STUDIO_URL}/trpc/${procedure}?input=${encodeURIComponent(JSON.stringify(input))}`
+  const url = `${PROXY_BASE}/${procedure}?input=${encodeURIComponent(JSON.stringify(input))}`
   const r = await fetch(url)
-  if (!r.ok) throw new Error(`Studio tRPC ${procedure} failed: ${r.status}`)
+  if (!r.ok) throw new Error(`Studio ${procedure} failed: ${r.status}`)
   const d = await r.json()
   if (d.error) throw new Error(d.error.message)
   return d.result?.data as T

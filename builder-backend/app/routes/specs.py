@@ -85,17 +85,24 @@ def generate(req: GenerateRequest):
             "## Instructions\n\nAnalyse the input and return a valid JSON response.\n"
         )
 
-    # Persist spec to disk so compile/deploy can find it
-    spec_file = SPECS_PATH / "agents" / f"{spec.metadata.name}.yaml"
-    spec_file.parent.mkdir(parents=True, exist_ok=True)
-    spec_file.write_text(spec_yaml)
-
-    # Persist the generated skill file (overwrite stubs, preserve real skills if they exist)
+    # 1. Patch missing skill paths in spec_dict BEFORE saving to disk
+    skill_path_str = ""
     for ag in spec.spec.agents:
-        skill_path = Path("/app") / ag.skill
+        skill_rel = ag.skill or f"skills/{spec.metadata.domain}/{ag.name}.skill.md"
+        if not ag.skill:
+            for node in spec_dict.get("spec", {}).get("agents", []):
+                if node.get("name") == ag.name:
+                    node["skill"] = skill_rel
+        # Write skill file
+        skill_path = Path("/app") / skill_rel
         skill_path.parent.mkdir(parents=True, exist_ok=True)
         skill_path.write_text(skill_content)
         skill_path_str = str(skill_path)
+
+    # 2. Save spec to disk (skill paths now guaranteed to be present)
+    spec_file = SPECS_PATH / "agents" / f"{spec.metadata.name}.yaml"
+    spec_file.parent.mkdir(parents=True, exist_ok=True)
+    spec_file.write_text(yaml.dump(spec_dict, sort_keys=False, allow_unicode=True))
 
     return {
         "spec": spec_dict,

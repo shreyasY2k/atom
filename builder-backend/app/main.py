@@ -2,7 +2,7 @@
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from app.routes import specs, agents, registry
+from app.routes import specs, agents, registry, studio
 
 app = FastAPI(
     title="ATOM Agent Platform — Agent Builder",
@@ -20,6 +20,7 @@ app.add_middleware(
 app.include_router(specs.router)
 app.include_router(agents.router)
 app.include_router(registry.router)
+app.include_router(studio.router)
 
 
 @app.get("/health")
