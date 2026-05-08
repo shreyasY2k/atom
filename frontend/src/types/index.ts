@@ -26,30 +26,83 @@ export interface TraceEvent {
 
 // ---- Workflow types ----
 
+export interface RetryConfig {
+  max_attempts: number
+  backoff: 'exponential' | 'linear' | 'constant'
+  initial_delay_seconds?: number
+  max_delay_seconds?: number
+}
+
+export interface AuthConfig {
+  type: 'bearer' | 'basic' | 'api_key'
+  token?: string
+  username?: string
+  password?: string
+  header?: string
+  key?: string
+}
+
+export interface DecisionCase {
+  condition: string
+  target: string
+  label?: string
+}
+
+export interface EscalationPolicy {
+  action: 'auto_approve' | 'auto_reject' | 'escalate'
+  escalate_to_group?: string
+}
+
+export interface SkipCondition {
+  condition: string
+  auto_resolution: 'accept' | 'reject'
+}
+
 export interface WorkflowNode {
   id: string
   label: string
   type: 'agent' | 'http' | 'decision' | 'human_task'
+  description?: string
   next?: string | null
   branches?: Record<string, string | null>
+  on_error?: string
+  timeout_seconds?: number
+  retry?: RetryConfig
+  tags?: string[]
+
   // agent
   agent_ref?: { name: string; version: string }
   input_mapping?: Record<string, string>
   output_capture?: string
   confidence_threshold?: number
   fallback_node?: string
+
   // http
   method?: string
   url_template?: string
+  headers?: Record<string, string>
   body_template?: Record<string, unknown>
-  timeout_seconds?: number
+  auth?: AuthConfig
+  extract?: Record<string, string>
+  expect_status?: number[]
+
   // decision
   expression?: string
+  cases?: DecisionCase[]
+  default?: string
+
   // human_task
   assignee_group?: string
+  assignee_individual?: string
   task_template?: { title: string; description: string; actions: string[] }
   sla_seconds?: number
-  // runtime (set by UI)
+  priority?: 'low' | 'medium' | 'high' | 'critical'
+  evidence?: string[]
+  form_schema?: Record<string, unknown>
+  skip_if?: SkipCondition
+  escalation_policy?: EscalationPolicy
+
+  // runtime (set by UI, not serialised)
   _serviceAccountId?: string
   _nodeState?: 'running' | 'completed' | 'paused' | 'error'
   _outputSummary?: Record<string, unknown>

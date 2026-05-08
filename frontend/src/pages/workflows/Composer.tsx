@@ -485,8 +485,12 @@ function KVEditor({
 
 // ── Inspector ─────────────────────────────────────────────────────────────────
 
-const ASSIGNEE_GROUPS = ['ops', 'compliance', 'risk-management', 'audit']
+const ASSIGNEE_GROUPS = ['ops', 'compliance', 'risk-management', 'audit', 'risk', 'legal']
 const HTTP_METHODS = ['GET', 'POST', 'PUT', 'DELETE', 'PATCH']
+const AUTH_TYPES = ['bearer', 'basic', 'api_key'] as const
+const PRIORITY_LEVELS = ['low', 'medium', 'high', 'critical'] as const
+const ESCALATION_ACTIONS = ['auto_approve', 'auto_reject', 'escalate'] as const
+const BACKOFF_TYPES = ['exponential', 'linear', 'constant'] as const
 
 function Inspector({
   node,
@@ -496,13 +500,12 @@ function Inspector({
   onReplaceWithAgent,
 }: {
   node: WorkflowNode | null
-  agents: { name: string; service_account_id: string; status: string; tools?: string[] }[]
+  agents: { name: string; service_account_id: string; status: string; tools?: string[]; reasoning_mode?: string }[]
   nodeIds: string[]
   onUpdate: (nodeId: string, changes: Partial<WorkflowNode>) => void
   onReplaceWithAgent: (nodeId: string, agentName: string, svcId: string) => void
 }) {
   const [showPicker, setShowPicker] = useState(false)
-
   useEffect(() => { setShowPicker(false) }, [node?.id])
 
   if (!node) {
@@ -516,297 +519,391 @@ function Inspector({
   }
 
   const up = (changes: Partial<WorkflowNode>) => onUpdate(node.id, changes)
-
   const selectedAgent = agents.find((a) => a.name === node.agent_ref?.name)
   const tools = selectedAgent?.tools ?? []
-
   const canReplace = node.type === 'human_task' || node.type === 'http'
 
+  const SectionLabel = ({ children }: { children: React.ReactNode }) => (
+    <Typography variant="caption" color="text.secondary" fontWeight={700}
+      sx={{ textTransform: 'uppercase', letterSpacing: '0.07em', display: 'block', mt: 0.5 }}>
+      {children}
+    </Typography>
+  )
+
   return (
-    <Box sx={{ p: 1.5, overflowY: 'auto', height: '100%', display: 'flex', flexDirection: 'column', gap: 1.5 }}>
-      {/* Header */}
+    <Box sx={{ p: 1.5, overflowY: 'auto', height: '100%', display: 'flex', flexDirection: 'column', gap: 1.25 }}>
+
+      {/* ── Identity ── */}
       <Box>
         <Typography variant="caption" color="text.secondary" display="block" gutterBottom>Label</Typography>
-        <TextField
-          size="small"
-          fullWidth
-          value={node.label}
+        <TextField size="small" fullWidth value={node.label}
           onChange={(e) => up({ label: e.target.value })}
-          inputProps={{ style: { fontSize: '0.8rem', fontWeight: 600 } }}
-        />
+          inputProps={{ style: { fontSize: '0.8rem', fontWeight: 600 } }} />
       </Box>
       <Box sx={{ display: 'flex', gap: 1, alignItems: 'center' }}>
         <Typography variant="caption" color="text.secondary">Type:</Typography>
-        <Chip
-          label={node.type}
-          size="small"
-          sx={{ fontFamily: 'monospace', color: NODE_STROKE[node.type] || '#94a3b8', bgcolor: NODE_FILL[node.type] || '#f8f9fa', border: `1px solid ${NODE_STROKE[node.type] || '#94a3b8'}` }}
-        />
+        <Chip label={node.type} size="small" sx={{ fontFamily: 'monospace',
+          color: NODE_STROKE[node.type] || '#94a3b8', bgcolor: NODE_FILL[node.type] || '#f8f9fa',
+          border: `1px solid ${NODE_STROKE[node.type] || '#94a3b8'}` }} />
       </Box>
+      <TextField size="small" label="Description" fullWidth multiline maxRows={2}
+        value={node.description ?? ''}
+        onChange={(e) => up({ description: e.target.value })}
+        inputProps={{ style: { fontSize: '0.78rem' } }} />
+
       <Divider />
 
-      {/* Agent fields */}
-      {node.type === 'agent' && (
-        <>
-          <FormControl size="small" fullWidth>
-            <InputLabel sx={{ fontSize: '0.8rem' }}>Agent</InputLabel>
-            <Select
-              label="Agent"
-              value={node.agent_ref?.name ?? ''}
-              onChange={(e) => up({ agent_ref: { name: e.target.value, version: node.agent_ref?.version ?? 'latest' } })}
-              sx={{ fontSize: '0.8rem' }}
-            >
-              {agents.map((a) => (
-                <MenuItem key={a.name} value={a.name} sx={{ fontSize: '0.8rem' }}>
-                  <Box>
-                    <Typography variant="body2" fontFamily="monospace">{a.name}</Typography>
-                    <Typography variant="caption" color="text.secondary">{a.status}</Typography>
-                  </Box>
-                </MenuItem>
-              ))}
+      {/* ── Common: routing & execution ── */}
+      <SectionLabel>Routing &amp; Error handling</SectionLabel>
+      <FormControl size="small" fullWidth>
+        <InputLabel sx={{ fontSize: '0.8rem' }}>On error → node</InputLabel>
+        <Select label="On error → node" value={node.on_error ?? ''}
+          onChange={(e) => up({ on_error: e.target.value || undefined })} sx={{ fontSize: '0.8rem' }}>
+          <MenuItem value="" sx={{ fontSize: '0.8rem' }}><em>None (fail workflow)</em></MenuItem>
+          {nodeIds.filter((id) => id !== node.id).map((id) => (
+            <MenuItem key={id} value={id} sx={{ fontSize: '0.8rem', fontFamily: 'monospace' }}>{id}</MenuItem>
+          ))}
+        </Select>
+      </FormControl>
+      <TextField size="small" label="Timeout (seconds)" type="number" fullWidth
+        value={node.timeout_seconds ?? 300}
+        onChange={(e) => up({ timeout_seconds: parseInt(e.target.value, 10) })}
+        inputProps={{ min: 1, style: { fontSize: '0.8rem' } }} />
+
+      {/* Retry — shown for agent + http */}
+      {(node.type === 'agent' || node.type === 'http') && (
+        <Box sx={{ display: 'flex', gap: 1 }}>
+          <TextField size="small" label="Retry attempts" type="number"
+            value={node.retry?.max_attempts ?? ''}
+            onChange={(e) => up({ retry: { ...node.retry, max_attempts: parseInt(e.target.value, 10) || 1, backoff: node.retry?.backoff ?? 'exponential' } })}
+            inputProps={{ min: 1, max: 10, style: { fontSize: '0.8rem' } }} sx={{ flex: 1 }} />
+          <FormControl size="small" sx={{ flex: 1 }}>
+            <InputLabel sx={{ fontSize: '0.8rem' }}>Backoff</InputLabel>
+            <Select label="Backoff" value={node.retry?.backoff ?? 'exponential'}
+              onChange={(e) => up({ retry: { ...node.retry, max_attempts: node.retry?.max_attempts ?? 1, backoff: e.target.value as 'exponential' | 'linear' | 'constant' } })}
+              sx={{ fontSize: '0.8rem' }}>
+              {BACKOFF_TYPES.map((b) => <MenuItem key={b} value={b} sx={{ fontSize: '0.8rem' }}>{b}</MenuItem>)}
             </Select>
           </FormControl>
-          <TextField
-            size="small"
-            label="Version"
-            fullWidth
-            value={node.agent_ref?.version ?? 'latest'}
-            onChange={(e) => up({ agent_ref: { name: node.agent_ref?.name ?? '', version: e.target.value } })}
-            inputProps={{ style: { fontSize: '0.8rem' } }}
-          />
-          <TextField
-            size="small"
-            label="Confidence threshold"
-            type="number"
-            fullWidth
-            value={node.confidence_threshold ?? ''}
-            onChange={(e) => up({ confidence_threshold: e.target.value === '' ? undefined : parseFloat(e.target.value) })}
-            inputProps={{ min: 0, max: 1, step: 0.05, style: { fontSize: '0.8rem' } }}
-          />
+        </Box>
+      )}
+
+      <Divider />
+
+      {/* ── Agent fields ── */}
+      {node.type === 'agent' && (<>
+        <SectionLabel>Agent</SectionLabel>
+        <FormControl size="small" fullWidth>
+          <InputLabel sx={{ fontSize: '0.8rem' }}>Agent</InputLabel>
+          <Select label="Agent" value={node.agent_ref?.name ?? ''}
+            onChange={(e) => up({ agent_ref: { name: e.target.value, version: node.agent_ref?.version ?? 'latest' } })}
+            sx={{ fontSize: '0.8rem' }}>
+            {agents.map((a) => (
+              <MenuItem key={a.name} value={a.name} sx={{ fontSize: '0.8rem' }}>
+                <Box>
+                  <Typography variant="body2" fontFamily="monospace">{a.name}</Typography>
+                  <Typography variant="caption" color="text.secondary">{a.status}</Typography>
+                </Box>
+              </MenuItem>
+            ))}
+          </Select>
+        </FormControl>
+        <TextField size="small" label="Version" fullWidth value={node.agent_ref?.version ?? 'latest'}
+          onChange={(e) => up({ agent_ref: { name: node.agent_ref?.name ?? '', version: e.target.value } })}
+          inputProps={{ style: { fontSize: '0.8rem' } }} />
+
+        <SectionLabel>Confidence routing</SectionLabel>
+        <TextField size="small" label="Confidence threshold (0–1)" type="number" fullWidth
+          value={node.confidence_threshold ?? ''}
+          onChange={(e) => up({ confidence_threshold: e.target.value === '' ? undefined : parseFloat(e.target.value) })}
+          inputProps={{ min: 0, max: 1, step: 0.05, style: { fontSize: '0.8rem' } }} />
+        <FormControl size="small" fullWidth>
+          <InputLabel sx={{ fontSize: '0.8rem' }}>Fallback node (low confidence)</InputLabel>
+          <Select label="Fallback node (low confidence)" value={node.fallback_node ?? ''}
+            onChange={(e) => up({ fallback_node: e.target.value || undefined })} sx={{ fontSize: '0.8rem' }}>
+            <MenuItem value="" sx={{ fontSize: '0.8rem' }}><em>None</em></MenuItem>
+            {nodeIds.filter((id) => id !== node.id).map((id) => (
+              <MenuItem key={id} value={id} sx={{ fontSize: '0.8rem', fontFamily: 'monospace' }}>{id}</MenuItem>
+            ))}
+          </Select>
+        </FormControl>
+
+        <SectionLabel>Data mapping</SectionLabel>
+        <KVEditor label="Input mapping" value={node.input_mapping ?? {}}
+          onChange={(v) => up({ input_mapping: v })} />
+        <TextField size="small" label="Output capture (ctx key)" fullWidth value={node.output_capture ?? ''}
+          onChange={(e) => up({ output_capture: e.target.value })}
+          inputProps={{ style: { fontSize: '0.8rem', fontFamily: 'monospace' } }} />
+
+        {tools.length > 0 && (
+          <Box>
+            <Typography variant="caption" color="text.secondary" display="block" gutterBottom>Capabilities</Typography>
+            <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.5 }}>
+              {tools.map((t) => <Chip key={t} label={`tool: ${t}`} size="small" variant="outlined" sx={{ fontSize: '0.65rem', height: 20 }} />)}
+            </Box>
+          </Box>
+        )}
+        {selectedAgent && (
+          <>
+            <Box>
+              <Typography variant="caption" color="text.secondary" display="block" gutterBottom>Reasoning mode</Typography>
+              <Box sx={{ display: 'flex', gap: 0.75, alignItems: 'center' }}>
+                <Chip label={selectedAgent.reasoning_mode ?? 'prescribed'} size="small" variant="outlined"
+                  sx={{ height: 18, fontSize: '0.65rem', color: selectedAgent.reasoning_mode === 'guided' ? '#185FA5' : '#5F5E5A' }} />
+                {selectedAgent.reasoning_mode === 'guided' && (
+                  <Chip label="variable reasoning" size="small"
+                    sx={{ height: 16, fontSize: '0.58rem', bgcolor: '#FFF3E0', color: '#E65100' }} />
+                )}
+              </Box>
+            </Box>
+            <Box>
+              <Typography variant="caption" color="text.secondary" display="block" gutterBottom>Service account</Typography>
+              <Chip label={selectedAgent.service_account_id} size="small"
+                sx={{ fontFamily: 'monospace', fontSize: '0.65rem', height: 20, bgcolor: NODE_FILL.agent,
+                  color: NODE_STROKE.agent, border: `1px solid ${NODE_STROKE.agent}`, maxWidth: '100%' }} />
+            </Box>
+          </>
+        )}
+      </>)}
+
+      {/* ── HTTP fields ── */}
+      {node.type === 'http' && (<>
+        <SectionLabel>Request</SectionLabel>
+        <Box sx={{ display: 'flex', gap: 1 }}>
+          <FormControl size="small" sx={{ width: 100, flexShrink: 0 }}>
+            <InputLabel sx={{ fontSize: '0.8rem' }}>Method</InputLabel>
+            <Select label="Method" value={node.method ?? 'GET'}
+              onChange={(e) => up({ method: e.target.value as WorkflowNode['method'] })} sx={{ fontSize: '0.8rem' }}>
+              {HTTP_METHODS.map((m) => <MenuItem key={m} value={m} sx={{ fontSize: '0.8rem' }}>{m}</MenuItem>)}
+            </Select>
+          </FormControl>
+          <TextField size="small" label="URL template" fullWidth value={node.url_template ?? ''}
+            onChange={(e) => up({ url_template: e.target.value })}
+            inputProps={{ style: { fontSize: '0.78rem', fontFamily: 'monospace' } }} />
+        </Box>
+
+        <SectionLabel>Authentication</SectionLabel>
+        <FormControl size="small" fullWidth>
+          <InputLabel sx={{ fontSize: '0.8rem' }}>Auth type</InputLabel>
+          <Select label="Auth type" value={node.auth?.type ?? ''}
+            onChange={(e) => up({ auth: e.target.value ? { ...node.auth, type: e.target.value as 'bearer' | 'basic' | 'api_key' } : undefined })}
+            sx={{ fontSize: '0.8rem' }}>
+            <MenuItem value="" sx={{ fontSize: '0.8rem' }}><em>None</em></MenuItem>
+            {AUTH_TYPES.map((t) => <MenuItem key={t} value={t} sx={{ fontSize: '0.8rem' }}>{t}</MenuItem>)}
+          </Select>
+        </FormControl>
+        {node.auth?.type === 'bearer' && (
+          <TextField size="small" label="Bearer token" fullWidth value={node.auth.token ?? ''}
+            onChange={(e) => up({ auth: { ...node.auth!, token: e.target.value } })}
+            inputProps={{ style: { fontSize: '0.78rem', fontFamily: 'monospace' } }} />
+        )}
+        {node.auth?.type === 'basic' && (<>
+          <TextField size="small" label="Username" fullWidth value={node.auth.username ?? ''}
+            onChange={(e) => up({ auth: { ...node.auth!, username: e.target.value } })}
+            inputProps={{ style: { fontSize: '0.78rem' } }} />
+          <TextField size="small" label="Password" type="password" fullWidth value={node.auth.password ?? ''}
+            onChange={(e) => up({ auth: { ...node.auth!, password: e.target.value } })}
+            inputProps={{ style: { fontSize: '0.78rem' } }} />
+        </>)}
+        {node.auth?.type === 'api_key' && (<>
+          <TextField size="small" label="Header name" fullWidth value={node.auth.header ?? 'X-API-Key'}
+            onChange={(e) => up({ auth: { ...node.auth!, header: e.target.value } })}
+            inputProps={{ style: { fontSize: '0.78rem' } }} />
+          <TextField size="small" label="Key value" fullWidth value={node.auth.key ?? ''}
+            onChange={(e) => up({ auth: { ...node.auth!, key: e.target.value } })}
+            inputProps={{ style: { fontSize: '0.78rem', fontFamily: 'monospace' } }} />
+        </>)}
+
+        <SectionLabel>Response</SectionLabel>
+        <KVEditor label="Extract fields (output key → dot.path)" value={node.extract ?? {}}
+          onChange={(v) => up({ extract: v })} />
+        <TextField size="small" label="Expect status codes (comma-separated)" fullWidth
+          value={(node.expect_status ?? []).join(', ')}
+          onChange={(e) => {
+            const codes = e.target.value.split(',').map((s) => parseInt(s.trim(), 10)).filter((n) => !isNaN(n))
+            up({ expect_status: codes.length ? codes : undefined })
+          }}
+          helperText="e.g. 200, 201, 202 — leave blank for any 2xx"
+          inputProps={{ style: { fontSize: '0.8rem', fontFamily: 'monospace' } }} />
+        <TextField size="small" label="Output capture (ctx key)" fullWidth value={node.output_capture ?? ''}
+          onChange={(e) => up({ output_capture: e.target.value })}
+          inputProps={{ style: { fontSize: '0.8rem', fontFamily: 'monospace' } }} />
+      </>)}
+
+      {/* ── Decision fields ── */}
+      {node.type === 'decision' && (<>
+        {/* Binary mode */}
+        {!node.cases?.length && (<>
+          <SectionLabel>Binary decision</SectionLabel>
+          <TextField size="small" label="Expression" fullWidth multiline maxRows={3}
+            value={node.expression ?? ''}
+            onChange={(e) => up({ expression: e.target.value })}
+            inputProps={{ style: { fontSize: '0.8rem', fontFamily: 'monospace' } }}
+            helperText="e.g. ctx.input.amount_usd > 250000" />
+          <Box>
+            <Typography variant="caption" color="text.secondary" display="block" gutterBottom>
+              Branch targets — draw arrows from canvas handles
+            </Typography>
+            <Box sx={{ display: 'flex', flexDirection: 'column', gap: 0.5 }}>
+              <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                <Chip label="T" size="small" sx={{ bgcolor: 'rgba(59,109,17,0.1)', color: '#3B6D11', fontSize: '0.65rem', height: 18, minWidth: 24 }} />
+                <Typography variant="caption" fontFamily="monospace" color="text.secondary">{node.branches?.true ?? '(none)'}</Typography>
+              </Box>
+              <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                <Chip label="F" size="small" sx={{ bgcolor: 'rgba(185,28,28,0.1)', color: '#b91c1c', fontSize: '0.65rem', height: 18, minWidth: 24 }} />
+                <Typography variant="caption" fontFamily="monospace" color="text.secondary">{node.branches?.false ?? '(none)'}</Typography>
+              </Box>
+            </Box>
+          </Box>
+        </>)}
+
+        {/* Multi-way mode */}
+        {!!node.cases?.length && (<>
+          <SectionLabel>Multi-way decision (cases)</SectionLabel>
+          {node.cases.map((c, i) => (
+            <Box key={i} sx={{ p: 1, border: 1, borderColor: NODE_STROKE.decision, borderRadius: 1, bgcolor: NODE_FILL.decision, display: 'flex', flexDirection: 'column', gap: 0.75 }}>
+              <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+                <Chip label={`Case ${i + 1}`} size="small" sx={{ fontSize: '0.6rem', height: 16, bgcolor: NODE_STROKE.decision, color: '#fff' }} />
+                {c.label && <Typography variant="caption" color="text.secondary">{c.label}</Typography>}
+              </Box>
+              <TextField size="small" label="Condition" fullWidth value={c.condition}
+                onChange={(e) => { const next = [...node.cases!]; next[i] = { ...c, condition: e.target.value }; up({ cases: next }) }}
+                inputProps={{ style: { fontSize: '0.75rem', fontFamily: 'monospace' } }} />
+              <TextField size="small" label="Label" fullWidth value={c.label ?? ''}
+                onChange={(e) => { const next = [...node.cases!]; next[i] = { ...c, label: e.target.value }; up({ cases: next }) }}
+                inputProps={{ style: { fontSize: '0.75rem' } }} />
+              <FormControl size="small" fullWidth>
+                <InputLabel sx={{ fontSize: '0.75rem' }}>Target node</InputLabel>
+                <Select label="Target node" value={c.target}
+                  onChange={(e) => { const next = [...node.cases!]; next[i] = { ...c, target: e.target.value }; up({ cases: next }) }}
+                  sx={{ fontSize: '0.75rem' }}>
+                  {nodeIds.filter((id) => id !== node.id).map((id) => (
+                    <MenuItem key={id} value={id} sx={{ fontSize: '0.75rem', fontFamily: 'monospace' }}>{id}</MenuItem>
+                  ))}
+                </Select>
+              </FormControl>
+            </Box>
+          ))}
           <FormControl size="small" fullWidth>
-            <InputLabel sx={{ fontSize: '0.8rem' }}>Fallback node</InputLabel>
-            <Select
-              label="Fallback node"
-              value={node.fallback_node ?? ''}
-              onChange={(e) => up({ fallback_node: e.target.value || undefined })}
-              sx={{ fontSize: '0.8rem' }}
-            >
-              <MenuItem value="" sx={{ fontSize: '0.8rem' }}><em>None</em></MenuItem>
+            <InputLabel sx={{ fontSize: '0.8rem' }}>Default (no case matched)</InputLabel>
+            <Select label="Default (no case matched)" value={node.default ?? ''}
+              onChange={(e) => up({ default: e.target.value || undefined })} sx={{ fontSize: '0.8rem' }}>
+              <MenuItem value="" sx={{ fontSize: '0.8rem' }}><em>None (required)</em></MenuItem>
               {nodeIds.filter((id) => id !== node.id).map((id) => (
                 <MenuItem key={id} value={id} sx={{ fontSize: '0.8rem', fontFamily: 'monospace' }}>{id}</MenuItem>
               ))}
             </Select>
           </FormControl>
-          <TextField
-            size="small"
-            label="Output capture"
-            fullWidth
-            value={node.output_capture ?? ''}
-            onChange={(e) => up({ output_capture: e.target.value })}
-            inputProps={{ style: { fontSize: '0.8rem', fontFamily: 'monospace' } }}
-          />
-          <KVEditor
-            label="Input mapping"
-            value={node.input_mapping ?? {}}
-            onChange={(v) => up({ input_mapping: v })}
-          />
-          {tools.length > 0 && (
-            <Box>
-              <Typography variant="caption" color="text.secondary" display="block" gutterBottom>Capabilities</Typography>
-              <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.5 }}>
-                {tools.map((t) => (
-                  <Chip key={t} label={`tool: ${t}`} size="small" variant="outlined" sx={{ fontSize: '0.65rem', height: 20 }} />
-                ))}
-              </Box>
-            </Box>
-          )}
-          {selectedAgent && (
-            <>
-              <Box>
-                <Typography variant="caption" color="text.secondary" display="block" gutterBottom>Reasoning mode</Typography>
-                <Box sx={{ display: 'flex', gap: 0.75, alignItems: 'center' }}>
-                  <Chip
-                    label={(selectedAgent as typeof selectedAgent & { reasoning_mode?: string }).reasoning_mode ?? 'prescribed'}
-                    size="small"
-                    variant="outlined"
-                    sx={{ height: 18, fontSize: '0.65rem', color: (selectedAgent as typeof selectedAgent & { reasoning_mode?: string }).reasoning_mode === 'guided' ? '#185FA5' : '#5F5E5A' }}
-                  />
-                  {(selectedAgent as typeof selectedAgent & { reasoning_mode?: string }).reasoning_mode === 'guided' && (
-                    <Chip
-                      label="variable reasoning"
-                      size="small"
-                      sx={{ height: 16, fontSize: '0.58rem', bgcolor: '#FFF3E0', color: '#E65100' }}
-                    />
-                  )}
-                </Box>
-              </Box>
-              <Box>
-                <Typography variant="caption" color="text.secondary" display="block" gutterBottom>Service account</Typography>
-                <Chip
-                  label={selectedAgent.service_account_id}
-                  size="small"
-                  sx={{ fontFamily: 'monospace', fontSize: '0.65rem', height: 20, bgcolor: NODE_FILL.agent, color: NODE_STROKE.agent, border: `1px solid ${NODE_STROKE.agent}`, maxWidth: '100%' }}
-                />
-              </Box>
-            </>
-          )}
-        </>
-      )}
+        </>)}
+      </>)}
 
-      {/* HTTP fields */}
-      {node.type === 'http' && (
-        <>
-          <FormControl size="small" fullWidth>
-            <InputLabel sx={{ fontSize: '0.8rem' }}>Method</InputLabel>
-            <Select
-              label="Method"
-              value={node.method ?? 'GET'}
-              onChange={(e) => up({ method: e.target.value as WorkflowNode['method'] })}
-              sx={{ fontSize: '0.8rem' }}
-            >
-              {HTTP_METHODS.map((m) => <MenuItem key={m} value={m} sx={{ fontSize: '0.8rem' }}>{m}</MenuItem>)}
+      {/* ── Human task fields ── */}
+      {node.type === 'human_task' && (<>
+        <SectionLabel>Assignment</SectionLabel>
+        <FormControl size="small" fullWidth>
+          <InputLabel sx={{ fontSize: '0.8rem' }}>Assignee group</InputLabel>
+          <Select label="Assignee group" value={node.assignee_group ?? ''}
+            onChange={(e) => up({ assignee_group: e.target.value })} sx={{ fontSize: '0.8rem' }}>
+            {ASSIGNEE_GROUPS.map((g) => <MenuItem key={g} value={g} sx={{ fontSize: '0.8rem' }}>{g}</MenuItem>)}
+          </Select>
+        </FormControl>
+        <TextField size="small" label="Assignee individual (email, optional)" fullWidth value={node.assignee_individual ?? ''}
+          onChange={(e) => up({ assignee_individual: e.target.value || undefined })}
+          inputProps={{ style: { fontSize: '0.8rem' } }} />
+        <Box sx={{ display: 'flex', gap: 1 }}>
+          <FormControl size="small" sx={{ flex: 1 }}>
+            <InputLabel sx={{ fontSize: '0.8rem' }}>Priority</InputLabel>
+            <Select label="Priority" value={node.priority ?? 'medium'}
+              onChange={(e) => up({ priority: e.target.value as WorkflowNode['priority'] })} sx={{ fontSize: '0.8rem' }}>
+              {PRIORITY_LEVELS.map((p) => <MenuItem key={p} value={p} sx={{ fontSize: '0.8rem' }}>{p}</MenuItem>)}
             </Select>
           </FormControl>
-          <TextField
-            size="small"
-            label="URL template"
-            fullWidth
-            value={node.url_template ?? ''}
-            onChange={(e) => up({ url_template: e.target.value })}
-            inputProps={{ style: { fontSize: '0.8rem', fontFamily: 'monospace' } }}
-          />
-          <TextField
-            size="small"
-            label="Output capture"
-            fullWidth
-            value={node.output_capture ?? ''}
-            onChange={(e) => up({ output_capture: e.target.value })}
-            inputProps={{ style: { fontSize: '0.8rem', fontFamily: 'monospace' } }}
-          />
-          <TextField
-            size="small"
-            label="Timeout (seconds)"
-            type="number"
-            fullWidth
-            value={node.timeout_seconds ?? 30}
-            onChange={(e) => up({ timeout_seconds: parseInt(e.target.value, 10) })}
-            inputProps={{ min: 1, style: { fontSize: '0.8rem' } }}
-          />
-        </>
-      )}
+          <TextField size="small" label="SLA (seconds)" type="number" sx={{ flex: 1 }}
+            value={node.sla_seconds ?? 3600}
+            onChange={(e) => up({ sla_seconds: parseInt(e.target.value, 10) })}
+            inputProps={{ min: 60, style: { fontSize: '0.8rem' } }} />
+        </Box>
 
-      {/* Decision fields */}
-      {node.type === 'decision' && (
-        <>
-          <TextField
-            size="small"
-            label="Expression"
-            fullWidth
-            multiline
-            maxRows={3}
-            value={node.expression ?? ''}
-            onChange={(e) => up({ expression: e.target.value })}
-            inputProps={{ style: { fontSize: '0.8rem', fontFamily: 'monospace' } }}
-            helperText="Python expression, e.g. ctx.input.amount_usd > 250000"
-          />
-          <Box>
-            <Typography variant="caption" color="text.secondary" display="block" gutterBottom>Branch targets (drawn from canvas)</Typography>
-            <Box sx={{ display: 'flex', flexDirection: 'column', gap: 0.5 }}>
-              <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                <Chip label="true" size="small" sx={{ bgcolor: 'rgba(59,109,17,0.1)', color: '#3B6D11', fontSize: '0.65rem', height: 18 }} />
-                <Typography variant="caption" fontFamily="monospace" color="text.secondary">{node.branches?.true ?? '(none)'}</Typography>
-              </Box>
-              <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                <Chip label="false" size="small" sx={{ bgcolor: 'rgba(185,28,28,0.1)', color: '#b91c1c', fontSize: '0.65rem', height: 18 }} />
-                <Typography variant="caption" fontFamily="monospace" color="text.secondary">{node.branches?.false ?? '(none)'}</Typography>
-              </Box>
-            </Box>
-          </Box>
-        </>
-      )}
+        <SectionLabel>Task content</SectionLabel>
+        <TextField size="small" label="Task title" fullWidth value={node.task_template?.title ?? ''}
+          onChange={(e) => up({ task_template: { title: e.target.value, description: node.task_template?.description ?? '', actions: node.task_template?.actions ?? ['accept', 'reject'] } })}
+          inputProps={{ style: { fontSize: '0.8rem' } }} />
+        <TextField size="small" label="Task description" fullWidth multiline rows={2}
+          value={node.task_template?.description ?? ''}
+          onChange={(e) => up({ task_template: { title: node.task_template?.title ?? '', description: e.target.value, actions: node.task_template?.actions ?? ['accept', 'reject'] } })}
+          inputProps={{ style: { fontSize: '0.8rem' } }} />
+        <TextField size="small" label="Evidence (ctx keys, comma-separated)" fullWidth
+          value={(node.evidence ?? []).join(', ')}
+          onChange={(e) => {
+            const keys = e.target.value.split(',').map((s) => s.trim()).filter(Boolean)
+            up({ evidence: keys.length ? keys : undefined })
+          }}
+          helperText="e.g. kyc_result, ofac_result — shown to the reviewer"
+          inputProps={{ style: { fontSize: '0.8rem', fontFamily: 'monospace' } }} />
 
-      {/* Human task fields */}
-      {node.type === 'human_task' && (
-        <>
+        <SectionLabel>Auto-skip</SectionLabel>
+        <TextField size="small" label="Skip if condition" fullWidth value={node.skip_if?.condition ?? ''}
+          onChange={(e) => up({ skip_if: e.target.value ? { condition: e.target.value, auto_resolution: node.skip_if?.auto_resolution ?? 'accept' } : undefined })}
+          inputProps={{ style: { fontSize: '0.8rem', fontFamily: 'monospace' } }}
+          helperText="Python expression — if true, task is never created" />
+        {node.skip_if && (
           <FormControl size="small" fullWidth>
-            <InputLabel sx={{ fontSize: '0.8rem' }}>Assignee group</InputLabel>
-            <Select
-              label="Assignee group"
-              value={node.assignee_group ?? ''}
-              onChange={(e) => up({ assignee_group: e.target.value })}
-              sx={{ fontSize: '0.8rem' }}
-            >
+            <InputLabel sx={{ fontSize: '0.8rem' }}>Auto-resolution</InputLabel>
+            <Select label="Auto-resolution" value={node.skip_if.auto_resolution ?? 'accept'}
+              onChange={(e) => up({ skip_if: { ...node.skip_if!, auto_resolution: e.target.value as 'accept' | 'reject' } })}
+              sx={{ fontSize: '0.8rem' }}>
+              <MenuItem value="accept" sx={{ fontSize: '0.8rem' }}>accept</MenuItem>
+              <MenuItem value="reject" sx={{ fontSize: '0.8rem' }}>reject</MenuItem>
+            </Select>
+          </FormControl>
+        )}
+
+        <SectionLabel>SLA escalation policy</SectionLabel>
+        <FormControl size="small" fullWidth>
+          <InputLabel sx={{ fontSize: '0.8rem' }}>On SLA expiry</InputLabel>
+          <Select label="On SLA expiry" value={node.escalation_policy?.action ?? ''}
+            onChange={(e) => up({ escalation_policy: e.target.value ? { action: e.target.value as 'auto_approve' | 'auto_reject' | 'escalate', escalate_to_group: node.escalation_policy?.escalate_to_group } : undefined })}
+            sx={{ fontSize: '0.8rem' }}>
+            <MenuItem value="" sx={{ fontSize: '0.8rem' }}><em>None (timeout)</em></MenuItem>
+            {ESCALATION_ACTIONS.map((a) => <MenuItem key={a} value={a} sx={{ fontSize: '0.8rem' }}>{a}</MenuItem>)}
+          </Select>
+        </FormControl>
+        {node.escalation_policy?.action === 'escalate' && (
+          <FormControl size="small" fullWidth>
+            <InputLabel sx={{ fontSize: '0.8rem' }}>Escalate to group</InputLabel>
+            <Select label="Escalate to group" value={node.escalation_policy.escalate_to_group ?? ''}
+              onChange={(e) => up({ escalation_policy: { ...node.escalation_policy!, escalate_to_group: e.target.value } })}
+              sx={{ fontSize: '0.8rem' }}>
               {ASSIGNEE_GROUPS.map((g) => <MenuItem key={g} value={g} sx={{ fontSize: '0.8rem' }}>{g}</MenuItem>)}
             </Select>
           </FormControl>
-          <TextField
-            size="small"
-            label="Task title"
-            fullWidth
-            value={node.task_template?.title ?? ''}
-            onChange={(e) => up({ task_template: { ...node.task_template!, title: e.target.value, description: node.task_template?.description ?? '', actions: node.task_template?.actions ?? ['accept', 'reject'] } })}
-            inputProps={{ style: { fontSize: '0.8rem' } }}
-          />
-          <TextField
-            size="small"
-            label="Task description"
-            fullWidth
-            multiline
-            rows={2}
-            value={node.task_template?.description ?? ''}
-            onChange={(e) => up({ task_template: { ...node.task_template!, title: node.task_template?.title ?? '', description: e.target.value, actions: node.task_template?.actions ?? ['accept', 'reject'] } })}
-            inputProps={{ style: { fontSize: '0.8rem' } }}
-          />
-          <TextField
-            size="small"
-            label="SLA (seconds)"
-            type="number"
-            fullWidth
-            value={node.sla_seconds ?? 3600}
-            onChange={(e) => up({ sla_seconds: parseInt(e.target.value, 10) })}
-            inputProps={{ min: 60, style: { fontSize: '0.8rem' } }}
-          />
-          <TextField
-            size="small"
-            label="Output capture"
-            fullWidth
-            value={node.output_capture ?? ''}
-            onChange={(e) => up({ output_capture: e.target.value })}
-            inputProps={{ style: { fontSize: '0.8rem', fontFamily: 'monospace' } }}
-          />
-        </>
-      )}
+        )}
 
-      {/* Replace with agent */}
+        <SectionLabel>Output</SectionLabel>
+        <TextField size="small" label="Output capture (ctx key)" fullWidth value={node.output_capture ?? ''}
+          onChange={(e) => up({ output_capture: e.target.value })}
+          inputProps={{ style: { fontSize: '0.8rem', fontFamily: 'monospace' } }} />
+      </>)}
+
+      {/* ── Replace with agent ── */}
       {canReplace && (
         <Box sx={{ pt: 1, mt: 'auto', borderTop: 1, borderColor: 'divider' }}>
-          <Button
-            variant="contained"
-            size="small"
-            fullWidth
-            startIcon={<AutoFixHighIcon />}
+          <Button variant="contained" size="small" fullWidth startIcon={<AutoFixHighIcon />}
             onClick={() => setShowPicker(!showPicker)}
-            sx={{ bgcolor: NODE_STROKE.agent, '&:hover': { bgcolor: '#3d3596' } }}
-          >
+            sx={{ bgcolor: NODE_STROKE.agent, '&:hover': { bgcolor: '#3d3596' } }}>
             Replace with agent
           </Button>
           {showPicker && (
             <Paper variant="outlined" sx={{ mt: 1, overflow: 'hidden' }}>
               {agents.filter((a) => a.status === 'deployed').map((a) => (
-                <Box
-                  key={a.name}
-                  component="button"
+                <Box key={a.name} component="button"
                   onClick={() => { onReplaceWithAgent(node.id, a.name, a.service_account_id); setShowPicker(false) }}
-                  sx={{
-                    display: 'block', width: '100%', textAlign: 'left',
-                    px: 1.5, py: 1, bgcolor: 'transparent', border: 'none',
-                    borderBottom: '1px solid', borderColor: 'divider',
-                    cursor: 'pointer', '&:hover': { bgcolor: 'action.hover' },
-                    '&:last-child': { borderBottom: 'none' },
-                  }}
-                >
+                  sx={{ display: 'block', width: '100%', textAlign: 'left', px: 1.5, py: 1,
+                    bgcolor: 'transparent', border: 'none', borderBottom: '1px solid', borderColor: 'divider',
+                    cursor: 'pointer', '&:hover': { bgcolor: 'action.hover' }, '&:last-child': { borderBottom: 'none' } }}>
                   <Typography variant="caption" display="block" fontFamily="monospace">{a.name}</Typography>
-                  <Typography variant="caption" display="block" fontFamily="monospace" sx={{ color: NODE_STROKE.agent, fontSize: '0.6rem' }}>{a.service_account_id}</Typography>
+                  <Typography variant="caption" display="block" fontFamily="monospace"
+                    sx={{ color: NODE_STROKE.agent, fontSize: '0.6rem' }}>{a.service_account_id}</Typography>
                 </Box>
               ))}
               {agents.filter((a) => a.status === 'deployed').length === 0 && (
