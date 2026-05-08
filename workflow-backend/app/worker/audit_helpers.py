@@ -9,9 +9,10 @@ from app.core.event_bus import publish
 
 
 def node_start(run_id: str, node_id: str, node_type: str,
-               actor_type: str, actor_id: str) -> float:
+               actor_type: str, actor_id: str,
+               node_input: dict | None = None) -> float:
     """Emit node_start audit + SSE. Returns wall-clock start time."""
-    audit.emit_node_start(run_id, node_id, node_type, actor_type, actor_id)
+    audit.emit_node_start(run_id, node_id, node_type, actor_type, actor_id, node_input or {})
     publish(run_id, {
         "event": "node_started",
         "run_id": run_id,
@@ -33,7 +34,7 @@ def node_complete(run_id: str, node_id: str, node_type: str,
     ).hexdigest()[:16]
 
     audit.emit_node_complete(run_id, node_id, node_type, actor_type, actor_id,
-                             duration_ms, result, output_hash)
+                             duration_ms, result, output_hash, node_output=output)
     publish(run_id, {
         "event": "node_completed",
         "run_id": run_id,

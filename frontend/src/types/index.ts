@@ -12,6 +12,7 @@ export interface AgentRecord {
   status: 'deployed' | 'undeployed' | 'deploying'
   reasoning_mode?: 'prescribed' | 'guided'
   sample_prompts?: string[]
+  agent_role_name?: string   // e.g. "kyc-analyst" for the kyc-refresh spec
 }
 
 export interface TraceMessage {

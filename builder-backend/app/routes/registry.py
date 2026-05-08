@@ -1,17 +1,41 @@
 """Routes: agent registry — list, get, delete."""
 
+import os
 import httpx
+import yaml
 from fastapi import APIRouter, HTTPException
+from pathlib import Path
 
 from app.core import audit, identity, registry_db
 from app.core.container import LocalDeployManager, WORK_DIR
 
 router = APIRouter(prefix="/agents", tags=["registry"])
 
+SPECS_PATH = Path(os.environ.get("SPECS_PATH", "/app/specs"))
+
+
+def _backfill_role_name(agents: list[dict]) -> list[dict]:
+    """For any agent missing agent_role_name, read the spec and fill it in lazily."""
+    updated = []
+    for a in agents:
+        if not a.get("agent_role_name"):
+            spec_path = SPECS_PATH / "agents" / f"{a['name']}.yaml"
+            try:
+                spec_dict = yaml.safe_load(spec_path.read_text())
+                role_name = spec_dict.get("spec", {}).get("agents", [{}])[0].get("name")
+                if role_name:
+                    a = {**a, "agent_role_name": role_name}
+                    registry_db.set_agent_role_name(a["name"], role_name)
+            except Exception:
+                pass
+        updated.append(a)
+    return updated
+
 
 @router.get("")
 def list_agents():
-    return {"agents": registry_db.list_all()}
+    agents = _backfill_role_name(registry_db.list_all())
+    return {"agents": agents}
 
 
 @router.get("/{name}")
@@ -19,7 +43,8 @@ def get_agent(name: str):
     rec = registry_db.get(name)
     if not rec:
         raise HTTPException(404, f"agent {name!r} not found")
-    return rec
+    result = _backfill_role_name([rec])
+    return result[0]
 
 
 @router.delete("/{name}")

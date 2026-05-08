@@ -153,6 +153,8 @@ def deploy_agent(name: str):
 
     # 5. Register
     now = datetime.now(timezone.utc).isoformat()
+    # agent_role_name = the internal role name used in OTEL traces (spec.agents[0].name)
+    agent_role_name = spec.spec.agents[0].name if spec.spec.agents else None
     record = {
         "name": name,
         "version": spec.metadata.version,
@@ -165,6 +167,7 @@ def deploy_agent(name: str):
         "spec_hash": spec_hash,
         "code_hash": chash,
         "status": "deployed",
+        "agent_role_name": agent_role_name,
     }
     registry_db.upsert(record)
 

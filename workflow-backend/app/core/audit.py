@@ -29,23 +29,27 @@ def emit(prefix: str, event: dict) -> None:
 
 
 def emit_node_start(run_id: str, node_id: str, node_type: str,
-                    actor_type: str, actor_id: str) -> None:
+                    actor_type: str, actor_id: str,
+                    node_input: dict | None = None) -> None:
     emit(
         f"workflow-run/{run_id}",
         {"run_id": run_id, "node_id": node_id, "type": "node_start",
-         "node_type": node_type, "actor_type": actor_type, "actor_id": actor_id},
+         "node_type": node_type, "actor_type": actor_type, "actor_id": actor_id,
+         "node_input": node_input or {}},
     )
 
 
 def emit_node_complete(run_id: str, node_id: str, node_type: str,
                        actor_type: str, actor_id: str,
                        duration_ms: int, result: str,
-                       output_hash: str = "") -> None:
+                       output_hash: str = "",
+                       node_output: dict | None = None) -> None:
     emit(
         f"workflow-run/{run_id}",
         {"run_id": run_id, "node_id": node_id, "type": "node_complete",
          "node_type": node_type, "actor_type": actor_type, "actor_id": actor_id,
-         "output_hash": output_hash, "duration_ms": duration_ms, "result": result},
+         "output_hash": output_hash, "duration_ms": duration_ms, "result": result,
+         "node_output": node_output or {}},
     )
 
 

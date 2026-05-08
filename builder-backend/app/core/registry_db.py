@@ -56,10 +56,12 @@ def upsert(record: dict) -> None:
         conn.execute("""
             INSERT INTO agents
               (name, version, service_account_id, virtual_key, owner,
-               deployed_at, endpoint, container_id, spec_hash, code_hash, status)
+               deployed_at, endpoint, container_id, spec_hash, code_hash, status,
+               agent_role_name)
             VALUES
               (:name, :version, :service_account_id, :virtual_key, :owner,
-               :deployed_at, :endpoint, :container_id, :spec_hash, :code_hash, :status)
+               :deployed_at, :endpoint, :container_id, :spec_hash, :code_hash, :status,
+               :agent_role_name)
             ON CONFLICT(name) DO UPDATE SET
               version=excluded.version,
               service_account_id=excluded.service_account_id,
@@ -69,8 +71,9 @@ def upsert(record: dict) -> None:
               container_id=excluded.container_id,
               spec_hash=excluded.spec_hash,
               code_hash=excluded.code_hash,
-              status=excluded.status
-        """, record)
+              status=excluded.status,
+              agent_role_name=COALESCE(excluded.agent_role_name, agents.agent_role_name)
+        """, {"agent_role_name": None, **record})
 
 
 def get(name: str) -> dict | None:
@@ -83,6 +86,12 @@ def list_all() -> list[dict]:
     with _conn() as conn:
         rows = conn.execute("SELECT * FROM agents ORDER BY deployed_at DESC").fetchall()
         return [dict(r) for r in rows]
+
+
+def set_agent_role_name(name: str, role_name: str) -> None:
+    """Backfill the agent_role_name for an existing agent record."""
+    with _conn() as conn:
+        conn.execute("UPDATE agents SET agent_role_name=? WHERE name=?", (role_name, name))
 
 
 def mark_undeployed(name: str) -> None:
@@ -132,5 +141,20 @@ def list_all_runs(limit: int = 200) -> list[dict]:
         return [dict(r) for r in rows]
 
 
+def _migrate():
+    """Add new columns to existing tables without breaking old installs."""
+    with _conn() as conn:
+        for sql in [
+            "ALTER TABLE agents ADD COLUMN agent_role_name TEXT",
+            "ALTER TABLE agent_runs ADD COLUMN user_message TEXT",
+            "ALTER TABLE agent_runs ADD COLUMN agent_response TEXT",
+        ]:
+            try:
+                conn.execute(sql)
+            except Exception:
+                pass  # column already exists
+
+
 # Initialise on import
 _init()
+_migrate()

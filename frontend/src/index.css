@@ -9,3 +9,9 @@ body { font-family: Roboto, "Helvetica Neue", Arial, sans-serif; }
   50% { box-shadow: 0 0 0 8px rgba(124, 58, 237, 0); }
 }
 .node-running { animation: node-pulse 1.5s ease-in-out infinite; }
+
+/* Dot pulse for running indicator in DAG run view */
+@keyframes pulse {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.5; transform: scale(0.75); }
+}

@@ -75,7 +75,8 @@ async def invoke_agent_activity(payload: dict) -> dict:
     node_id  = payload["node_id"]
     actor_id = payload.get("actor_id", "system:unknown-agent")
 
-    t0 = node_start(run_id, node_id, "agent", "agent", actor_id)
+    t0 = node_start(run_id, node_id, "agent", "agent", actor_id,
+                    node_input=payload.get("input", {}))
     try:
         timeout = payload.get("timeout_seconds", 180)
         async with httpx.AsyncClient(timeout=timeout) as client:
@@ -113,7 +114,8 @@ async def http_call_activity(payload: dict) -> dict:
     headers = dict(payload.get("headers", {}))
     headers.update(_build_auth_headers(auth_cfg))
 
-    t0 = node_start(run_id, node_id, "http", "system", "system:workflow-engine")
+    t0 = node_start(run_id, node_id, "http", "system", "system:workflow-engine",
+                    node_input={"method": method, "url": url, "body": body})
 
     try:
         async with httpx.AsyncClient(timeout=timeout) as client:
@@ -209,7 +211,10 @@ async def decision_activity(payload: dict) -> dict:
     default    = payload.get("default")
     ctx_data   = payload["context"]
 
-    t0 = node_start(run_id, node_id, "decision", "system", "system:workflow-engine")
+    t0 = node_start(run_id, node_id, "decision", "system", "system:workflow-engine",
+                    node_input={"expression": expression or "",
+                                "cases_count": len(cases or []),
+                                "context_keys": list(ctx_data.keys())})
 
     import ast as _ast
 
@@ -271,7 +276,11 @@ async def human_task_activity(payload: dict) -> dict:
         else full_ctx
     )
 
-    t0 = node_start(run_id, node_id, "human_task", "human", "system:pending-human")
+    t0 = node_start(run_id, node_id, "human_task", "human", "system:pending-human",
+                    node_input={"title": payload["title"],
+                                "assignee_group": payload.get("assignee_group"),
+                                "description": payload.get("description", ""),
+                                "context": context_for_task})
 
     # Create the task in the task queue
     task_body = {

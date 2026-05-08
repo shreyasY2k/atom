@@ -180,6 +180,8 @@ def get_run_nodes(name: str, run_id: str):
                 "result": end.get("result", "pending"),
                 "output_hash": end.get("output_hash"),
                 "status": "completed" if end else "running",
+                "node_input": start.get("node_input", {}),
+                "node_output": end.get("node_output", {}),
             })
 
     return {

@@ -414,6 +414,21 @@ export default function Chat() {
   })
   const runs = runsData?.runs ?? []
 
+  // OTEL traces filtered by this agent's role name (e.g. "kyc-analyst" for kyc-refresh)
+  const agentRoleName = (selectedAgent as AgentRecord & { agent_role_name?: string } | null)?.agent_role_name ?? ''
+  const { data: tracesData, refetch: refetchTraces } = useQuery({
+    queryKey: ['studio-traces-all', saId],
+    queryFn: () => studioGet<{ data: { list: StudioTrace[] } }>(`/trpc/getTraces?input=${encodeURIComponent(JSON.stringify({ pagination:{ page:1, pageSize:100 } }))}`),
+    enabled: !!saId,
+    refetchInterval: 15000,
+  })
+  // Filter OTEL traces to only those from this agent's role name
+  const filteredTraces = (tracesData?.data?.list ?? []).filter(t =>
+    agentRoleName
+      ? t.traceName.toLowerCase().includes(agentRoleName.toLowerCase())
+      : false
+  )
+
   const [selectedRunId, setSelectedRunId] = useState<string | null>(null)
 
   const [input, setInput] = useState('')
@@ -428,7 +443,7 @@ export default function Chat() {
     try {
       await builderApi.invokeAgent(selectedAgent.name, { text: text.trim(), ...(attachment?.name ? { file_name: attachment.name } : {}) })
       setAttachment(null)
-      setTimeout(() => refetchRuns(), 3000)
+      setTimeout(() => { refetchRuns(); refetchTraces() }, 3000)
     } catch (e) { /* ignore */ }
     finally { setLoading(false) }
   }
@@ -447,10 +462,15 @@ export default function Chat() {
     } catch { return '' }
   }
 
-  // Only show runs from Socket.io — already filtered by service_account_id (project).
-  // Do NOT add unfiltered tRPC traces; they contain all agents.
-  const combinedItems: { id: string; name: string; status: string; time: string; totalTokens?: number }[] =
-    runs.map(r => ({ id: r.id, name: r.name, status: r.status, time: r.timestamp }))
+  // Combine Socket.io runs (filtered by SA ID) + OTEL traces (filtered by role name).
+  // Deduplicate by ID. OTEL traces give the full history; Socket.io runs give live state.
+  const runIds = new Set(runs.map(r => r.id))
+  const combinedItems: { id: string; name: string; status: string; time: string; totalTokens?: number }[] = [
+    ...runs.map(r => ({ id: r.id, name: r.name, status: r.status, time: r.timestamp })),
+    ...filteredTraces
+      .filter(t => !runIds.has(t.traceId))
+      .map(t => ({ id: t.traceId, name: t.traceName, status: t.status === 1 ? 'finished' : 'running', time: t.startTime, totalTokens: t.totalTokens })),
+  ]
 
   return (
     <Box sx={{ display:'flex', height:'100%' }}>
@@ -477,7 +497,7 @@ export default function Chat() {
       </Box>
 
       {/* ── Col 2: Run list + input ─────────────── */}
-      <Box sx={{ width:300, flexShrink:0, borderRight:1, borderColor:'divider', display:'flex', flexDirection:'column', bgcolor:'background.paper' }}>
+      <Box sx={{ width:260, flexShrink:0, borderRight:1, borderColor:'divider', display:'flex', flexDirection:'column', bgcolor:'background.paper' }}>
         {/* Agent header */}
         {selectedAgent && (
           <Box sx={{ px:1.5, py:1, borderBottom:1, borderColor:'divider', display:'flex', alignItems:'center', gap:1 }}>
@@ -595,14 +615,11 @@ export default function Chat() {
       {selectedRunId && selectedAgent ? (
         <Box sx={{ flex:1, display:'flex', minWidth:0, minHeight:0 }}>
           {/* Conversation */}
-          <Box sx={{ flex:1, overflow:'auto', p:2 }}>
-            <Typography variant="caption" color="text.secondary" fontFamily="monospace" display="block" sx={{ mb:1.5, fontSize:'0.65rem' }}>
-              Run: {selectedRunId}
-            </Typography>
+          <Box sx={{ flex:1, overflow:'auto', p:2, minWidth:0 }}>
             <RunConversation runId={selectedRunId} agentName={selectedAgent.name} colorIdx={ci} emojiIdx={ei} />
           </Box>
           {/* Data View: Statistics + Trace */}
-          <Box sx={{ width:320, flexShrink:0, borderLeft:1, borderColor:'divider' }}>
+          <Box sx={{ width:280, flexShrink:0, borderLeft:1, borderColor:'divider' }}>
             <RunDetail runId={selectedRunId} agentName={selectedAgent.name} />
           </Box>
         </Box>
