@@ -4,11 +4,11 @@ metadata:
   name: kyc-document-extractor
   domain: banking-kyc
   version: 1.0.0
-  description: Agent for extracting and reviewing KYC documents.
+  description: Agent for extracting and processing KYC documents.
   owner: user:demo@mphasis.com
 spec:
   agents:
-  - name: kyc-extractor
+  - name: kyc-extractor-agent
     role: standalone
     agent_role_file: agent-roles/banking-kyc/kyc-document-extractor.role.md
     reasoning_mode: prescribed
@@ -19,12 +19,14 @@ spec:
     tools:
     - get_kyc_documents
     - get_customer_profile
+    - get_external_screening
     memory:
       type: short_term
       cross_conversation:
         enabled: true
         kind: personal
         identity_field: input.customer_id
+    skill: skills/banking-kyc/kyc-extractor-agent.skill.md
   flow:
     type: standalone
   audit:
