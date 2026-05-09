@@ -3,10 +3,10 @@
 import logging
 import os
 import time
-from typing import Any
+from typing import Any, Callable
 
-from fastapi import FastAPI, Request, Response
-from starlette.middleware.base import BaseHTTPMiddleware
+from fastapi import FastAPI, Request
+from starlette.types import ASGIApp, Receive, Scope, Send
 
 from opentelemetry import trace
 from opentelemetry.sdk.trace import TracerProvider
@@ -72,15 +72,27 @@ def _setup_tracing(service_name: str) -> TracerProvider:
     return provider
 
 
-class _AccessLog(BaseHTTPMiddleware):
-    """Log every HTTP request/response with method, path, status, duration."""
+class _AccessLog:
+    """Pure ASGI access-log middleware.
 
-    def __init__(self, app: Any, service_name: str = "") -> None:
-        super().__init__(app)
+    Must sit INSIDE the OTEL middleware so that trace.get_current_span() returns
+    the active span when we emit each log line.  In Starlette's LIFO stack this
+    means we call app.add_middleware(_AccessLog) BEFORE
+    FastAPIInstrumentor.instrument_app().
+    """
+
+    def __init__(self, app: ASGIApp, service_name: str = "") -> None:
+        self.app = app
         self._log = logging.getLogger(f"{service_name}.http")
 
-    async def dispatch(self, request: Request, call_next: Any) -> Response:
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        if scope["type"] != "http":
+            await self.app(scope, receive, send)
+            return
+
+        request = Request(scope)
         t0 = time.perf_counter()
+
         self._log.info(
             "http.request",
             extra={
@@ -90,18 +102,26 @@ class _AccessLog(BaseHTTPMiddleware):
                 "http.client_ip": request.client.host if request.client else None,
             },
         )
-        response = await call_next(request)
-        ms = round((time.perf_counter() - t0) * 1000, 2)
+
+        status_code = 0
+
+        async def _send(message: Any) -> None:
+            nonlocal status_code
+            if message["type"] == "http.response.start":
+                status_code = message["status"]
+            await send(message)
+
+        await self.app(scope, receive, _send)
+
         self._log.info(
             "http.response",
             extra={
                 "http.method": request.method,
                 "http.path": request.url.path,
-                "http.status": response.status_code,
-                "http.duration_ms": ms,
+                "http.status": status_code,
+                "http.duration_ms": round((time.perf_counter() - t0) * 1000, 2),
             },
         )
-        return response
 
 
 def setup(app: FastAPI, service_name: str = "builder-backend") -> None:
@@ -109,8 +129,13 @@ def setup(app: FastAPI, service_name: str = "builder-backend") -> None:
     _setup_logging(service_name)
     provider = _setup_tracing(service_name)
 
-    FastAPIInstrumentor.instrument_app(app, tracer_provider=provider)
+    # Starlette middleware is LIFO: last add_middleware call = outermost (runs first).
+    # Required chain: Prometheus → OTEL (create span) → _AccessLog (read span) → handler
+    # So: add _AccessLog first (innermost), OTEL second, Prometheus last (outermost).
+    # _AccessLog is a pure ASGI class (not BaseHTTPMiddleware) to avoid the
+    # BaseHTTPMiddleware contextvars-propagation bug that breaks OTEL span injection.
     app.add_middleware(_AccessLog, service_name=service_name)
+    FastAPIInstrumentor.instrument_app(app, tracer_provider=provider)
     Instrumentator().instrument(app).expose(
         app, endpoint="/metrics", include_in_schema=False
     )

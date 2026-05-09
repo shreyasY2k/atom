@@ -5,8 +5,8 @@ import os
 import time
 from typing import Any
 
-from fastapi import FastAPI, Request, Response
-from starlette.middleware.base import BaseHTTPMiddleware
+from fastapi import FastAPI, Request
+from starlette.types import ASGIApp, Receive, Scope, Send
 
 from opentelemetry import trace
 from opentelemetry.sdk.trace import TracerProvider
@@ -40,30 +40,44 @@ class _JsonFormatter(jsonlogger.JsonFormatter):
         log_record["service"] = _svc
 
 
-class _AccessLog(BaseHTTPMiddleware):
-    _log = logging.getLogger("http.access")
+class _AccessLog:
+    """Pure ASGI access-log middleware — sits inside OTEL so span context is active."""
 
-    async def dispatch(self, request: Request, call_next: Any) -> Response:
+    def __init__(self, app: ASGIApp) -> None:
+        self.app = app
+        self._log = logging.getLogger("http.access")
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        if scope["type"] != "http":
+            await self.app(scope, receive, send)
+            return
+
+        request = Request(scope)
         t0 = time.perf_counter()
         self._log.info(
             "http.request",
-            extra={
-                "http.method": request.method,
-                "http.path": request.url.path,
-            },
+            extra={"http.method": request.method, "http.path": request.url.path},
         )
-        response = await call_next(request)
-        ms = round((time.perf_counter() - t0) * 1000, 2)
+
+        status_code = 0
+
+        async def _send(message: Any) -> None:
+            nonlocal status_code
+            if message["type"] == "http.response.start":
+                status_code = message["status"]
+            await send(message)
+
+        await self.app(scope, receive, _send)
+
         self._log.info(
             "http.response",
             extra={
                 "http.method": request.method,
                 "http.path": request.url.path,
-                "http.status": response.status_code,
-                "http.duration_ms": ms,
+                "http.status": status_code,
+                "http.duration_ms": round((time.perf_counter() - t0) * 1000, 2),
             },
         )
-        return response
 
 
 def setup(app: FastAPI, service_name: str) -> None:
@@ -91,8 +105,10 @@ def setup(app: FastAPI, service_name: str) -> None:
     )
     trace.set_tracer_provider(provider)
 
-    FastAPIInstrumentor.instrument_app(app, tracer_provider=provider)
+    # LIFO: _AccessLog first (innermost), OTEL wraps it (creates span), Prometheus outermost.
+    # Pure ASGI class avoids BaseHTTPMiddleware's contextvars-propagation bug.
     app.add_middleware(_AccessLog)
+    FastAPIInstrumentor.instrument_app(app, tracer_provider=provider)
     Instrumentator().instrument(app).expose(
         app, endpoint="/metrics", include_in_schema=False
     )
