@@ -3,6 +3,7 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from app.routes import specs, agents, registry, studio
+from app.core.observability import setup
 
 app = FastAPI(
     title="ATOM Agent Platform — Agent Builder",
@@ -26,3 +27,6 @@ app.include_router(studio.router)
 @app.get("/health")
 def health():
     return {"status": "ok", "service": "builder-backend"}
+
+
+setup(app, "builder-backend")

@@ -1,3 +1,4 @@
+from observability import setup
 """SWIFT/DTC gateway mock — accepts transfer instructions."""
 from fastapi import FastAPI
 import uuid
@@ -17,3 +18,5 @@ def submit(payload: dict):
         "submitted_at": "2026-05-08T10:00:00Z",
         "message": "MT103 instruction accepted; settlement T+1.",
     }
+
+setup(app, "swift-gw")

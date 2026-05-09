@@ -1,3 +1,4 @@
+from observability import setup
 """KYC mock service. Customer profiles, documents, external screening."""
 from datetime import date
 from fastapi import FastAPI, HTTPException
@@ -66,3 +67,5 @@ def get_screening(payload: dict):
     cid = payload.get("customer_id")
     if cid not in CUSTOMERS: raise HTTPException(404)
     return SCREENING[cid]
+
+setup(app, "kyc-svc")

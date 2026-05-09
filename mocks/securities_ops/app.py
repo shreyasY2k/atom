@@ -1,3 +1,4 @@
+from observability import setup
 """
 Securities Operations mock.
 Backs the asset-recon agent's three tools:
@@ -285,3 +286,5 @@ def get_position_lots(payload: dict):
         "total_quantity": sum(lot["quantity"] for lot in lots),
         "total_cost_basis_usd": sum(lot["total_cost_basis_usd"] for lot in lots),
     }
+
+setup(app, "securities-ops")

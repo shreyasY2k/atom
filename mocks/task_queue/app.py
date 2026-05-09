@@ -1,3 +1,4 @@
+from observability import setup
 """Human task queue mock. In V1 this is in-memory; in Phase 2, replace
 with the bank's actual task management system (ServiceNow, Pega, etc.)."""
 from fastapi import FastAPI, HTTPException
@@ -56,3 +57,5 @@ def resolve(task_id: str, payload: dict):
     t["resolution"] = payload.get("resolution")  # accept | reject | edit
     t["edits"] = payload.get("edits")
     return t
+
+setup(app, "task-queue")

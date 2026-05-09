@@ -1,6 +1,6 @@
 // Grafana Alloy config — ATOM Agent Platform
-// Collects Docker container logs → Loki
-// Relays OTEL traces → Tempo (via internal network)
+// Collects Docker container logs → Loki (structured JSON with trace_id/span_id)
+// Prometheus metrics are scraped directly by the prometheus service.
 
 // ── Docker log discovery ───────────────────────────────────────────────────
 
@@ -44,23 +44,26 @@ loki.source.docker "docker_logs" {
   refresh_interval = "5s"
 }
 
-// Try to parse JSON-structured log lines; pass through non-JSON as raw text
+// Parse JSON-structured log lines; extract trace/span for label promotion
 loki.process "parse_json" {
   forward_to = [loki.write.local.receiver]
 
   stage.json {
     expressions = {
-      level   = "level",
-      event   = "event",
-      service = "service",
-      run_id  = "run_id",
+      level    = "level",
+      event    = "event",
+      service  = "service",
+      run_id   = "run_id",
+      trace_id = "trace_id",
+      span_id  = "span_id",
     }
   }
 
   stage.labels {
     values = {
-      level   = "",
-      service = "",
+      level    = "",
+      service  = "",
+      trace_id = "",
     }
   }
 }
@@ -71,30 +74,5 @@ loki.write "local" {
   }
   external_labels = {
     platform = "atom-agent-platform",
-  }
-}
-
-// ── Prometheus metrics scraping (optional — service endpoints) ─────────────
-
-prometheus.scrape "platform_services" {
-  targets = [
-    {"__address__" = "builder-backend:8080",  "job" = "builder-backend"},
-    {"__address__" = "workflow-backend:8081",  "job" = "workflow-backend"},
-    {"__address__" = "litellm:4000",           "job" = "litellm"},
-  ]
-  scrape_interval = "30s"
-  metrics_path    = "/metrics"
-
-  forward_to = [prometheus.remote_write.grafana_cloud.receiver]
-}
-
-// Write metrics to Grafana's built-in Prometheus (via remote_write to itself)
-// In a local stack, point this at prometheus if you have it; for demo we skip
-prometheus.remote_write "grafana_cloud" {
-  endpoint {
-    url = "http://grafana:3001/api/prom/push"
-    tls_config {
-      insecure_skip_verify = true
-    }
   }
 }

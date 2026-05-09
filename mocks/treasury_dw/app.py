@@ -1,3 +1,4 @@
+from observability import setup
 from fastapi import FastAPI
 app = FastAPI(title="Treasury Data Warehouse", version="0.1.0")
 @app.get("/health")
@@ -13,3 +14,5 @@ def securities():
         {"cusip": "912828ZQ6", "qty": 50000000, "type": "UST_2Y"},
         {"cusip": "912810RW0", "qty": 30000000, "type": "UST_10Y"},
     ]}
+
+setup(app, "treasury-dw")

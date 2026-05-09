@@ -1,3 +1,4 @@
+from observability import setup
 """OFAC sanctions screening mock."""
 from fastapi import FastAPI
 
@@ -16,3 +17,5 @@ def screen(payload: dict):
         "lists_checked": ["SDN", "Non-SDN", "EU Consolidated"],
         "details": "No matches found in any list.",
     }
+
+setup(app, "ofac-svc")

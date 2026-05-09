@@ -4,12 +4,10 @@ import asyncio
 import logging
 import os
 
-logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
-
 from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 
 from app.routes import audit, runs, specs, tasks, workflows
-from fastapi.middleware.cors import CORSMiddleware
 from app.worker.activities import (
     decision_activity,
     http_call_activity,
@@ -17,6 +15,7 @@ from app.worker.activities import (
     invoke_agent_activity,
 )
 from app.worker.runner import MphasisWorkflowRunner
+from app.core.observability import setup
 
 logger = logging.getLogger(__name__)
 
@@ -45,6 +44,9 @@ def health():
     return {"status": "ok", "service": "workflow-backend"}
 
 
+setup(app, "workflow-backend")
+
+
 # ---------------------------------------------------------------------------
 # Temporal worker — runs as a background task in the same process (V1)
 # ---------------------------------------------------------------------------
@@ -59,7 +61,7 @@ async def _run_worker():
     host = os.environ.get("TEMPORAL_HOST", "temporal:7233")
     ns   = os.environ.get("TEMPORAL_NAMESPACE", "default")
     tq   = os.environ.get("TEMPORAL_TASK_QUEUE", "ats-task-queue")
-    print(f"[worker] starting — host={host} ns={ns} tq={tq}", flush=True)
+    logger.info("Temporal worker connecting", extra={"host": host, "namespace": ns, "task_queue": tq})
 
     while True:
         try:

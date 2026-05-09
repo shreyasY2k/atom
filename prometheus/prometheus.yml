@@ -1,0 +1,38 @@
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+  external_labels:
+    platform: "atom-agent-platform"
+
+scrape_configs:
+  - job_name: builder-backend
+    static_configs:
+      - targets: ["builder-backend:8080"]
+
+  - job_name: workflow-backend
+    static_configs:
+      - targets: ["workflow-backend:8081"]
+
+  - job_name: litellm
+    static_configs:
+      - targets: ["litellm:4000"]
+
+  - job_name: mock-bfsi
+    static_configs:
+      - targets:
+          - "treasury-dw:8090"
+          - "market-data:8091"
+          - "lcr-engine:8092"
+          - "fnol-svc:8093"
+          - "ocr-svc:8094"
+
+  - job_name: mock-ats
+    static_configs:
+      - targets:
+          - "kyc-svc:8095"
+          - "ofac-svc:8096"
+          - "swift-gw:8097"
+          - "task-queue:8098"
+          - "securities-ops:8099"
+          - "fraud-svc:8102"
+          - "incoming-queue:8099"

@@ -5,6 +5,7 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
 COPY app.py .
+COPY observability.py .
 COPY data/ data/
 
 ENV PYTHONUNBUFFERED=1

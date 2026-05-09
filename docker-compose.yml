@@ -157,8 +157,22 @@ services:
     networks: [agentnet]
 
   # ============================================================
-  # OBSERVABILITY STACK — Loki + Tempo + Grafana + Alloy
+  # OBSERVABILITY STACK — Prometheus + Loki + Tempo + Grafana + Alloy
   # ============================================================
+  prometheus:
+    image: prom/prometheus:v2.52.0
+    container_name: prometheus
+    restart: unless-stopped
+    ports: ["9090:9090"]
+    volumes:
+      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus-data:/prometheus
+    command:
+      - "--config.file=/etc/prometheus/prometheus.yml"
+      - "--storage.tsdb.path=/prometheus"
+      - "--storage.tsdb.retention.time=7d"
+    networks: [agentnet]
+
   loki:
     image: grafana/loki:2.9.8
     container_name: loki
@@ -295,6 +309,7 @@ services:
   task-queue:        { build: { context: ./mocks/task_queue },    container_name: task-queue,    ports: ["8098:8098"], networks: [agentnet], restart: unless-stopped }
   securities-ops:    { build: { context: ./mocks/securities_ops }, container_name: securities-ops, ports: ["8099:8099"], networks: [agentnet], restart: unless-stopped }
   fraud-svc:         { build: { context: ./mocks/fraud_svc }, container_name: fraud-svc, ports: ["8102:8102"], networks: [agentnet], restart: unless-stopped }
+  incoming-queue:    { build: { context: ./mocks/incoming_queue }, container_name: incoming-queue, ports: ["8101:8099"], networks: [agentnet], restart: unless-stopped }
 
   # ============================================================
   # PLATFORM
@@ -330,6 +345,7 @@ services:
       - SECURITIES_OPS_URL=http://securities-ops:8099
       - FRAUD_SVC_URL=http://fraud-svc:8102
       - STUDIO_URL=http://studio:3000
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4318
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
       - ./skills:/app/skills
@@ -360,6 +376,7 @@ services:
       - TASK_QUEUE_URL=http://task-queue:8098
       - SPECS_PATH=/app/specs
       - SKILLS_PATH=/app/skills
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4318
     volumes:
       - ./specs:/app/specs
       - ./skills:/app/skills:ro
@@ -395,6 +412,7 @@ volumes:
   loki-data:
   tempo-data:
   grafana-data:
+  prometheus-data:
 
 networks:
   agentnet:

@@ -1,3 +1,4 @@
+from observability import setup
 """Mock fraud-detection data service — transaction history, customer baseline, peer segments."""
 
 from fastapi import FastAPI, HTTPException
@@ -119,3 +120,5 @@ def get_peer_segment(customer_id: str):
     if seg is None:
         raise HTTPException(404, f"customer {customer_id!r} not found")
     return {"customer_id": customer_id, **seg}
+
+setup(app, "fraud-svc")

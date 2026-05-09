@@ -31,9 +31,9 @@ exporters:
     tls:
       insecure: true
 
-  # Console — local debug
+  # Console — minimal debug (suppress span body noise)
   debug:
-    verbosity: detailed
+    verbosity: basic
 
 service:
   pipelines:

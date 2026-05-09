@@ -1,3 +1,4 @@
+from observability import setup
 """
 FNOL / Policy mock service.
 
@@ -290,3 +291,5 @@ def verify_arithmetic(payload: dict):
         "match": abs(diff) < 0.01,
         "item_count": len(items),
     }
+
+setup(app, "fnol-svc")

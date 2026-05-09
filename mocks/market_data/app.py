@@ -1,3 +1,4 @@
+from observability import setup
 from fastapi import FastAPI
 app = FastAPI(title="Market Data", version="0.1.0")
 @app.get("/health")
@@ -9,3 +10,5 @@ def rates():
 @app.get("/fx")
 def fx():
     return {"as_of": "2026-05-08", "EURUSD": 1.082, "USDJPY": 152.40, "GBPUSD": 1.265}
+
+setup(app, "market-data")

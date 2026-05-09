@@ -1,3 +1,4 @@
+from observability import setup
 """
 OCR mock service — Tesseract-backed text extraction for the insurance OCR demo.
 
@@ -108,3 +109,5 @@ def _extract_text(data: bytes, filename: str) -> dict:
         "pages": pages,
         "char_count": len(full_text),
     }
+
+setup(app, "ocr-svc")
