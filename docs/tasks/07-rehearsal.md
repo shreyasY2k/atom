@@ -316,7 +316,7 @@ recording.
 - [ ] Backup laptop with full stack pre-warmed and tested
 - [ ] Network fallback: hotspot ready (Gemini API is the only external
       dependency)
-- [ ] `mphasis demo preflight` runs clean (all three paths) before the
+- [ ] `atom demo preflight` runs clean (all three paths) before the
       demo session
 
 ## What can go wrong on the day
@@ -329,22 +329,22 @@ recording.
 | Audience asks a hostile question | Q&A prep covered it; if not, "let me make sure I get that right and follow up by EOD" — don't bluff |
 | Live demo breaks twice | Switch to recording. Don't try a third time. |
 | Workflow build live takes too long | Compression point: open a half-built one and finish the last 2–3 nodes |
-| Composer canvas misbehaves visually | Fall back to CLI: `mphasis workflow run --sample` while continuing voiceover |
+| Composer canvas misbehaves visually | Fall back to CLI: `atom workflow run --sample` while continuing voiceover |
 | Agent's confidence drifts | Pin to deterministic mode pre-demo (mocked LLM response cached) |
-| Human task UI doesn't update | Resolve via `mphasis tasks resolve <id>` from a terminal you have ready |
+| Human task UI doesn't update | Resolve via `atom tasks resolve <id>` from a terminal you have ready |
 
 The general rule: **never debug live**. If something fails twice,
 switch to the pre-recorded fallback. The audience would rather see a
 recording than a Mphasis person typing into a terminal.
 
 Special case: the CLI is your secondary backstop. If the Composer UI
-breaks, the demo can continue via `mphasis workflow run` and
-`mphasis tasks resolve` while you talk through what's happening. Less
+breaks, the demo can continue via `atom workflow run` and
+`atom tasks resolve` while you talk through what's happening. Less
 visual but functional. Practice this path in at least one rehearsal.
 
 ## Pre-demo day checklist
 
-- [ ] `mphasis demo preflight` — all three paths green
+- [ ] `atom demo preflight` — all three paths green
 - [ ] Pre-warm all agents (one invoke each — first call is always
       slowest)
 - [ ] Verify MinIO retention COMPLIANCE 90d still set

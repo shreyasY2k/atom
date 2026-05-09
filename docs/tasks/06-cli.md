@@ -4,12 +4,12 @@
 > - Workflow commands now mirror the visual Composer (build via 04b)
 > - Agent scaffolding emits the new fields from 04c (`reasoning_mode`,
 >   `input_schema`, `agentscope_skills`)
-> - HITL task commands added (`mphasis tasks list / resolve`)
-> - `mphasis runs` commands for inspecting and replaying workflow runs
+> - HITL task commands added (`atom tasks list / resolve`)
+> - `atom runs` commands for inspecting and replaying workflow runs
 
 ## Goal
 
-`mphasis` CLI is installable, all agent and workflow workflows work
+`atom` CLI is installable, all agent and workflow workflows work
 end-to-end via CLI, and Mode B (manual editor + CLI) is demoable as
 the developer-experience story alongside the UI.
 
@@ -40,12 +40,12 @@ list open HITL tasks, resolve them, and replay past runs.
    ```bash
    cd cli/
    pip install -e .
-   mphasis --help
+   atom --help
    ```
 
 2. **Scaffold a new agent end-to-end.**
    ```bash
-   mphasis agent scaffold demo-agent --domain banking-kyc
+   atom agent scaffold demo-agent --domain banking-kyc
    # Verifies:
    #   agent-roles/banking-kyc/demo-agent.role.md created
    #   specs/agents/demo-agent.yaml created with reasoning_mode,
@@ -55,21 +55,21 @@ list open HITL tasks, resolve them, and replay past runs.
 
 3. **Validate the agent spec.**
    ```bash
-   mphasis agent validate specs/agents/demo-agent.yaml
+   atom agent validate specs/agents/demo-agent.yaml
    # POSTs the file to builder-backend /specs/agent/validate
    # Pretty-prints validation result; exit 1 on errors
    ```
 
 4. **List agents.**
    ```bash
-   mphasis agent list
+   atom agent list
    # Hits builder-backend /agents; shows: name, version, mode, owner,
    # service-account ID, deploy status
    ```
 
 5. **Compile + deploy an agent.**
    ```bash
-   mphasis agent deploy demo-agent
+   atom agent deploy demo-agent
    # Calls /agents/<name>/compile, then /agents/<name>/deploy
    # Streams progress (compile, build container, register identity,
    # start container, health check)
@@ -79,11 +79,11 @@ list open HITL tasks, resolve them, and replay past runs.
 6. **Test-invoke a deployed agent.**
    ```bash
    # Structured input
-   mphasis agent invoke kyc-refresh \
+   atom agent invoke kyc-refresh \
      --input '{"customer_id": "CUST-100442"}'
 
    # Free-text input (uses the 04c adapter)
-   mphasis agent invoke kyc-refresh \
+   atom agent invoke kyc-refresh \
      --text "refresh KYC for customer CUST-100442"
 
    # Pretty-prints the agent's response with mode badge and timing
@@ -91,7 +91,7 @@ list open HITL tasks, resolve them, and replay past runs.
 
 7. **Init a workflow.**
    ```bash
-   mphasis workflow init demo-workflow
+   atom workflow init demo-workflow
    # Creates specs/workflows/demo-workflow.yaml with stub nodes,
    # default metadata.layout (top-to-bottom), placeholder
    # input_schema and sample_inputs
@@ -99,32 +99,32 @@ list open HITL tasks, resolve them, and replay past runs.
 
 8. **Validate a workflow spec.**
    ```bash
-   mphasis workflow validate specs/workflows/demo-workflow.yaml
+   atom workflow validate specs/workflows/demo-workflow.yaml
    # POSTs to workflow-backend /specs/workflow/validate
    # Pretty-prints errors; reports BFSI-invariant violations clearly
    ```
 
 9. **Register a workflow with the engine.**
    ```bash
-   mphasis workflow register demo-workflow
+   atom workflow register demo-workflow
    # Validates, then calls /workflows/<name>/register
    # Workflow is now executable
    ```
 
 10. **List workflows.**
     ```bash
-    mphasis workflow list
+    atom workflow list
     # name, version, registered_at, last run timestamp, last status
     ```
 
 11. **Run a workflow.**
     ```bash
     # With explicit input
-    mphasis workflow run ats-asset-transfer \
+    atom workflow run ats-asset-transfer \
       --input '{"transfer_id": "...", "customer_id": "CUST-100442", ...}'
 
     # With a sample input from the spec
-    mphasis workflow run ats-asset-transfer \
+    atom workflow run ats-asset-transfer \
       --sample "Routine $40K"
 
     # Streams SSE events live to terminal:
@@ -142,36 +142,36 @@ list open HITL tasks, resolve them, and replay past runs.
 
 12. **Inspect a run.**
     ```bash
-    mphasis runs list --workflow ats-asset-transfer
+    atom runs list --workflow ats-asset-transfer
     # Recent runs: id, status, started_at, duration
 
-    mphasis runs get run-9f3a...
+    atom runs get run-9f3a...
     # Full event timeline with actor types color-coded
 
-    mphasis runs replay run-9f3a...
+    atom runs replay run-9f3a...
     # Re-streams the run's events from MinIO audit log
     ```
 
 13. **HITL task commands.**
     ```bash
-    mphasis tasks list
+    atom tasks list
     # Open tasks: id, workflow, run_id, assignee_group, age, SLA
 
-    mphasis tasks list --status resolved --since "1 day ago"
+    atom tasks list --status resolved --since "1 day ago"
 
-    mphasis tasks get TASK-A3F9B2C1
+    atom tasks get TASK-A3F9B2C1
     # Full task detail incl. agent draft
 
-    mphasis tasks resolve TASK-A3F9B2C1 --action accept
-    mphasis tasks resolve TASK-A3F9B2C1 --action reject
-    mphasis tasks resolve TASK-A3F9B2C1 --action edit \
+    atom tasks resolve TASK-A3F9B2C1 --action accept
+    atom tasks resolve TASK-A3F9B2C1 --action reject
+    atom tasks resolve TASK-A3F9B2C1 --action edit \
       --edits '{"confidence": 0.95, "recommendation": "PASS"}'
     # Workflow resumes
     ```
 
-14. **`mphasis status` — health check.**
+14. **`atom status` — health check.**
     ```bash
-    mphasis status
+    atom status
     ```
     Hits `/health` on every service. Output:
     ```
@@ -187,9 +187,9 @@ list open HITL tasks, resolve them, and replay past runs.
     ```
     Useful before every rehearsal.
 
-15. **`mphasis demo` — pre-flight.**
+15. **`atom demo` — pre-flight.**
     ```bash
-    mphasis demo preflight
+    atom demo preflight
     ```
     Runs three demo paths against ATS workflow non-interactively:
     - Auto-resolves human tasks with default actions after 5s wait
@@ -202,11 +202,11 @@ list open HITL tasks, resolve them, and replay past runs.
     Use the CLI alongside the UI in the demo:
     ```bash
     # The "developer experience" moment
-    mphasis agent scaffold loan-eligibility --domain banking-credit
+    atom agent scaffold loan-eligibility --domain banking-credit
     # Show the generated stub in editor (split screen)
     # Edit the role file with a focused prompt
-    mphasis agent validate specs/agents/loan-eligibility.yaml
-    mphasis agent deploy loan-eligibility
+    atom agent validate specs/agents/loan-eligibility.yaml
+    atom agent deploy loan-eligibility
     # Agent appears in the UI's agent list immediately
     ```
     This sells Mode B as the realistic developer experience: "you don't
@@ -214,28 +214,28 @@ list open HITL tasks, resolve them, and replay past runs.
 
 ## Definition of Done
 
-- [ ] `pip install -e .` succeeds; `mphasis --help` shows all commands
-- [ ] `mphasis agent scaffold` creates spec + role files with all 04c
+- [ ] `pip install -e .` succeeds; `atom --help` shows all commands
+- [ ] `atom agent scaffold` creates spec + role files with all 04c
       fields (reasoning_mode, input_schema, sample_prompts)
-- [ ] `mphasis agent validate` calls backend; pretty-prints errors
-- [ ] `mphasis agent deploy` deploys via builder-backend; identity
+- [ ] `atom agent validate` calls backend; pretty-prints errors
+- [ ] `atom agent deploy` deploys via builder-backend; identity
       issued visibly
-- [ ] `mphasis agent invoke` supports both `--input` (JSON) and
+- [ ] `atom agent invoke` supports both `--input` (JSON) and
       `--text` (free text) modes
-- [ ] `mphasis workflow init` creates workflow stub with default
+- [ ] `atom workflow init` creates workflow stub with default
       layout, input_schema, sample_inputs placeholders
-- [ ] `mphasis workflow validate` calls backend; surfaces BFSI-invariant
+- [ ] `atom workflow validate` calls backend; surfaces BFSI-invariant
       errors clearly
-- [ ] `mphasis workflow register` registers with Temporal via backend
-- [ ] `mphasis workflow run` streams SSE events to terminal in
+- [ ] `atom workflow register` registers with Temporal via backend
+- [ ] `atom workflow run` streams SSE events to terminal in
       real time
-- [ ] `mphasis workflow run --sample <label>` works with workflows
+- [ ] `atom workflow run --sample <label>` works with workflows
       that have `metadata.sample_inputs`
-- [ ] `mphasis runs list/get/replay` works
-- [ ] `mphasis tasks list/get/resolve` works; resolving resumes the
+- [ ] `atom runs list/get/replay` works
+- [ ] `atom tasks list/get/resolve` works; resolving resumes the
       paused workflow
-- [ ] `mphasis status` checks all 14+ services with informative output
-- [ ] `mphasis demo preflight` runs all three ATS paths and reports
+- [ ] `atom status` checks all 14+ services with informative output
+- [ ] `atom demo preflight` runs all three ATS paths and reports
       pass/fail
 - [ ] CLI demo flow rehearsed at least 3 times alongside the UI flow
 
@@ -246,7 +246,7 @@ list open HITL tasks, resolve them, and replay past runs.
   workflow-backend, stop — call the backend.
 - **`workflow run` doesn't exit cleanly when the run pauses at human
   task.** It should: print "paused at <node>, task <id>", exit 0.
-  User can resume via `mphasis tasks resolve`.
+  User can resume via `atom tasks resolve`.
 - **SSE stream drops mid-run on slow terminals.** Use a robust SSE
   client lib (sseclient-py) with auto-reconnect, not raw httpx.
 - **`agent invoke --text` ignores the agent's input_schema.** It
@@ -267,7 +267,7 @@ Mode B can be in the demo: keep Mode A in the live demo, mention
 Mode B as a slide ("for developers who prefer their own editor").
 **Don't cut the CLI from the codebase** — it's a backstop. If the
 UI breaks live, you can complete the demo from the terminal with
-`mphasis workflow run --sample` and `mphasis tasks resolve`.
+`atom workflow run --sample` and `atom tasks resolve`.
 
 ## What this session does NOT do
 
@@ -275,5 +275,5 @@ UI breaks live, you can complete the demo from the terminal with
 - Does not implement Mode C (NL → workflow generation) — that's
   a workflow-backend endpoint
 - Does not add CLI-side caching or offline mode
-- Does not add a `mphasis init` for first-time setup — `docker
+- Does not add a `atom init` for first-time setup — `docker
   compose up` covers that

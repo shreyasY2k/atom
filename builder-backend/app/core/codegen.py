@@ -193,6 +193,40 @@ _FASTAPI_OVERRIDE = textwrap.dedent("""
             m = _re.search(r'\{.*\}', content, _re.DOTALL)
             return _json.loads(m.group()) if m else {}
 
+    ## REQUIRED: clear agent memory and strip code fences before each invocation.
+
+    AgentScope's InMemoryMemory accumulates history across HTTP requests in the same
+    process. Clear it at the START of the flow function to prevent cross-customer
+    contamination. Also, always strip markdown code fences from agent output before
+    JSON-parsing (Gemini sometimes wraps output in ```json...```):
+
+    ```python
+    async def standalone_run(payload: dict) -> dict:
+        <agent_name>.memory.clear()   # prevent cross-invocation history leakage
+        ...
+        # After getting output_text from the agent response:
+        try:
+            _clean = output_text.strip()
+            if _clean.startswith("```json"):
+                _clean = _clean[7:]
+            elif _clean.startswith("```"):
+                _clean = _clean[3:]
+            if _clean.endswith("```"):
+                _clean = _clean[:-3]
+            return json.loads(_clean.strip())
+        except json.JSONDecodeError:
+            import re as _re2
+            m = _re2.search(r"\{.*\}", output_text, _re2.DOTALL)
+            if m:
+                try:
+                    return json.loads(m.group())
+                except Exception:
+                    pass
+            return {"raw_output": output_text, "confidence": 0.0,
+                    "recommendation": "REVIEW",
+                    "notes_for_reviewer": "Agent output was not valid JSON"}
+    ```
+
     @app.post("/invoke")
     async def invoke(payload: dict) -> dict:
         run_id = payload.pop("_run_id", None)   # propagated from builder-backend for trace correlation
