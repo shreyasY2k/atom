@@ -1,4 +1,4 @@
-# Mphasis Agent Platform — TechShift Demo
+# ATOM Agent Platform — TechShift Demo
 
 A two-surface platform for BFSI process automation:
 
@@ -18,11 +18,12 @@ docker compose build      # ~10–15 min first time (builds AgentScope, Studio, 
 docker compose up -d
 docker compose ps         # all services healthy
 
-open http://localhost:5173    # Mphasis Agent Platform UI (Builder + Composer)
+open http://localhost:5173    # ATOM Agent Platform UI (Builder + Composer)
 open http://localhost:3000    # AgentScope Studio (agent traces)
 open http://localhost:8233    # Temporal Web UI (workflow runs)
 open http://localhost:9001    # MinIO console (audit logs)
 open http://localhost:4000/ui # LiteLLM dashboard (LLM/tool calls + virtual keys)
+open http://localhost:3001    # Grafana (logs via Loki, traces via Tempo)
 ```
 
 ## What this is
@@ -37,12 +38,25 @@ Two surfaces over a common spec → code → deploy → audit pipeline:
 - **MinIO** with object lock for audit
 - **Mock BFSI services** (treasury, market data, LCR engine, OCR, FNOL/policy, KYC, OFAC, SWIFT, internal task queue)
 
+## Deployed agents (auto-managed via LocalDeployManager)
+
+These 4 agents are deployed at startup by calling `POST /agents/{name}/deploy` through the builder-backend. Each gets its own LiteLLM virtual key (non-human service-account identity) and runs in its own container on `agentnet`.
+
+| Agent | Domain | Mode | Container |
+|---|---|---|---|
+| `kyc-refresh` | ATS / banking-KYC | prescribed | `agent-kyc-refresh-1-0-0` |
+| `asset-recon` | ATS / securities-ops | prescribed | `agent-asset-recon-1-0-0` |
+| `medical-claim-classifier` | insurance-claims | prescribed | `agent-medical-claim-classifier-1-0-0` |
+| `transaction-anomaly-triage` | banking-fraud | **guided** | `agent-transaction-anomaly-triage-1-0-0` |
+
+Redeploy any agent: `curl -X POST http://localhost:8080/agents/{name}/deploy`
+
 ## Three build modes
 
 | Mode | Description |
 |---|---|
 | **A. Visual + AI** | UI generates from prose. Fastest. Used for demo path 1. |
-| **B. CLI scaffold + manual** | `mphasis agent scaffold <name>` and `mphasis workflow init` produce stubs in repo; developer fills in. Used for demo path 2 (the realistic dev workflow). |
+| **B. CLI scaffold + manual** | `atom agent scaffold <name>` and `atom workflow init` produce stubs in repo; developer fills in. Used for demo path 2 (the realistic dev workflow). |
 | **C. Full natural-language** | UI generates entire workflow including its agents from prose. Optional demo wow. |
 
 ## What this is not
@@ -56,3 +70,4 @@ A production-grade product. It's a TechShift capability demo intended to land fo
 - [`docs/identity-and-audit.md`](./docs/identity-and-audit.md) — non-human identity model
 - [`docs/workflow-spec-format.md`](./docs/workflow-spec-format.md) — workflow YAML schema
 - [`docs/tasks/00-overview.md`](./docs/tasks/00-overview.md) — work plan
+- [`docs/qa-prep.md`](./docs/qa-prep.md) — Q&A prep (20 questions from US bank audiences)

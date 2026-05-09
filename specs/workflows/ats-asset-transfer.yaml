@@ -4,7 +4,7 @@
 # Three demo paths:
 #   1. Routine ($40K)     — KYC PASS, no sanction hit, amount < $250K, agents run
 #   2. High-value ($1.2M) — branches to compliance-review (amount > $250K)
-#   3. KYC breach         — KYC confidence < 0.75 → kyc-human-review (skip_if bypasses for tiny amounts)
+#   3. KYC breach         — KYC confidence < 0.82 → kyc-human-review (skip_if bypasses for tiny amounts)
 
 apiVersion: mphasis.platform/v1
 kind: WorkflowDeployment
@@ -37,7 +37,7 @@ metadata:
   sample_inputs:
     - label: "Routine $40K"
       input:
-        transfer_id: "XFER-RT-001"
+        transfer_id: "XFER-100442-001"
         customer_id: "CUST-100442"
         amount_usd: 40000
         securities:
@@ -48,7 +48,7 @@ metadata:
           account: "ACC-JPM-9934"
     - label: "High-value $1.2M"
       input:
-        transfer_id: "XFER-HV-001"
+        transfer_id: "XFER-200119-001"
         customer_id: "CUST-200119"
         amount_usd: 1200000
         securities:
@@ -59,7 +59,7 @@ metadata:
           account: "ACC-GS-4421"
     - label: "Stale doc"
       input:
-        transfer_id: "XFER-SD-001"
+        transfer_id: "XFER-300577-001"
         customer_id: "CUST-300577"
         amount_usd: 49000
         securities:
@@ -119,7 +119,7 @@ spec:
       description: >
         Pulls the customer's current KYC profile, checks document staleness,
         runs adverse-media + PEP screening, returns a confidence score and
-        recommendation. Routes to kyc-human-review if confidence < 0.75.
+        recommendation. Routes to kyc-human-review if confidence < 0.82.
       type: agent
       agent_ref:
         name: kyc-refresh
@@ -127,7 +127,7 @@ spec:
       input_mapping:
         customer_id: "ctx.input.customer_id"
       output_capture: kyc_result
-      confidence_threshold: 0.75
+      confidence_threshold: 0.82
       fallback_node: kyc-human-review
       timeout_seconds: 120
       retry:
@@ -143,7 +143,7 @@ spec:
     - id: kyc-human-review
       label: "KYC human review (low-confidence)"
       description: >
-        Created when the KYC agent returns confidence < 0.75 or errors.
+        Created when the KYC agent returns confidence < 0.82 or errors.
         Reviewer sees agent draft and can accept, reject, or edit.
       type: human_task
       assignee_group: ops
@@ -151,7 +151,7 @@ spec:
         title: "KYC needs human review for {{ ctx.input.customer_id }}"
         description: >
           The KYC agent returned confidence {{ ctx.kyc_result.confidence }}.
-          Threshold is 0.75. Please review the agent draft and
+          Threshold is 0.82. Please review the agent draft and
           accept, reject, or edit before the transfer proceeds.
         actions: [accept, reject, edit]
       sla_seconds: 7200
@@ -182,11 +182,10 @@ spec:
       body_template:
         customer_id: "{{ ctx.input.customer_id }}"
         destination: "{{ ctx.input.destination }}"
-      # Pull the specific hit flag and score out of the response
+      # Pull the specific hit flag and screening ID from the response
       extract:
-        sanctions_hit: result.hit
-        sanctions_score: result.risk_score
-        screening_id: result.screening_id
+        sanctions_hit: hit
+        screening_id: screening_id
       output_capture: ofac_result
       timeout_seconds: 10
       retry:
@@ -275,7 +274,6 @@ spec:
       label: "Submit SWIFT/DTC instruction"
       description: >
         Sends the MT103 / DTC ACATS instruction to the settlement gateway.
-        Authenticated with a bearer token (injected from env at run time).
         Retried up to 3× with exponential backoff on transient errors.
       type: http
       method: POST
@@ -286,14 +284,11 @@ spec:
         securities: "{{ ctx.input.securities }}"
         destination: "{{ ctx.input.destination }}"
         compliance_ref: "{{ ctx.compliance_decision.task_id }}"
-      auth:
-        type: bearer
-        token: "{{ ctx.env.SWIFT_API_TOKEN }}"
       # Extract the instruction reference number from the response
       extract:
-        instruction_id: data.instruction_id
-        settlement_date: data.expected_settlement_date
-        swift_status: data.status
+        instruction_id: instruction_id
+        settlement_date: submitted_at
+        swift_status: status
       expect_status: [200, 201, 202]
       output_capture: swift_result
       timeout_seconds: 30
