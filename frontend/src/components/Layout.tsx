@@ -94,6 +94,8 @@ export default function Layout() {
           flexGrow: 1,
           marginTop: `${APPBAR_H}px`,
           height: `calc(100vh - ${APPBAR_H}px)`,
+          display: 'flex',
+          flexDirection: 'column',
           overflow: 'auto',
           bgcolor: 'background.default',
           minWidth: 0,
