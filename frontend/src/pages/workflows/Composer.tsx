@@ -1408,7 +1408,9 @@ export default function Composer({ workflowName: propName }: { workflowName?: st
           es.close()
       } catch { /* ignore */ }
     }
-    es.onerror = () => es.close()
+    es.onerror = () => {
+      // Only close on terminal workflow events — let EventSource reconnect on transient errors
+    }
   }, [wfName])
 
   useEffect(() => () => { esRef.current?.close() }, [])

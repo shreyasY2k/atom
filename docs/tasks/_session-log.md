@@ -568,8 +568,8 @@ Task 05: ATS workflow end-to-end — three demo paths reliable, full audit trail
 - [x] SWIFT call succeeds: instruction_id populated, swift_status=ACCEPTED in task context
 - [x] receive-request and notify nodes work: incoming-queue mock live on port 8101
 - [x] `pre-warm.sh`, `run-path.sh`, `validate-paths.sh` created and executable
-- [ ] SSE event stream verified with frontend canvas (not tested in this session — next step)
-- [ ] 10 consecutive passes per path (tested 2 consecutive passes; repeating 10x is Task 06/07 rehearsal gate)
+- [x] SSE event stream verified: max_gap=2.02s (18 keepalives per run); event_bus.py keepalive loop fixed to 2s interval; Composer.tsx onerror no longer closes connection
+- [x] 10 consecutive passes per path: Routine 10/10 (34–83s), High-value 10/10 (18–56s), Confidence-breach 10/10 (46–151s) — 30/30 total
 
 ### Known issues / notes for next session (Task 06)
 - `string-reversal-agent` container keeps restarting (Restarting (1)) — this is a test deploy artifact, not demo-critical, but should be cleaned up

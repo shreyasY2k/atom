@@ -28,14 +28,16 @@ async def subscribe(run_id: str) -> AsyncIterator[dict]:
     _subscribers[run_id].append(q)
     try:
         while True:
-            event = await asyncio.wait_for(q.get(), timeout=30)
+            try:
+                event = await asyncio.wait_for(q.get(), timeout=2)
+            except asyncio.TimeoutError:
+                # Send keepalive ping every 2s to keep SSE connection alive
+                yield {"event": "keepalive"}
+                continue
             yield event
             if event.get("event") in ("workflow_completed", "workflow_failed",
                                        "workflow_cancelled"):
                 break
-    except asyncio.TimeoutError:
-        # Send a keepalive comment and continue (SSE standard)
-        yield {"event": "keepalive"}
     finally:
         try:
             _subscribers[run_id].remove(q)
