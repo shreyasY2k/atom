@@ -320,45 +320,34 @@ function FullConversation({ spans, agentName, c, e }: { spans: Span[]; agentName
   return <Box>{elements}</Box>
 }
 
-// ── Data View — RUN / MESSAGE / TRACE tabs (matches Studio) ──────────────────
+// ── Data View — RUN / TRACE tabs using builder-backend MinIO events ──────────
+// Studio Socket.io IDs don't match builder-backend run IDs, so we use
+// GET /agents/{name}/runs/{runId}/events instead (reads from MinIO, always correct).
 
-function DataView({ runId }: { runId: string }) {
+function DataView({ agentName, runId, userText, agentText }: {
+  agentName: string; runId: string; userText?: string; agentText?: string
+}) {
   const [tab, setTab] = useState(0)
   const { data, isLoading } = useQuery({
-    queryKey: ['studio-spans', runId],
-    queryFn: () => studioGet<{ spans: Span[] }>(`/runs/${runId}/spans`),
-    staleTime: 30000,
+    queryKey: ['run-events', agentName, runId],
+    queryFn: () => builderApi.getRunEvents(agentName, runId),
+    staleTime: 60_000,
   })
-  const spans = data?.spans ?? []
+  const events = data?.events ?? []
 
-  // Stats from spans
-  const roots  = spans.filter(s => !s.parentSpanId || !spans.find(p => p.spanId === s.parentSpanId))
-  const llm    = spans.filter(s => s.name.startsWith('chat ') || s.name.startsWith('chat_'))
-  const tools  = spans.filter(s => s.name.startsWith('execute_tool'))
-
-  const totalIn  = llm.reduce((s, sp) => { const g=((sp.attributes as Record<string,Record<string,unknown>>)?.gen_ai?.usage as Record<string,number>)||{}; return s+(g.input_tokens||g.prompt_tokens||0) }, 0)
-  const totalOut = llm.reduce((s, sp) => { const g=((sp.attributes as Record<string,Record<string,unknown>>)?.gen_ai?.usage as Record<string,number>)||{}; return s+(g.output_tokens||g.completion_tokens||0) }, 0)
+  const llmEvents = events.filter(e => e.event_type === 'llm_call')
+  const toolEvents = events.filter(e => e.event_type === 'tool_call')
+  const totalIn  = llmEvents.reduce((s, e) => s + (e.input_tokens ?? 0), 0)
+  const totalOut = llmEvents.reduce((s, e) => s + (e.output_tokens ?? 0), 0)
   const totalTok = totalIn + totalOut
+  const totalMs  = llmEvents.reduce((s, e) => s + (e.duration_ms ?? 0), 0)
 
-  const totalMs = spans.length > 0 ? (() => {
-    try { const t0=BigInt(spans[0].startTimeUnixNano); const t1=spans.reduce((m,s)=>BigInt(s.endTimeUnixNano)>m?BigInt(s.endTimeUnixNano):m,t0); return Number((t1-t0)/BigInt(1_000_000)) } catch { return 0 }
-  })() : 0
-
-  // Model breakdown
   const modelCounts: Record<string,number> = {}
-  llm.forEach(s => {
-    const model = s.name.replace(/^chat_?/,'').trim() || 'unknown'
-    modelCounts[model] = (modelCounts[model] || 0) + 1
+  llmEvents.forEach(e => {
+    const m = (e.model ?? 'unknown').replace('gemini-3.1-pro-preview','gemini-3.1-pro').slice(0,22)
+    modelCounts[m] = (modelCounts[m] ?? 0) + 1
   })
   const maxModelCount = Math.max(1, ...Object.values(modelCounts))
-
-  const root = spans.find(s => !s.parentSpanId || !spans.find(p => p.spanId === s.parentSpanId))
-  const rootGenAi = ((root?.attributes as Record<string,unknown>)?.gen_ai || {}) as Record<string,unknown>
-  const projectAttr = ((root?.attributes as Record<string,unknown>)?.agentscope || {}) as Record<string,unknown>
-  const runName = (rootGenAi?.agent as Record<string,unknown>)?.name as string || 'unknown'
-  const projectId = projectAttr?.project as string || ''
-  const tsNs = root?.startTimeUnixNano
-  const tsDate = tsNs ? new Date(Number(BigInt(tsNs)/BigInt(1_000_000))).toLocaleString() : ''
 
   const Section = ({ title, children }: { title: string; children: React.ReactNode }) => (
     <Box sx={{ mb:2 }}>
@@ -381,17 +370,17 @@ function DataView({ runId }: { runId: string }) {
     <Box sx={{ width:300, flexShrink:0, borderLeft:1, borderColor:'divider', display:'flex', flexDirection:'column', bgcolor:'background.paper' }}>
       <Box sx={{ px:1.5, py:1, borderBottom:1, borderColor:'divider' }}>
         <Typography variant="caption" fontWeight={700} sx={{ textTransform:'uppercase', letterSpacing:'0.07em', fontSize:'0.65rem' }}>
-          Data View
+          Trace
         </Typography>
         <Typography variant="caption" color="text.secondary" sx={{ display:'block', fontSize:'0.62rem', mt:0.25 }}>
-          The statistics of the current run instance
+          {agentName} · {runId.slice(-12)}
         </Typography>
       </Box>
 
       <Tabs value={tab} onChange={(_, v) => setTab(v)} sx={{ borderBottom:1, borderColor:'divider', minHeight:36, px:1 }}>
-        {['RUN','MESSAGE','TRACE'].map((lbl, idx) => (
+        {['RUN','MESSAGE','LLM CALLS'].map((lbl, idx) => (
           <Tab key={lbl} label={lbl} value={idx}
-            sx={{ fontSize:'0.68rem', minHeight:36, py:0, fontWeight:700, minWidth:60, px:1.5 }} />
+            sx={{ fontSize:'0.65rem', minHeight:36, py:0, fontWeight:700, minWidth:60, px:1 }} />
         ))}
       </Tabs>
 
@@ -401,7 +390,6 @@ function DataView({ runId }: { runId: string }) {
         {/* ── RUN tab ── */}
         {tab===0 && !isLoading && (
           <Box sx={{ p:1.5 }}>
-            {/* Status row */}
             <Box sx={{ display:'flex', alignItems:'center', gap:1.5, mb:2, p:1.25, bgcolor:'action.hover', borderRadius:1.5 }}>
               <Box sx={{ textAlign:'center', flex:1 }}>
                 <Typography variant="caption" color="text.secondary" sx={{ display:'block', fontSize:'0.6rem', textTransform:'uppercase' }}>STATUS</Typography>
@@ -409,78 +397,114 @@ function DataView({ runId }: { runId: string }) {
               </Box>
               <Box sx={{ width:'1px', bgcolor:'divider', alignSelf:'stretch' }} />
               <Box sx={{ textAlign:'center', flex:1 }}>
-                <Typography variant="caption" color="text.secondary" sx={{ display:'block', fontSize:'0.6rem', textTransform:'uppercase' }}>INVOCATIONS</Typography>
-                <Typography variant="body2" fontWeight={700}>{llm.length} Times</Typography>
+                <Typography variant="caption" color="text.secondary" sx={{ display:'block', fontSize:'0.6rem', textTransform:'uppercase' }}>LLM CALLS</Typography>
+                <Typography variant="body2" fontWeight={700}>{llmEvents.length}</Typography>
               </Box>
               <Box sx={{ width:'1px', bgcolor:'divider', alignSelf:'stretch' }} />
               <Box sx={{ textAlign:'center', flex:1 }}>
                 <Typography variant="caption" color="text.secondary" sx={{ display:'block', fontSize:'0.6rem', textTransform:'uppercase' }}>TOKENS</Typography>
-                <Typography variant="body2" fontWeight={700}>{totalTok > 1000 ? `${(totalTok/1000).toFixed(1)}K` : totalTok} Tokens</Typography>
+                <Typography variant="body2" fontWeight={700}>{totalTok > 1000 ? `${(totalTok/1000).toFixed(1)}K` : totalTok}</Typography>
               </Box>
             </Box>
 
-            {runName && (
-              <Section title="METADATA">
-                <Row label="Name" value={runName} />
-                {projectId && <Row label="Project" value={projectId.slice(-20)} mono />}
-                {tsDate && <Row label="Timestamp" value={tsDate} />}
-              </Section>
+            {events.length === 0 && (
+              <Typography variant="caption" color="text.secondary">
+                No LiteLLM events found for this run. Events may not yet be indexed in MinIO.
+              </Typography>
             )}
 
-            <Section title="INVOCATION">
-              <Row label="Total Times" value={llm.length} />
-              <Row label="Tool Calls" value={tools.length} />
-              <Row label="Total Time" value={totalMs<1000?`${totalMs}ms`:`${(totalMs/1000).toFixed(1)}s`} />
-            </Section>
+            {events.length > 0 && <>
+              <Section title="INVOCATION">
+                <Row label="LLM calls" value={llmEvents.length} />
+                <Row label="Tool calls" value={toolEvents.length} />
+                <Row label="Total time" value={totalMs<1000?`${totalMs}ms`:`${(totalMs/1000).toFixed(1)}s`} />
+              </Section>
 
-            {Object.keys(modelCounts).length > 0 && (
-              <Section title="DISTRIBUTION">
-                {Object.entries(modelCounts).map(([model, count]) => (
-                  <Box key={model} sx={{ mb:0.75 }}>
-                    <Typography variant="caption" color="text.secondary" sx={{ fontSize:'0.65rem', display:'block', mb:0.25 }}>
-                      {model.replace('gemini-3.1-pro-preview','gemini-3.1-pro').slice(0,22)}
-                    </Typography>
-                    <Box sx={{ display:'flex', alignItems:'center', gap:1 }}>
-                      <Box sx={{ flex:1, height:6, bgcolor:'action.hover', borderRadius:0.5, overflow:'hidden' }}>
-                        <Box sx={{ width:`${(count/maxModelCount)*100}%`, height:'100%', bgcolor:'primary.main', borderRadius:0.5 }} />
+              {Object.keys(modelCounts).length > 0 && (
+                <Section title="MODEL">
+                  {Object.entries(modelCounts).map(([model, count]) => (
+                    <Box key={model} sx={{ mb:0.75 }}>
+                      <Typography variant="caption" color="text.secondary" sx={{ fontSize:'0.65rem', display:'block', mb:0.25 }}>{model}</Typography>
+                      <Box sx={{ display:'flex', alignItems:'center', gap:1 }}>
+                        <Box sx={{ flex:1, height:6, bgcolor:'action.hover', borderRadius:0.5, overflow:'hidden' }}>
+                          <Box sx={{ width:`${(count/maxModelCount)*100}%`, height:'100%', bgcolor:'primary.main', borderRadius:0.5 }} />
+                        </Box>
+                        <Typography variant="caption" fontFamily="monospace" sx={{ fontSize:'0.62rem', flexShrink:0 }}>{count}</Typography>
                       </Box>
-                      <Typography variant="caption" fontFamily="monospace" sx={{ fontSize:'0.62rem', flexShrink:0 }}>{count}</Typography>
                     </Box>
-                  </Box>
-                ))}
-              </Section>
-            )}
+                  ))}
+                </Section>
+              )}
 
-            <Section title="TOKEN">
-              <Row label="Total" value={totalTok.toLocaleString()} />
-              <Row label="Prompt" value={totalIn.toLocaleString()} />
-              <Row label="Completion" value={totalOut.toLocaleString()} />
-              {llm.length > 0 && (<>
-                <Row label="Average" value={(totalTok/llm.length).toFixed(1)} />
-                <Row label="Prompt (Avg)" value={(totalIn/llm.length).toFixed(1)} />
-                <Row label="Completion (Avg)" value={(totalOut/llm.length).toFixed(1)} />
-              </>)}
-            </Section>
+              <Section title="TOKENS">
+                <Row label="Total" value={totalTok.toLocaleString()} />
+                <Row label="Prompt" value={totalIn.toLocaleString()} />
+                <Row label="Completion" value={totalOut.toLocaleString()} />
+              </Section>
+            </>}
           </Box>
         )}
 
-        {/* ── MESSAGE tab — full conversation from spans ── */}
+        {/* ── MESSAGE tab — user prompt + agent response ── */}
         {tab===1 && !isLoading && (
           <Box sx={{ p:1.5 }}>
-            {spans.length === 0
-              ? <Typography variant="caption" color="text.secondary">No message data.</Typography>
-              : <FullConversation spans={spans} agentName={runName} c={0} e={0} />
-            }
+            {userText && (
+              <Box sx={{ mb:1.5 }}>
+                <Chip label="user" size="small" sx={{ height:14, fontSize:'0.58rem', mb:0.5 }} />
+                <Typography variant="caption" display="block" sx={{ whiteSpace:'pre-wrap', color:'text.primary' }}>{userText}</Typography>
+              </Box>
+            )}
+            {agentText && (
+              <Box>
+                <Chip label="→ response" size="small" sx={{ height:14, fontSize:'0.58rem', mb:0.5, bgcolor:'rgba(59,109,17,0.1)' }} />
+                <Box component="pre" sx={{ fontSize:'0.72rem', fontFamily:'monospace', whiteSpace:'pre-wrap', overflow:'auto', maxHeight:400, m:0, color:'text.primary', bgcolor:'action.hover', p:1, borderRadius:1 }}>
+                  {agentText}
+                </Box>
+              </Box>
+            )}
+            {!userText && !agentText && (
+              <Typography variant="caption" color="text.secondary">No message data.</Typography>
+            )}
           </Box>
         )}
 
-        {/* ── TRACE tab — span tree ── */}
+        {/* ── LLM CALLS tab — MinIO LiteLLM events ── */}
         {tab===2 && !isLoading && (
           <Box sx={{ p:1 }}>
-            {roots.length===0
-              ? <Typography variant="caption" color="text.secondary">No trace data yet.</Typography>
-              : roots.map(r => <SpanRow key={r.spanId} span={r} all={spans} depth={0} />)
-            }
+            {events.length === 0 && (
+              <Typography variant="caption" color="text.secondary" sx={{ p:1, display:'block' }}>
+                No LiteLLM events in MinIO for this run yet.
+              </Typography>
+            )}
+            {events.map((ev, i) => (
+              <Box key={i} sx={{ mb:1, border:1, borderColor:'divider', borderRadius:1, overflow:'hidden' }}>
+                <Box sx={{ px:1, py:0.5, bgcolor:'action.hover', display:'flex', alignItems:'center', gap:1 }}>
+                  <Box sx={{ width:6, height:6, borderRadius:'50%', flexShrink:0,
+                    bgcolor: ev.event_type==='tool_call' ? '#854F0B' : '#185FA5' }} />
+                  <Typography variant="caption" fontFamily="monospace" fontWeight={600} sx={{ flex:1, fontSize:'0.7rem', color: ev.event_type==='tool_call' ? '#854F0B' : '#185FA5' }}>
+                    {ev.event_type==='tool_call' ? `tool: ${ev.tool_name ?? '?'}` : (ev.model ?? 'llm_call').slice(0,20)}
+                  </Typography>
+                  {ev.duration_ms != null && (
+                    <Typography variant="caption" color="text.secondary" sx={{ fontSize:'0.6rem', flexShrink:0 }}>
+                      {ev.duration_ms < 1000 ? `${ev.duration_ms}ms` : `${(ev.duration_ms/1000).toFixed(1)}s`}
+                    </Typography>
+                  )}
+                  {(ev.input_tokens != null || ev.output_tokens != null) && (
+                    <Typography variant="caption" color="text.secondary" sx={{ fontSize:'0.6rem', flexShrink:0 }}>
+                      {(ev.input_tokens ?? 0) + (ev.output_tokens ?? 0)}t
+                    </Typography>
+                  )}
+                </Box>
+                {ev.response_content && (
+                  <Box sx={{ px:1, py:0.5 }}>
+                    <Typography variant="caption" color="text.secondary" sx={{ fontSize:'0.6rem', display:'block', mb:0.25 }}>→ response</Typography>
+                    <Typography variant="caption" fontFamily="monospace" sx={{ fontSize:'0.68rem', whiteSpace:'pre-wrap', color:'text.primary', display:'block', maxHeight:100, overflow:'hidden' }}>
+                      {ev.response_content.slice(0,300)}{ev.response_content.length>300?'…':''}
+                    </Typography>
+                  </Box>
+                )}
+              </Box>
+            ))}
           </Box>
         )}
       </Box>
@@ -561,6 +585,15 @@ export default function Chat() {
 
   // Selected run for DataView panel (set when user clicks "View trace")
   const [selectedRunId, setSelectedRunId] = useState<string|null>(null)
+  const [traceContext, setTraceContext] = useState<{ userText?: string; agentText?: string }>({})
+
+  // Find user message that precedes an agent message by index
+  const getTraceContext = (agentMsgId: string) => {
+    const idx = messages.findIndex(m => m.id === agentMsgId)
+    const userMsg = idx > 0 ? messages[idx - 1] : null
+    const agentMsg = messages[idx]
+    return { userText: userMsg?.text, agentText: agentMsg?.text }
+  }
 
   // Conversation messages
   const [messages, setMessages] = useState<LocalMessage[]>([])
@@ -802,7 +835,11 @@ export default function Chat() {
                     )}
                     {msg.runId && !msg.loading && (
                       <Box component="button"
-                        onClick={() => setSelectedRunId(prev => prev===msg.runId ? null : (msg.runId??null))}
+                        onClick={() => {
+                          const isOpen = selectedRunId === msg.runId
+                          setSelectedRunId(isOpen ? null : (msg.runId ?? null))
+                          if (!isOpen) setTraceContext(getTraceContext(msg.id))
+                        }}
                         sx={{ mt:0.5, background:'none', border:'none', cursor:'pointer', display:'flex', alignItems:'center', gap:0.5, color:'text.secondary', fontSize:'0.68rem', px:0, '&:hover':{ color:'primary.main' } }}>
                         <ExpandMoreIcon sx={{ fontSize:13 }} />
                         {selectedRunId===msg.runId ? 'Hide trace' : 'View trace'}
@@ -878,7 +915,14 @@ export default function Chat() {
       </Box>
 
       {/* DataView panel — opens when user clicks "View trace" on a message */}
-      {selectedRunId && <DataView runId={selectedRunId} />}
+      {selectedRunId && selectedAgent && (
+        <DataView
+          agentName={selectedAgent.name}
+          runId={selectedRunId}
+          userText={traceContext.userText}
+          agentText={traceContext.agentText}
+        />
+      )}
     </Box>
   )
 }
