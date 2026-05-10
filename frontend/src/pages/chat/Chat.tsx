@@ -562,7 +562,7 @@ export default function Chat() {
   // Selected run for DataView panel (set when user clicks "View trace")
   const [selectedRunId, setSelectedRunId] = useState<string|null>(null)
 
-  // Live conversation messages
+  // Conversation messages
   const [messages, setMessages] = useState<LocalMessage[]>([])
   const [input, setInput] = useState('')
   const [loading, setLoading] = useState(false)
@@ -574,8 +574,59 @@ export default function Chat() {
 
   const samplePrompts: string[] = (selectedAgent as (AgentRecord & { sample_prompts?: string[] }) | null)?.sample_prompts ?? []
 
-  // Clear conversation when switching agents
-  useEffect(() => { setMessages([]); setSelectedRunId(null) }, [selectedAgent?.name])
+  // Backend run history — user_message + agent_response stored per run
+  const { data: runsData } = useQuery({
+    queryKey: ['agent-runs', selectedAgent?.name],
+    queryFn: () => builderApi.listAgentRuns(selectedAgent!.name),
+    enabled: !!selectedAgent,
+    staleTime: 60_000,
+  })
+
+  // Restore conversation on agent switch:
+  //   1. localStorage (instant, survives refresh)
+  //   2. backend runs (fallback: first visit or localStorage cleared)
+  useEffect(() => {
+    if (!selectedAgent) { setMessages([]); setSelectedRunId(null); return }
+    const key = `atom_chat_${selectedAgent.name}`
+    try {
+      const stored = localStorage.getItem(key)
+      if (stored) {
+        setMessages(JSON.parse(stored) as LocalMessage[])
+        setSelectedRunId(null)
+        return
+      }
+    } catch { /* corrupt localStorage — fall through */ }
+
+    // Reconstruct from backend run history
+    const runs = (runsData?.runs ?? []) as Array<{
+      run_id: string; started_at: string; status: string;
+      user_message?: string; agent_response?: string
+    }>
+    if (runs.length > 0) {
+      const reconstructed: LocalMessage[] = []
+      ;[...runs].reverse().forEach((run, i) => {
+        if (run.user_message) {
+          reconstructed.push({ id:`hist-u-${i}`, role:'user', text:run.user_message })
+          reconstructed.push({ id:`hist-a-${i}`, role:'agent', text:run.agent_response ?? '(no response)', runId:run.run_id })
+        }
+      })
+      setMessages(reconstructed)
+      // Seed localStorage so next refresh is instant
+      try { localStorage.setItem(key, JSON.stringify(reconstructed)) } catch { /* quota */ }
+    } else {
+      setMessages([])
+    }
+    setSelectedRunId(null)
+  }, [selectedAgent?.name, runsData]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Persist to localStorage whenever messages change
+  useEffect(() => {
+    if (!selectedAgent || messages.length === 0) return
+    // Don't persist loading state
+    const toStore = messages.filter(m => !m.loading)
+    if (toStore.length === 0) return
+    try { localStorage.setItem(`atom_chat_${selectedAgent.name}`, JSON.stringify(toStore)) } catch { /* quota */ }
+  }, [messages, selectedAgent?.name])
 
   // Auto-scroll on new message
   useEffect(() => { bottomRef.current?.scrollIntoView({ behavior:'smooth' }) }, [messages, loading])
@@ -666,7 +717,13 @@ export default function Chat() {
           )}
           {messages.length > 0 && (
             <Tooltip title="Clear conversation">
-              <IconButton size="small" onClick={() => { setMessages([]); setSelectedRunId(null) }} sx={{ color:'text.secondary' }}>
+              <IconButton size="small" onClick={() => {
+                setMessages([])
+                setSelectedRunId(null)
+                if (selectedAgent) {
+                  try { localStorage.removeItem(`atom_chat_${selectedAgent.name}`) } catch { /* ignore */ }
+                }
+              }} sx={{ color:'text.secondary' }}>
                 <CasinoIcon sx={{ fontSize:14 }} />
               </IconButton>
             </Tooltip>
