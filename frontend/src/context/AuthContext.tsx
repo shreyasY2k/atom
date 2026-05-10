@@ -54,7 +54,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         if (s.role) { setAuth(s); setReady(true); return }
       } catch {}
     }
-    fetch(`${AUTH_BASE}/auth/me`, { credentials: 'include' })
+    // No credentials: 'include' — wildcard CORS and localStorage are primary auth store.
+    fetch(`${AUTH_BASE}/auth/me`)
       .then(r => r.ok ? r.json() : null)
       .then(data => {
         if (data?.role) {
@@ -71,7 +72,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     const r = await fetch(`${AUTH_BASE}/auth/login`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      credentials: 'include',
       body: JSON.stringify({ role }),
     })
     if (!r.ok) throw new Error('Login failed')
@@ -82,7 +82,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, [])
 
   const logout = useCallback(async () => {
-    await fetch(`${AUTH_BASE}/auth/logout`, { method: 'POST', credentials: 'include' }).catch(() => {})
+    await fetch(`${AUTH_BASE}/auth/logout`, { method: 'POST' }).catch(() => {})
     setAuth(EMPTY)
     localStorage.removeItem(STORAGE_KEY)
   }, [])
