@@ -76,6 +76,41 @@ list open HITL tasks, resolve them, and replay past runs.
    # Prints the issued service-account ID on success
    ```
 
+5b. **Deployment request flow** (depends on task 05b)
+    ```bash
+    # As Builder
+    atom login --as builder
+    atom agent deploy demo-agent
+    # Output: "Submitted deployment request dep-A1B2C3D4 for agent
+    #  demo-agent v0.1.0; waiting for approval"
+    #  Track with: atom deployments get dep-A1B2C3D4
+    atom deployments list --requester me
+
+    # As Approver
+    atom login --as approver
+    atom deployments list --status pending
+    atom deployments approve dep-A1B2C3D4 --note "approved"
+    # Output: "Approved dep-A1B2C3D4 — deploy_status: deploying"
+
+    # Back as Builder, see it deployed
+    atom login --as builder
+    atom agent history demo-agent
+    ```
+
+    Other deployment commands:
+    ```bash
+    atom deployments get dep-A1B2C3D4       # full record detail
+    atom deployments reject dep-A1B2C3D4 --reason "spec incomplete"
+    atom deployments request-changes dep-A1B2C3D4 --comments "add threshold docs"
+    atom workflow register ats-asset-transfer   # role-aware (builder→request, admin→direct)
+    atom workflow history ats-asset-transfer
+    ```
+
+    Role behaviour:
+    - **Builder** (`atom login --as builder`): `agent deploy` and `workflow register` submit requests; never deploy directly
+    - **Approver** (`atom login --as approver`): `agent deploy` deploys directly (own work); can also approve others' requests
+    - **Admin** (`atom login --as admin`): `agent deploy` uses bypass deploy; recorded as "bypassed" in audit
+
 6. **Test-invoke a deployed agent.**
    ```bash
    # Structured input
