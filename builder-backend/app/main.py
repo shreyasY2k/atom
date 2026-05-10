@@ -11,13 +11,6 @@ app = FastAPI(
     description="Validates, generates, compiles, and deploys BFSI agents.",
 )
 
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
-
 app.include_router(auth.router)
 app.include_router(specs.router)
 app.include_router(agents.router)
@@ -31,4 +24,15 @@ def health():
     return {"status": "ok", "service": "builder-backend"}
 
 
+# setup() adds OTEL + AccessLog middleware (LIFO — they become inner layers).
+# CORSMiddleware must be added LAST so it is the outermost layer and handles
+# OPTIONS preflights before any other middleware can interfere.
 setup(app, "builder-backend")
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_methods=["*"],
+    allow_headers=["*"],
+    expose_headers=["*"],
+)
