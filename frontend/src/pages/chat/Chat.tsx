@@ -584,7 +584,7 @@ export default function Chat() {
     if (!selectedAgent) { setMessages([]); setSelectedRunId(null); return }
     let cancelled = false
     const agentName = selectedAgent.name
-    const key = `atom_chat_${agentName}`
+    const key = `atom_chat_v2_${agentName}`
 
     // Tier 1: localStorage (instant, no network)
     try {
@@ -635,7 +635,7 @@ export default function Chat() {
     if (!selectedAgent || messages.length === 0) return
     const toStore = messages.filter(m => !m.loading)
     if (toStore.length === 0) return
-    try { localStorage.setItem(`atom_chat_${selectedAgent.name}`, JSON.stringify(toStore)) } catch { /* quota */ }
+    try { localStorage.setItem(`atom_chat_v2_${selectedAgent.name}`, JSON.stringify(toStore)) } catch { /* quota */ }
   }, [messages]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // Auto-scroll on new message
@@ -731,7 +731,7 @@ export default function Chat() {
                 setMessages([])
                 setSelectedRunId(null)
                 if (selectedAgent) {
-                  try { localStorage.removeItem(`atom_chat_${selectedAgent.name}`) } catch { /* ignore */ }
+                  try { localStorage.removeItem(`atom_chat_v2_${selectedAgent.name}`) } catch { /* ignore */ }
                 }
               }} sx={{ color:'text.secondary' }}>
                 <CasinoIcon sx={{ fontSize:14 }} />
