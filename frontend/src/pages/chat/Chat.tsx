@@ -619,14 +619,19 @@ export default function Chat() {
     setSelectedRunId(null)
   }, [selectedAgent?.name, runsData]) // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Persist to localStorage whenever messages change
+  // Persist to localStorage when messages change from user sends.
+  // IMPORTANT: selectedAgent?.name is intentionally NOT in the dep array.
+  // Including it causes both this effect and the restore effect to fire on
+  // agent switch — both capture stale messages, so this effect writes the
+  // old agent's messages under the new agent's key before restore clears them.
+  // By depending only on messages, this only fires when messages actually
+  // change (new sends), not when the agent name changes.
   useEffect(() => {
     if (!selectedAgent || messages.length === 0) return
-    // Don't persist loading state
     const toStore = messages.filter(m => !m.loading)
     if (toStore.length === 0) return
     try { localStorage.setItem(`atom_chat_${selectedAgent.name}`, JSON.stringify(toStore)) } catch { /* quota */ }
-  }, [messages, selectedAgent?.name])
+  }, [messages]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // Auto-scroll on new message
   useEffect(() => { bottomRef.current?.scrollIntoView({ behavior:'smooth' }) }, [messages, loading])
