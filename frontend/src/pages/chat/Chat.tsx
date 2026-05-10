@@ -574,50 +574,55 @@ export default function Chat() {
 
   const samplePrompts: string[] = (selectedAgent as (AgentRecord & { sample_prompts?: string[] }) | null)?.sample_prompts ?? []
 
-  // Backend run history — user_message + agent_response stored per run
-  const { data: runsData } = useQuery({
-    queryKey: ['agent-runs', selectedAgent?.name],
-    queryFn: () => builderApi.listAgentRuns(selectedAgent!.name),
-    enabled: !!selectedAgent,
-    staleTime: 60_000,
-  })
-
-  // Restore conversation on agent switch:
-  //   1. localStorage (instant, survives refresh)
-  //   2. backend runs (fallback: first visit or localStorage cleared)
+  // Restore conversation when agent changes.
+  // Fetch runs directly (not via useQuery) to avoid React Query returning
+  // a previous agent's cached data before the new query resolves — which
+  // caused all agents to show the same (last-used) conversation.
+  // The cancellation flag discards any fetch that resolves after another
+  // agent switch has already happened.
   useEffect(() => {
     if (!selectedAgent) { setMessages([]); setSelectedRunId(null); return }
-    const key = `atom_chat_${selectedAgent.name}`
+    let cancelled = false
+    const agentName = selectedAgent.name
+    const key = `atom_chat_${agentName}`
+
+    // Tier 1: localStorage (instant, no network)
     try {
       const stored = localStorage.getItem(key)
       if (stored) {
-        setMessages(JSON.parse(stored) as LocalMessage[])
-        setSelectedRunId(null)
+        const parsed = JSON.parse(stored) as LocalMessage[]
+        if (!cancelled) { setMessages(parsed); setSelectedRunId(null) }
         return
       }
-    } catch { /* corrupt localStorage — fall through */ }
+    } catch { /* corrupt — fall through */ }
 
-    // Reconstruct from backend run history
-    const runs = (runsData?.runs ?? []) as Array<{
-      run_id: string; started_at: string; status: string;
-      user_message?: string; agent_response?: string
-    }>
-    if (runs.length > 0) {
-      const reconstructed: LocalMessage[] = []
-      ;[...runs].reverse().forEach((run, i) => {
-        if (run.user_message) {
-          reconstructed.push({ id:`hist-u-${i}`, role:'user', text:run.user_message })
-          reconstructed.push({ id:`hist-a-${i}`, role:'agent', text:run.agent_response ?? '(no response)', runId:run.run_id })
-        }
-      })
-      setMessages(reconstructed)
-      // Seed localStorage so next refresh is instant
-      try { localStorage.setItem(key, JSON.stringify(reconstructed)) } catch { /* quota */ }
-    } else {
-      setMessages([])
-    }
+    // Clear immediately while the fetch is in flight
+    setMessages([])
     setSelectedRunId(null)
-  }, [selectedAgent?.name, runsData]) // eslint-disable-line react-hooks/exhaustive-deps
+
+    // Tier 2: backend run history for THIS specific agent
+    builderApi.listAgentRuns(agentName)
+      .then(data => {
+        if (cancelled) return
+        const runs = (data.runs ?? []) as Array<{
+          run_id: string; user_message?: string; agent_response?: string
+        }>
+        if (runs.length === 0) return
+        const reconstructed: LocalMessage[] = []
+        ;[...runs].reverse().forEach((run, i) => {
+          if (!run.user_message) return
+          reconstructed.push({ id:`hist-u-${i}`, role:'user', text:run.user_message })
+          reconstructed.push({ id:`hist-a-${i}`, role:'agent', text:run.agent_response ?? '', runId:run.run_id })
+        })
+        if (reconstructed.length === 0) return
+        setMessages(reconstructed)
+        // Seed localStorage so next switch/refresh is instant
+        try { localStorage.setItem(key, JSON.stringify(reconstructed)) } catch { /* quota */ }
+      })
+      .catch(() => { /* no history available — stay empty */ })
+
+    return () => { cancelled = true }
+  }, [selectedAgent?.name]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // Persist to localStorage when messages change from user sends.
   // IMPORTANT: selectedAgent?.name is intentionally NOT in the dep array.
