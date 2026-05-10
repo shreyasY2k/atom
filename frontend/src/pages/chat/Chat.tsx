@@ -128,7 +128,11 @@ function SpanRow({ span, all, depth = 0 }: { span: Span; all: Span[]; depth?: nu
           <Box sx={{ ml:1.5, mr:0.5, mb:0.5 }}>
             {inputM.slice(-2).map((m: unknown, mi) => {
               const msg = m as Record<string,unknown>
-              const text = ((msg.parts as {content?:string}[]) || []).map(p => p.content||'').join('').trim()
+              // Show user-role parts only (skip system prompt in trace preview)
+              if ((msg.role as string) === 'system') return null
+              const text = ((msg.parts as {content?:string;text?:string;type?:string}[]) || [])
+                .filter(p => !p.type || p.type === 'text')
+                .map(p => p.content || p.text || '').join('').trim()
               if (!text) return null
               return <Box key={mi} sx={{ mb:0.25 }}>
                 <Chip label={String(msg.role||'user')} size="small" sx={{ height:14, fontSize:'0.58rem', mb:0.25 }} />
@@ -139,12 +143,17 @@ function SpanRow({ span, all, depth = 0 }: { span: Span; all: Span[]; depth?: nu
             })}
             {outputM.slice(0,1).map((m: unknown, mi) => {
               const msg = m as Record<string,unknown>
-              const text = ((msg.parts as {content?:string}[]) || []).map(p => p.content||'').join('').trim()
+              // Only show 'text' type parts — exclude reasoning/thinking from response preview
+              const text = ((msg.parts as {content?:string;text?:string;type?:string}[]) || [])
+                .filter(p => p.type === 'text')
+                .map(p => p.content || p.text || '').join('').trim()
               if (!text) return null
+              // Strip markdown fences for preview
+              const preview = text.replace(/^```(?:json)?\n?/, '').replace(/\n?```$/, '').trim()
               return <Box key={`o${mi}`} sx={{ borderTop:1, borderColor:'divider', pt:0.25 }}>
                 <Chip label="→ response" size="small" sx={{ height:14, fontSize:'0.58rem', mb:0.25, bgcolor:'rgba(59,109,17,0.1)' }} />
                 <Typography variant="caption" fontFamily="monospace" sx={{ display:'block', fontSize:'0.68rem', color:'text.primary', ml:0.5, whiteSpace:'pre-wrap', maxHeight:120, overflow:'hidden' }}>
-                  {text.slice(0,350)}{text.length>350?'…':''}
+                  {preview.slice(0,350)}{preview.length>350?'…':''}
                 </Typography>
               </Box>
             })}
@@ -238,25 +247,28 @@ function FullConversation({ spans, agentName, c, e }: { spans: Span[]; agentName
             parts.forEach((part, pi) => {
               const ptype = part.type as string
               const key = `chat-${ci}-msg-${mi}-part-${pi}`
+              // Span data uses 'content' for all part types; 'text'/'thinking' are fallbacks
+              const partContent = String(part.content ?? part.text ?? part.thinking ?? '')
 
-              if (ptype === 'thinking') {
+              // Gemini returns 'reasoning' type; some spans use 'thinking'
+              if (ptype === 'reasoning' || ptype === 'thinking') {
+                if (!partContent) return
                 turnElements.push(
                   <ContentBlock key={key} title="Thinking" accent="#6941C6" defaultOpen={false}>
                     <Typography variant="caption" fontFamily="monospace" sx={{ fontSize:'0.68rem', color:'text.secondary', whiteSpace:'pre-wrap', display:'block' }}>
-                      {String(part.thinking || '').slice(0, 500)}
+                      {partContent.slice(0, 600)}
                     </Typography>
                   </ContentBlock>
                 )
               } else if (ptype === 'tool_call') {
                 const toolName = part.name as string || 'tool'
                 const args = part.args as Record<string,unknown> || {}
-                // Find matching execute_tool span for the result
                 const toolResult = toolSpans.find(ts => ts.name.includes(toolName))
                 const toolGenAi = ((toolResult?.attributes as Record<string,Record<string,unknown>>)?.gen_ai || {}) as Record<string,unknown>
                 const resultMsgs = ((toolGenAi?.output as Record<string,unknown>)?.messages as unknown[]) || []
                 const resultText = resultMsgs.flatMap((rm: unknown) =>
-                  ((rm as Record<string,unknown>).parts as {content?:string;type?:string}[] | undefined || [])
-                    .filter(p => p.type === 'text').map(p => p.content || '')
+                  ((rm as Record<string,unknown>).parts as {content?:string;text?:string;type?:string}[] | undefined || [])
+                    .filter(p => p.type === 'text').map(p => p.content || p.text || '')
                 ).join('')
 
                 turnElements.push(
@@ -274,17 +286,18 @@ function FullConversation({ spans, agentName, c, e }: { spans: Span[]; agentName
                   </ContentBlock>
                 )
               } else if (ptype === 'text') {
-                // Only show the final text (last chat span)
+                // Only show for the last chat span; use part.content (primary) or part.text
                 const isLastChat = ci === chatSpans.length - 1
-                if (isLastChat && part.text) {
-                  const text = String(part.text)
-                  let display = text
+                if (isLastChat && partContent) {
+                  // Strip markdown fences if the response is wrapped in ```json ... ```
+                  let display = partContent.trim()
+                  const fenceMatch = display.match(/^```(?:json)?\n?([\s\S]*?)```\s*$/)
+                  if (fenceMatch) display = fenceMatch[1].trim()
+
+                  // Pretty-print if valid JSON
                   try {
-                    const parsed = JSON.parse(text)
-                    if (parsed.confidence != null && parsed.recommendation) {
-                      display = JSON.stringify(parsed, null, 2)
-                    }
-                  } catch { /* use raw */ }
+                    display = JSON.stringify(JSON.parse(display), null, 2)
+                  } catch { /* leave as-is */ }
 
                   turnElements.push(
                     <ContentBlock key={key} title={`${agentName} response`} accent="#3B6D11" defaultOpen={true}>
@@ -478,6 +491,9 @@ function DataView({ runId }: { runId: string }) {
 // ── Format agent response ─────────────────────────────────────────────────────
 
 function formatResponse(raw: Record<string, unknown>): string {
+  // Strip internal tracking fields before display
+  const { _run_id, ...display } = raw
+  raw = display
   if (typeof raw.raw_output === 'string') return raw.raw_output
   if (raw.confidence != null && raw.recommendation) {
     const c = (Number(raw.confidence)*100).toFixed(0)
