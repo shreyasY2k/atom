@@ -2,7 +2,7 @@
 # Compares incoming security positions against the customer's records, flags
 # discrepancies, returns a reconciliation report with confidence score.
 
-apiVersion: mphasis.platform/v1
+apiVersion: atom.platform/v1
 kind: AgentDeployment
 
 metadata:
@@ -13,7 +13,7 @@ metadata:
     Reconcile incoming asset transfer positions against customer records.
     Identify mismatches in CUSIP, quantity, lot dates. Flag for human
     review when discrepancies exceed thresholds.
-  owner: mphasis-bfsi-platform-team
+  owner: atom-bfsi-platform-team
 
 spec:
   agents:

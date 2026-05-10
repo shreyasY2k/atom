@@ -63,7 +63,7 @@ Five outcomes:
    from `input_schema`. Sample-input buttons fill the form. Do NOT
    add a chat-style input here; chat belongs on the Builder Test panel.
 6. **Match the existing UI's visual language.** Light, minimalist,
-   Mphasis brand. Don't redesign. The canvas is one new component;
+   Atom brand. Don't redesign. The canvas is one new component;
    everything around it stays.
 
 ---

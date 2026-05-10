@@ -17,7 +17,9 @@ def compute_service_account_id(name: str, spec_dict: dict) -> str:
     return f"svc-acct-{name}-{_spec_hash(spec_dict)[:6]}{ts[-4:]}"
 
 
-def issue_identity(name: str, spec_dict: dict, spec: AgentSpec) -> tuple[str, str]:
+def issue_identity(
+    name: str, spec_dict: dict, spec: AgentSpec, owner: str = "user:demo@atom.demo"
+) -> tuple[str, str]:
     """
     Issue a LiteLLM virtual key for the agent.
     Returns (service_account_id, virtual_key_string).
@@ -31,7 +33,7 @@ def issue_identity(name: str, spec_dict: dict, spec: AgentSpec) -> tuple[str, st
             "actor_type": "agent",
             "agent_name": name,
             "version": spec.metadata.version,
-            "owner": "user:demo@mphasis.com",
+            "owner": owner,
             "tool_allowlist": tool_allowlist,
         },
         models=["gemini-3.1-pro", "gemini-3-flash", "gemini-embedding"],

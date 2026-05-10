@@ -21,7 +21,7 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 
 AGENT_SPEC_TEMPLATE = """\
 # Stub agent spec — fill in the marked sections.
-apiVersion: mphasis.platform/v1
+apiVersion: atom.platform/v1
 kind: AgentDeployment
 
 metadata:
@@ -123,7 +123,7 @@ You are an agent in an ATOM Agent Platform workflow. TODO: your role.
 
 WORKFLOW_SPEC_TEMPLATE = """\
 # Stub workflow spec. Fill in nodes; minimum 2 nodes for a valid workflow.
-apiVersion: mphasis.platform/v1
+apiVersion: atom.platform/v1
 kind: WorkflowDeployment
 
 metadata:

@@ -94,7 +94,7 @@ Five outcomes, one session:
 Repo layout after migration:
 
 ```
-mphasis-agent-platform/
+atom/
 ├── agent-roles/                       # NEW (was skills/<domain>/)
 │   ├── ats/
 │   │   ├── kyc-refresh.role.md
@@ -169,7 +169,7 @@ spec:
 4. Update `builder-backend` to read `role` field. Keep a one-cycle
    compatibility shim that accepts either `skill` or `role`, with a
    deprecation log line when `skill` is used.
-5. Update `cli/mphasis.py agent scaffold` to write to `agent-roles/`
+5. Update `cli/atom.py agent scaffold` to write to `agent-roles/`
    and emit `role:` in the spec.
 6. Run existing agent tests (Test panel + golden tests). All four ATS/
    treasury/insurance agents must produce byte-identical agent output
@@ -364,7 +364,7 @@ extraction step).
 Visual style notes: match the existing light-theme minimalist Google
 look. No avatars on chat bubbles. No emoji icons. No timestamps in
 line — hover to reveal. Subtle borders, generous whitespace, the
-existing color palette only. The goal is "Studio's UX, Mphasis's
+existing color palette only. The goal is "Studio's UX, Atom's
 brand."
 
 ### D.1 Chat-style input

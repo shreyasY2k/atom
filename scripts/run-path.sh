@@ -68,7 +68,7 @@ for t in run_tasks:
     echo "  Resolving human task $TASK_ID..."
     curl -sf -X POST "$TQ/tasks/$TASK_ID/resolve" \
       -H "Content-Type: application/json" \
-      -d '{"resolution":"accept","resolved_by":"user:demo@mphasis.com"}' > /dev/null
+      -d '{"resolution":"accept","resolved_by":"user:demo@atom.demo"}' > /dev/null
   done
 done
 

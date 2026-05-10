@@ -85,19 +85,19 @@ def generate(req: GenerateRequest):
             "## Instructions\n\nAnalyse the input and return a valid JSON response.\n"
         )
 
-    # 1. Patch missing skill paths in spec_dict BEFORE saving to disk
+    # 1. Save role content to agent-roles/<domain>/<spec-name>.role.md
     skill_path_str = ""
     for ag in spec.spec.agents:
-        skill_rel = ag.skill or f"skills/{spec.metadata.domain}/{ag.name}.skill.md"
-        if not ag.skill:
-            for node in spec_dict.get("spec", {}).get("agents", []):
-                if node.get("name") == ag.name:
-                    node["skill"] = skill_rel
-        # Write skill file
-        skill_path = Path("/app") / skill_rel
-        skill_path.parent.mkdir(parents=True, exist_ok=True)
-        skill_path.write_text(skill_content)
-        skill_path_str = str(skill_path)
+        role_rel = ag.agent_role_file or f"agent-roles/{spec.metadata.domain}/{spec.metadata.name}.role.md"
+        for node in spec_dict.get("spec", {}).get("agents", []):
+            if node.get("name") == ag.name:
+                node["agent_role_file"] = role_rel
+                node.pop("skill", None)  # drop legacy field
+        # Write role file
+        role_path = Path("/app") / role_rel
+        role_path.parent.mkdir(parents=True, exist_ok=True)
+        role_path.write_text(skill_content)
+        skill_path_str = str(role_path)
 
     # 2. Save spec to disk (skill paths now guaranteed to be present)
     spec_file = SPECS_PATH / "agents" / f"{spec.metadata.name}.yaml"

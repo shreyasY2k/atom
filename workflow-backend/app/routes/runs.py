@@ -22,7 +22,7 @@ from app.core.temporal_client import (
     describe_workflow,
     start_workflow,
 )
-from app.worker.runner import MphasisWorkflowRunner
+from app.worker.runner import AtomWorkflowRunner
 
 router = APIRouter(tags=["runs"])
 
@@ -113,7 +113,7 @@ async def start_run(name: str, payload: dict):
     # Start Temporal workflow
     await start_workflow(
         workflow_id=run_id,
-        workflow_cls=MphasisWorkflowRunner,
+        workflow_cls=AtomWorkflowRunner,
         args={
             "spec": spec_dict,
             "input": payload,

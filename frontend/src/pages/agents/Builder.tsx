@@ -18,7 +18,7 @@ import type { AgentRecord } from '../../types'
 type Mode = 'ai' | 'cli' | 'yaml'
 
 const TEMPLATES: Record<string, string> = {
-  kyc: `apiVersion: mphasis.platform/v1
+  kyc: `apiVersion: atom.platform/v1
 kind: AgentDeployment
 metadata:
   name: my-kyc-agent
@@ -50,7 +50,7 @@ spec:
     runtime: agentscope
     sandbox: base
     replicas: 1`,
-  recon: `apiVersion: mphasis.platform/v1
+  recon: `apiVersion: atom.platform/v1
 kind: AgentDeployment
 metadata:
   name: my-recon-agent

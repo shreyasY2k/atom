@@ -3,7 +3,7 @@
 # Demonstrates: OCR tool call, document parsing via Gemini Flash,
 # policy lookup, coverage validation, fraud signals, cross-conversation memory.
 
-apiVersion: mphasis.platform/v1
+apiVersion: atom.platform/v1
 kind: AgentDeployment
 
 metadata:
@@ -16,7 +16,7 @@ metadata:
     drafts a structured claim record. Checker independently verifies
     arithmetic, applies coverage rules, runs fraud-pattern signals,
     approves or flags issues.
-  owner: mphasis-ai-platform-team
+  owner: atom-ai-platform-team
 
 spec:
   agents:

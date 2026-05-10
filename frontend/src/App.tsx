@@ -3,7 +3,9 @@ import { BrowserRouter, Route, Routes, Navigate, useParams } from 'react-router-
 import { ThemeProvider, CssBaseline } from '@mui/material'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { getTheme } from './theme'
+import { AuthProvider, useAuth } from './context/AuthContext'
 import Layout from './components/Layout'
+import Login from './pages/auth/Login'
 import Home from './pages/Home'
 import Builder from './pages/agents/Builder'
 import AgentList from './pages/agents/List'
@@ -27,6 +29,45 @@ function ComposerParam() {
   return <Composer workflowName={name ?? ''} />
 }
 
+function AuthGuard({ children }: { children: React.ReactNode }) {
+  const { role, ready } = useAuth()
+  if (!ready) return null
+  if (!role) return <Navigate to="/login" replace />
+  return <>{children}</>
+}
+
+function AppRoutes() {
+  const { role, ready } = useAuth()
+
+  if (!ready) return null
+
+  return (
+    <Routes>
+      <Route
+        path="/login"
+        element={role ? <Navigate to="/" replace /> : <Login />}
+      />
+      <Route
+        path="/"
+        element={<AuthGuard><Layout /></AuthGuard>}
+      >
+        <Route index element={<Home />} />
+        <Route path="agents/build" element={<Builder />} />
+        <Route path="agents" element={<AgentList />} />
+        <Route path="workflows/compose" element={<ComposerLanding />} />
+        <Route path="workflows/compose/:name" element={<ComposerParam />} />
+        <Route path="workflows/runs" element={<WorkflowRuns />} />
+        <Route path="workflows" element={<WorkflowList />} />
+        <Route path="chat" element={<Chat />} />
+        <Route path="tasks" element={<Tasks />} />
+        <Route path="audit" element={<AuditEvents />} />
+        <Route path="audit/identities" element={<Identities />} />
+        <Route path="*" element={<Navigate to="/" replace />} />
+      </Route>
+    </Routes>
+  )
+}
+
 export default function App() {
   const [mode, setMode] = useState<'light' | 'dark'>(() =>
     (localStorage.getItem('colorMode') as 'light' | 'dark') || 'light'
@@ -46,22 +87,9 @@ export default function App() {
         <CssBaseline />
         <QueryClientProvider client={queryClient}>
           <BrowserRouter>
-            <Routes>
-              <Route path="/" element={<Layout />}>
-                <Route index element={<Home />} />
-                <Route path="agents/build" element={<Builder />} />
-                <Route path="agents" element={<AgentList />} />
-                <Route path="workflows/compose" element={<ComposerLanding />} />
-                <Route path="workflows/compose/:name" element={<ComposerParam />} />
-                <Route path="workflows/runs" element={<WorkflowRuns />} />
-                <Route path="workflows" element={<WorkflowList />} />
-                <Route path="chat" element={<Chat />} />
-                <Route path="tasks" element={<Tasks />} />
-                <Route path="audit" element={<AuditEvents />} />
-                <Route path="audit/identities" element={<Identities />} />
-                <Route path="*" element={<Navigate to="/" replace />} />
-              </Route>
-            </Routes>
+            <AuthProvider>
+              <AppRoutes />
+            </AuthProvider>
           </BrowserRouter>
         </QueryClientProvider>
       </ThemeProvider>

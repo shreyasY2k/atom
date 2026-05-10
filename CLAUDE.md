@@ -38,7 +38,7 @@ The demo must be:
 ## Tech stack (locked)
 
 - **Agent framework**: AgentScope + AgentScope Runtime (built from source)
-- **Workflow engine**: **Temporal** (official image, branded "Mphasis Workflow Composer" in the UI)
+- **Workflow engine**: **Temporal** (official image, branded \"Atom Workflow Composer\" in the UI)
 - **LLM gateway**: LiteLLM (Gemini-only, MCP gateway, virtual keys = service-account identities, S3 callback)
 - **Memory**: ReMe (built from source)
 - **Audit / artifacts**: MinIO with object lock
@@ -47,14 +47,14 @@ The demo must be:
 - **Workflow backend**: FastAPI + Temporal Python SDK + workflow-spec validator + worker
 - **Frontend**: React + Vite + Tailwind + Monaco editor + React Flow (for the Composer canvas)
 - **Mocks**: FastAPI per service
-- **CLI**: `mphasis` Click-based CLI for `agent scaffold`, `workflow init`
+- **CLI**: `atom` Click-based CLI for `agent scaffold`, `workflow init`
 
 ## Build modes (three)
 
 | Mode | Agent build | Workflow build | When to use |
 |---|---|---|---|
 | **A. Visual + AI** | Builder UI generates spec + skill from prose | Composer UI, drag-and-drop nodes, agents picked from registry | Fast prototyping; demo path 1 |
-| **B. CLI scaffold + manual** | `mphasis agent scaffold <name>` produces stub spec + stub skill in repo; developer fills in | Composer UI or `mphasis workflow init` produces stub `workflow-spec.yaml` | Realistic dev workflow; demo path 2 |
+| **B. CLI scaffold + manual** | `atom agent scaffold <name>` produces stub spec + stub skill in repo; developer fills in | Composer UI or `atom workflow init` produces stub `workflow-spec.yaml` | Realistic dev workflow; demo path 2 |
 | **C. Full natural-language** | Same as A | Composer also generates from prose | Demo-optional wow; off the critical path. Disable cleanly if it misbehaves. |
 
 ## Where to find things
@@ -74,7 +74,7 @@ The demo must be:
 - `temporal/` — worker code, activity definitions
 - `dockerfiles/` — build-from-source Dockerfiles
 - `samples/` — sample data
-- `cli/` — `mphasis` CLI source
+- `cli/` — `atom` CLI source
 
 ## Working agreements for Claude Code
 

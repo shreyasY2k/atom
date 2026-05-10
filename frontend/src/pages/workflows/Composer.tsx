@@ -369,7 +369,7 @@ const PALETTE_ITEMS = [
 
 function Palette() {
   const onDragStart = (e: React.DragEvent, type: string) => {
-    e.dataTransfer.setData('application/mphasis-nodetype', type)
+    e.dataTransfer.setData('application/atom-nodetype', type)
     e.dataTransfer.effectAllowed = 'move'
   }
   return (
@@ -1240,7 +1240,7 @@ export default function Composer({ workflowName: propName }: { workflowName?: st
 
   const onDrop = useCallback((e: React.DragEvent) => {
     e.preventDefault()
-    const type = e.dataTransfer.getData('application/mphasis-nodetype') as WorkflowNode['type'] | 'trigger'
+    const type = e.dataTransfer.getData('application/atom-nodetype') as WorkflowNode['type'] | 'trigger'
     if (!type || !rfInstance.current || !rfWrapperRef.current) return
 
     const bounds = rfWrapperRef.current.getBoundingClientRect()

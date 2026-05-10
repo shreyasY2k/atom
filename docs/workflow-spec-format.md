@@ -9,7 +9,7 @@ The Composer canvas is UX over this file. Every spec lives in
 ## Top-level structure
 
 ```yaml
-apiVersion: mphasis.platform/v1
+apiVersion: atom.platform/v1
 kind: WorkflowDeployment
 
 metadata:

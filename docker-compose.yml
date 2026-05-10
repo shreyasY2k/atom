@@ -1,8 +1,10 @@
-# Mphasis Agent Platform — full Phase 1 stack
-# ==============================================
+# Atom Agent Platform — full Phase 1 stack
+# =========================================
 # Two surfaces: Agent Builder + Workflow Composer.
 # Engine: Temporal for workflows, AgentScope Runtime for agents.
 # Gemini-only. AgentScope/ReMe/Studio built from source.
+
+name: atom
 
 services:
 
@@ -129,6 +131,7 @@ services:
       mc mb local/workflow-artifacts || true;
       mc mb local/specs || true;
       mc mb local/uploaded-documents || true;
+      mc mb local/atom-deployments || true;
       echo 'minio buckets ready';
       "
     networks: [agentnet]
@@ -275,6 +278,7 @@ services:
       context: ./dockerfiles/agentscope-runtime-sandbox
       args:
         AGENTSCOPE_RUNTIME_GIT_REF: ${AGENTSCOPE_RUNTIME_GIT_REF:-main}
+    image: atom-runtime-sandbox
     container_name: runtime-sandbox
     restart: unless-stopped
     ports: ["8001:8000"]
@@ -345,6 +349,7 @@ services:
       - SECURITIES_OPS_URL=http://securities-ops:8099
       - FRAUD_SVC_URL=http://fraud-svc:8102
       - STUDIO_URL=http://studio:3000
+      - WORKFLOW_BACKEND_URL=http://workflow-backend:8081
       - OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4318
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock

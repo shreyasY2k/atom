@@ -4,7 +4,7 @@ import os
 import httpx
 
 _BASE = os.environ.get("LITELLM_BASE_URL", "http://litellm:4000")
-_KEY  = os.environ.get("LITELLM_MASTER_KEY", "sk-mphasis-demo-master-2024")
+_KEY  = os.environ.get("LITELLM_MASTER_KEY", "sk-atom-demo-master-2024")
 _HEADERS = {"Authorization": f"Bearer {_KEY}", "Content-Type": "application/json"}
 
 

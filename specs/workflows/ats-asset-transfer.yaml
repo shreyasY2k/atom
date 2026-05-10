@@ -6,7 +6,7 @@
 #   2. High-value ($1.2M) — branches to compliance-review (amount > $250K)
 #   3. KYC breach         — KYC confidence < 0.82 → kyc-human-review (skip_if bypasses for tiny amounts)
 
-apiVersion: mphasis.platform/v1
+apiVersion: atom.platform/v1
 kind: WorkflowDeployment
 
 metadata:
@@ -19,7 +19,7 @@ metadata:
     sanctions, branches by amount tier, reconciles assets or routes for
     compliance review, submits SWIFT/DTC instruction, captures human
     final approval, notifies.
-  owner: mphasis-bfsi-platform-team
+  owner: atom-bfsi-platform-team
 
   layout:
     nodes:

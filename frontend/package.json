@@ -1,5 +1,5 @@
 {
-  "name": "mphasis-agent-platform-ui",
+  "name": "atom-ui",
   "private": true,
   "version": "1.0.0",
   "type": "module",

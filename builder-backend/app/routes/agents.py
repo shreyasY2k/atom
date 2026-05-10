@@ -2,20 +2,26 @@
 
 import hashlib
 import os
+import time
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 
 import httpx
 import yaml
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, BackgroundTasks, HTTPException, Request
+from pydantic import BaseModel, ValidationError
 
-from app.core import audit, codegen, identity, registry_db
+from app.core import audit, codegen, identity, registry_db, deployments_store
 from app.core.container import LocalDeployManager, WORK_DIR, AGENT_PORT, container_healthy
 from app.core.schema import AgentSpec
-from pydantic import ValidationError
 
 router = APIRouter(prefix="/agents", tags=["agents"])
+
+
+class DeployRequestBody(BaseModel):
+    notes: str = ""
+    previous_request_id: str | None = None
 
 SPECS_PATH  = Path(os.environ.get("SPECS_PATH", "/app/specs"))
 LITELLM_BASE_URL = os.environ.get("LITELLM_BASE_URL", "http://litellm:4000")
@@ -43,9 +49,10 @@ def _load_spec(name: str) -> tuple[AgentSpec, dict]:
 # ---------------------------------------------------------------------------
 
 @router.post("/{name}/compile")
-def compile_agent(name: str):
+def compile_agent(name: str, request: Request):
     """Generate and validate agent.py from the spec."""
     spec, spec_dict = _load_spec(name)
+    actor = request.headers.get("X-Atom-Actor", spec.metadata.owner)
 
     try:
         code = codegen.compile_agent(name, spec, spec_dict)
@@ -55,7 +62,7 @@ def compile_agent(name: str):
         raise HTTPException(502, f"Code generation failed: {e}")
 
     chash = codegen.code_hash(code)
-    audit.emit_build(name=name, owner=spec.metadata.owner)
+    audit.emit_build(name=name, owner=actor)
 
     return {
         "name": name,
@@ -67,15 +74,13 @@ def compile_agent(name: str):
 
 
 # ---------------------------------------------------------------------------
-# POST /agents/{name}/deploy
+# Core deploy logic — called by /deploy, /deploy-direct, and approval tasks
 # ---------------------------------------------------------------------------
 
-@router.post("/{name}/deploy")
-def deploy_agent(name: str):
-    """Compile (if needed), issue identity, build+run container, register."""
+def _do_deploy_agent(name: str, actor: str) -> dict:
+    """Build container, issue identity, register. Raises HTTPException on failure."""
     spec, spec_dict = _load_spec(name)
 
-    # 1. Generate code
     try:
         code = codegen.compile_agent(name, spec, spec_dict)
     except (ValueError, Exception) as e:
@@ -86,30 +91,26 @@ def deploy_agent(name: str):
         yaml.dump(spec_dict, sort_keys=True).encode()
     ).hexdigest()[:16]
 
-    # 2. Revoke any existing key for this agent before issuing a new one
     existing = registry_db.get(name)
     if existing and existing.get("virtual_key"):
         try:
             identity.revoke_identity(existing["virtual_key"])
         except Exception:
-            pass  # old key may already be gone; proceed
+            pass
 
-    # Issue service-account identity
     try:
-        svc_id, vkey = identity.issue_identity(name, spec_dict, spec)
+        svc_id, vkey = identity.issue_identity(name, spec_dict, spec, owner=actor)
     except Exception as e:
         raise HTTPException(502, f"Identity issuance failed: {e}")
 
-    # 3a. Pre-save key so we can revoke it if container build fails
     registry_db.upsert({
         "name": name, "version": spec.metadata.version,
         "service_account_id": svc_id, "virtual_key": vkey,
-        "owner": spec.metadata.owner, "deployed_at": datetime.now(timezone.utc).isoformat(),
+        "owner": actor, "deployed_at": datetime.now(timezone.utc).isoformat(),
         "endpoint": None, "container_id": None,
         "spec_hash": spec_hash, "code_hash": chash, "status": "deploying",
     })
 
-    # 3b. Build + run container via LocalDeployManager
     from app.core.container import STUDIO_URL
     env = {
         **_AGENT_ENV_BASE,
@@ -124,24 +125,18 @@ def deploy_agent(name: str):
     )
     try:
         deploy_result = deploy_mgr.deploy(
-            name=name,
-            version=spec.metadata.version,
-            agent_code=code,
-            port=AGENT_PORT,
-            env=env,
+            name=name, version=spec.metadata.version,
+            agent_code=code, port=AGENT_PORT, env=env,
         )
         endpoint = deploy_result["endpoint"]
     except Exception as e:
-        # Revoke key to avoid orphaned keys
         try:
             identity.revoke_identity(vkey)
         except Exception:
             pass
         raise HTTPException(502, f"Container build/run failed: {e}")
 
-    # 4. Wait for health
     healthy = False
-    import time
     for _ in range(30):
         if container_healthy(endpoint):
             healthy = True
@@ -151,42 +146,127 @@ def deploy_agent(name: str):
     if not healthy:
         raise HTTPException(502, "Agent container started but /health never returned 200")
 
-    # 5. Register
     now = datetime.now(timezone.utc).isoformat()
-    # agent_role_name = the internal role name used in OTEL traces (spec.agents[0].name)
     agent_role_name = spec.spec.agents[0].name if spec.spec.agents else None
     record = {
-        "name": name,
-        "version": spec.metadata.version,
-        "service_account_id": svc_id,
-        "virtual_key": vkey,
-        "owner": spec.metadata.owner,
-        "deployed_at": now,
-        "endpoint": endpoint,
-        "container_id": None,
-        "spec_hash": spec_hash,
-        "code_hash": chash,
-        "status": "deployed",
-        "agent_role_name": agent_role_name,
+        "name": name, "version": spec.metadata.version,
+        "service_account_id": svc_id, "virtual_key": vkey,
+        "owner": actor, "deployed_at": now, "endpoint": endpoint,
+        "container_id": None, "spec_hash": spec_hash, "code_hash": chash,
+        "status": "deployed", "agent_role_name": agent_role_name,
     }
     registry_db.upsert(record)
 
-    # 6. Audit events
     audit.emit_deploy(name=name, service_account_id=svc_id, version=spec.metadata.version)
-    audit.emit_build(name=name, owner=spec.metadata.owner)
+    audit.emit_build(name=name, owner=actor, action="deploy_agent")
 
-    # 7. Persist artifacts and spec to MinIO
     spec_yaml_text = yaml.dump(spec_dict, sort_keys=False, allow_unicode=True)
     audit.write_agent_artifact(
-        name=name,
-        version=spec.metadata.version,
-        agent_code=code,
-        spec_yaml=spec_yaml_text,
+        name=name, version=spec.metadata.version,
+        agent_code=code, spec_yaml=spec_yaml_text,
         metadata={k: v for k, v in record.items() if k != "virtual_key"},
     )
     audit.write_agent_spec(name=name, version=spec.metadata.version, spec_yaml=spec_yaml_text)
 
     return {k: v for k, v in record.items() if k != "virtual_key"}
+
+
+# ---------------------------------------------------------------------------
+# POST /agents/{name}/deploy  (direct, no approval gate)
+# ---------------------------------------------------------------------------
+
+@router.post("/{name}/deploy")
+def deploy_agent(name: str, request: Request):
+    """Compile (if needed), issue identity, build+run container, register."""
+    actor = request.headers.get("X-Atom-Actor", "user:demo@atom.demo")
+    return _do_deploy_agent(name, actor)
+
+
+# ---------------------------------------------------------------------------
+# POST /agents/{name}/deploy-request  (submit for approval)
+# POST /agents/{name}/deploy-direct   (admin bypass — deploys immediately)
+# GET  /agents/{name}/deployments     (history)
+# ---------------------------------------------------------------------------
+
+@router.post("/{name}/deploy-request")
+def deploy_request(name: str, body: DeployRequestBody, request: Request):
+    """Submit a deployment request. Approver must approve before the agent deploys."""
+    spec, spec_dict = _load_spec(name)
+    actor = request.headers.get("X-Atom-Actor", "user:demo@atom.demo")
+    spec_hash = "sha256:" + hashlib.sha256(
+        yaml.dump(spec_dict, sort_keys=True).encode()
+    ).hexdigest()
+
+    record = deployments_store.create_record({
+        "target_type": "agent",
+        "target_name": name,
+        "target_version": spec.metadata.version,
+        "spec_hash": spec_hash,
+        "requested_by": actor,
+        "approval_status": "pending",
+        "deploy_status": "pending",
+        "notes": body.notes,
+        "previous_request_id": body.previous_request_id,
+    })
+    deployments_store.emit_deployment_audit("deployment_requested", record, actor)
+    return record
+
+
+@router.post("/{name}/deploy-direct")
+def deploy_direct(name: str, body: DeployRequestBody, request: Request, background_tasks: BackgroundTasks):
+    """Platform Admin bypass — create record + deploy immediately, no approval needed."""
+    spec, spec_dict = _load_spec(name)
+    actor = request.headers.get("X-Atom-Actor", "user:demo@atom.demo")
+    spec_hash = "sha256:" + hashlib.sha256(
+        yaml.dump(spec_dict, sort_keys=True).encode()
+    ).hexdigest()
+
+    record = deployments_store.create_record({
+        "target_type": "agent",
+        "target_name": name,
+        "target_version": spec.metadata.version,
+        "spec_hash": spec_hash,
+        "requested_by": actor,
+        "approval_status": "bypassed",
+        "approved_by": actor,
+        "approved_at": datetime.now(timezone.utc).isoformat(),
+        "deploy_status": "deploying",
+        "notes": body.notes,
+    })
+    deployments_store.emit_deployment_audit("deployment_bypassed", record, actor,
+                                            notes="Admin bypass deploy")
+    background_tasks.add_task(_bg_deploy_agent, record["deployment_id"], name, actor)
+    return record
+
+
+@router.get("/{name}/deployments")
+def list_agent_deployments(name: str):
+    """Deployment history for one agent."""
+    return {"deployments": deployments_store.list_records(target_type="agent", target_name=name)}
+
+
+# ---------------------------------------------------------------------------
+# Background deploy task (called after approval or bypass)
+# ---------------------------------------------------------------------------
+
+def _bg_deploy_agent(deployment_id: str, name: str, actor: str) -> None:
+    """Background task: run deploy, update deployment record with outcome."""
+    try:
+        result = _do_deploy_agent(name, actor)
+        deployments_store.update_record(
+            deployment_id,
+            deploy_status="deployed",
+            deployed_at=result.get("deployed_at"),
+            service_account_id=result.get("service_account_id"),
+            code_hash="sha256:" + (result.get("code_hash") or ""),
+        )
+        rec = deployments_store.get_record(deployment_id) or {}
+        deployments_store.emit_deployment_audit("deployment_completed", rec, "system:builder-backend")
+    except Exception as e:
+        deployments_store.update_record(deployment_id, deploy_status="failed", deploy_error=str(e))
+        rec = deployments_store.get_record(deployment_id) or {}
+        deployments_store.emit_deployment_audit("deployment_failed", rec, "system:builder-backend",
+                                                notes=str(e))
 
 
 # ---------------------------------------------------------------------------

@@ -1,10 +1,10 @@
 """
-Mphasis Workflow Worker — Temporal worker that executes workflow-spec.yaml.
+Atom Workflow Worker — Temporal worker that executes workflow-spec.yaml.
 
 This is a stub showing the intended shape. Task 03b (workflow-backend)
 fills in the actual logic.
 
-The pattern: one generic Temporal workflow class (`MphasisWorkflowRunner`)
+The pattern: one generic Temporal workflow class (`AtomWorkflowRunner`)
 takes a workflow-spec dict + input payload, walks the node graph,
 executes activities per node type. This means we don't have to compile
 each workflow into custom Temporal code — we interpret the spec.
@@ -144,7 +144,7 @@ async def human_task_activity(payload: dict) -> dict:
 # ============================================================
 
 @workflow.defn(sandboxed=False)
-class MphasisWorkflowRunner:
+class AtomWorkflowRunner:
     """Generic runner that interprets a workflow-spec dict as a node graph."""
 
     @workflow.run
@@ -273,7 +273,7 @@ async def main():
     worker = Worker(
         client,
         task_queue=os.environ.get("TEMPORAL_TASK_QUEUE", "ats-task-queue"),
-        workflows=[MphasisWorkflowRunner],
+        workflows=[AtomWorkflowRunner],
         activities=[
             invoke_agent_activity,
             http_call_activity,

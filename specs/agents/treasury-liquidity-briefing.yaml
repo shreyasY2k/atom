@@ -1,7 +1,7 @@
 # Reference spec — Treasury Daily Liquidity Briefing
 # Maker-checker pattern. Gemini-only stack. Memory-enabled via ReMe.
 
-apiVersion: mphasis.platform/v1
+apiVersion: atom.platform/v1
 kind: AgentDeployment
 
 metadata:
@@ -12,7 +12,7 @@ metadata:
     Daily liquidity position briefing for US bank treasury, produced via
     maker-checker pattern. Maker drafts the brief; Checker independently
     verifies LCR math and HQLA cap compliance.
-  owner: mphasis-ai-platform-team
+  owner: atom-ai-platform-team
 
 spec:
   agents:

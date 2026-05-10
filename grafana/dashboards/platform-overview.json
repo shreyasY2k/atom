@@ -15,7 +15,7 @@
       "datasource": { "uid": "loki", "type": "loki" },
       "targets": [
         {
-          "expr": "{compose_project=\"mphasis-agent-platform\"} | json | line_format \"[{{.service}}] {{.event}} {{.run_id}}\"",
+          "expr": "{compose_project=\"atom\"} | json | line_format \"[{{.service}}] {{.event}} {{.run_id}}\"",
           "legendFormat": "",
           "refId": "A"
         }

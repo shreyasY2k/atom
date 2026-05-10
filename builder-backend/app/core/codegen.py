@@ -202,7 +202,9 @@ _FASTAPI_OVERRIDE = textwrap.dedent("""
 
     ```python
     async def standalone_run(payload: dict) -> dict:
-        <agent_name>.memory.clear()   # prevent cross-invocation history leakage
+        await <agent_name>.memory.clear()   # InMemoryMemory.clear() is async — must await
+        # Build user_input: prefer "text" (free-text path), then "input", else dump the whole dict.
+        user_input = payload.get("text") or payload.get("input") or _json.dumps(payload, default=str)
         ...
         # After getting output_text from the agent response:
         try:
@@ -230,9 +232,18 @@ _FASTAPI_OVERRIDE = textwrap.dedent("""
     @app.post("/invoke")
     async def invoke(payload: dict) -> dict:
         run_id = payload.pop("_run_id", None)   # propagated from builder-backend for trace correlation
-        if "text" in payload and not _looks_structured(payload):
-            structured = await _extract_input_from_text(payload["text"])
+        if "file_base64" in payload or "file" in payload:
+            # File/document path — pass directly; agent reads file_base64 + mime_type from payload
+            structured = payload
+        elif "text" in payload and not _looks_structured(payload):
+            if AGENT_INPUT_SCHEMA:
+                # Schema defined: extract structured fields from free text via Gemini Flash
+                structured = await _extract_input_from_text(payload["text"])
+            else:
+                # No schema: agent accepts raw free text — pass it directly
+                structured = {"text": payload["text"]}
         else:
+            # Structured JSON path: workflow invocation or direct API call with known fields
             structured = payload
         result = await <flow_run_function>(structured)
         if run_id:
@@ -335,6 +346,54 @@ def _fix_inline_skill(code: str, spec: AgentSpec) -> str:
     return code
 
 
+def _fix_generated_patterns(code: str) -> str:
+    """
+    Deterministic post-processing to correct patterns Gemini reliably gets wrong,
+    regardless of template instructions.
+    """
+    # 1. InMemoryMemory.clear() is async — ensure it is always awaited.
+    #    Add 'await' then collapse any accidental double-await.
+    code = re.sub(r'(\w+\.memory\.clear\(\))', r'await \1', code)
+    code = re.sub(r'\bawait\s+await\b', 'await', code)
+
+    # 2. user_input inside standalone_run: handle text / structured / binary.
+    #    Gemini generates payload.get("input", payload) which passes a dict literal
+    #    when neither "input" nor "text" is present, causing the agent to process
+    #    the stringified dict instead of real content.
+    code = re.sub(
+        r'user_input\s*=\s*payload\.get\(["\']input["\'],\s*payload\)',
+        'user_input = payload.get("text") or payload.get("input") or _json.dumps(payload, default=str)',
+        code,
+    )
+
+    # 3. /invoke routing block: rewrite deterministically to guarantee all three paths
+    #    (file/binary, free-text, structured) regardless of what Gemini generated.
+    #    Matches any variant of the text-routing block and replaces it wholesale.
+    _ROUTING_RE = re.compile(
+        r'(?P<ind>[ \t]+)if ["\']text["\'] in payload.*?'
+        r'(?P=ind)else:\n(?P=ind)[ \t]+structured\s*=\s*payload',
+        re.DOTALL,
+    )
+
+    def _routing_replacement(m: re.Match) -> str:
+        ind = m.group('ind')
+        return (
+            f'{ind}if "file_base64" in payload or "file" in payload:\n'
+            f'{ind}    structured = payload\n'
+            f'{ind}elif "text" in payload and not _looks_structured(payload):\n'
+            f'{ind}    if AGENT_INPUT_SCHEMA:\n'
+            f'{ind}        structured = await _extract_input_from_text(payload["text"])\n'
+            f'{ind}    else:\n'
+            f'{ind}        structured = {{"text": payload["text"]}}\n'
+            f'{ind}else:\n'
+            f'{ind}    structured = payload'
+        )
+
+    code = _ROUTING_RE.sub(_routing_replacement, code)
+
+    return code
+
+
 def _lint(code: str) -> list[str]:
     errors = []
     for pattern, msg in _REQUIRED_PATTERNS:
@@ -406,6 +465,7 @@ def compile_agent(name: str, spec: AgentSpec, spec_dict: dict) -> str:
         )
         code = _extract_code_block(raw)
         code = _fix_inline_skill(code, spec)
+        code = _fix_generated_patterns(code)
 
         # Syntax check
         try:
@@ -438,19 +498,19 @@ def code_hash(code: str) -> str:
 # ---------------------------------------------------------------------------
 
 _SPEC_GEN_SYSTEM = textwrap.dedent("""
-    You convert natural-language descriptions into Mphasis agent-spec YAML.
+    You convert natural-language descriptions into Atom agent-spec YAML.
 
     The output MUST be a single ```yaml``` fenced block matching this schema exactly:
 
     ```yaml
-    apiVersion: mphasis.platform/v1
+    apiVersion: atom.platform/v1
     kind: AgentDeployment
     metadata:
       name: <kebab-case-name>
       domain: <banking-kyc|banking-securities-ops|banking-treasury|insurance-claims>
       version: 1.0.0
       description: <one sentence>
-      owner: user:demo@mphasis.com
+      owner: user:demo@atom.demo
     spec:
       agents:
         - name: <agent-name>
@@ -481,11 +541,49 @@ _SPEC_GEN_SYSTEM = textwrap.dedent("""
         replicas: 1
     ```
 
+    The spec MUST also include an `input_schema` field under each agent that describes
+    what the /invoke endpoint accepts. Choose the right schema based on what the agent
+    processes:
+
+    ```yaml
+          # For agents that work with structured domain entities (most BFSI agents):
+          input_schema:
+            type: object
+            properties:
+              customer_id: {type: string, description: Customer identifier}
+              transfer_id: {type: string, description: Transfer request ID}
+            required: [customer_id]
+
+          # For agents that process uploaded documents or images (OCR, claims scanning):
+          input_schema:
+            type: object
+            properties:
+              file_base64: {type: string, description: Base64-encoded file content}
+              mime_type:
+                type: string
+                enum: [application/pdf, image/jpeg, image/png, text/plain]
+                description: MIME type of the uploaded file
+            required: [file_base64, mime_type]
+
+          # For agents that accept raw free text with no fixed structure:
+          input_schema: {}
+    ```
+
     Valid tools per domain:
     - banking-kyc: get_customer_profile, get_kyc_documents, get_external_screening
     - banking-securities-ops: get_customer_positions, get_security_master, check_position_lots
     - banking-treasury: get_overnight_positions, get_market_data, compute_lcr, get_trailing_metrics, validate_hqla_composition
     - insurance-claims: extract_document_text, parse_repair_estimate, lookup_policy, get_claims_history, verify_arithmetic, check_coverage, get_red_flag_signals
+
+    Input schema inference rules (apply in order):
+    1. If the description mentions documents, files, PDF, images, OCR, or scans → use the file_base64 schema.
+    2. If the domain is banking-kyc → required field is customer_id (string).
+    3. If the domain is banking-securities-ops → required fields are customer_id + transfer_id (strings).
+    4. If the domain is banking-treasury → required field is report_date (string, YYYY-MM-DD).
+    5. If the domain is insurance-claims and NOT document scanning → required field is claim_id (string).
+    6. If the agent performs pure text transformation with no domain entity → use `input_schema: {}`.
+    7. memory.identity_field must reference a field that exists in input_schema (e.g. input.customer_id).
+       If the schema has no customer identifier, set cross_conversation.enabled to false.
 
     Rules:
     - temperature MUST be 1.0
@@ -495,7 +593,7 @@ _SPEC_GEN_SYSTEM = textwrap.dedent("""
 
 
 _SKILL_GEN_SYSTEM = textwrap.dedent("""
-    You write domain-specific skill files for Mphasis Platform agents.
+    You write domain-specific skill files for Atom Platform agents.
     A skill file is the system prompt the agent uses at runtime.
 
     Study the following two reference skills carefully — yours must match this quality:
@@ -550,6 +648,13 @@ _SKILL_GEN_SYSTEM = textwrap.dedent("""
 
     [2–4 bullet points defining inform/recommend/not-authorize, what data you use, when to escalate]
 
+    ## Input format
+
+    [Describe what fields the agent expects in its invocation payload.
+     For structured agents: list each required field and its type.
+     For file agents: "Receives file_base64 (base64-encoded content) and mime_type. Decode to read."
+     For free-text agents: "Receives a text field containing the raw user input."]
+
     ## Process
 
     [Numbered steps. Each step specifies exactly which tool to call and why.
@@ -593,14 +698,24 @@ def generate_skill(prose: str, spec_dict: dict) -> str:
     ag = agents[0] if agents else {}
     meta = spec_dict.get("metadata", {})
 
+    input_schema = ag.get("input_schema") or {}
+    schema_desc = (
+        "file_base64 + mime_type (document/image upload)"
+        if "file_base64" in (input_schema.get("properties") or {})
+        else (", ".join(input_schema.get("required", [])) or "free text (no fixed schema)")
+    )
+
     context = (
         f"Agent name: {meta.get('name')}\n"
         f"Domain: {meta.get('domain')}\n"
         f"Description: {meta.get('description')}\n"
         f"Tools available: {', '.join(ag.get('tools', [])) or 'none (reasoning-only)'}\n"
         f"Role: {ag.get('role', 'standalone')}\n"
+        f"Input schema: {schema_desc}\n"
+        f"Full input_schema: {input_schema}\n"
         f"Original request: {prose}\n\n"
         "Write a complete, actionable skill file for this agent. "
+        "The ## Input format section must match the input_schema exactly. "
         "Include a specific JSON output format with all fields named and typed. "
         "Make the process steps concrete — what does the agent check and in what order. "
         "Make the critical rules specific and testable."

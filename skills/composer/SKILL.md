@@ -2,7 +2,7 @@
 name: workflow-composer
 description: |
   Compiles a natural-language description of a BFSI workflow into a
-  Mphasis Workflow Composer workflow-spec.yaml. Used by Mode C
+  Atom Workflow Composer workflow-spec.yaml. Used by Mode C
   (full natural-language workflow generation). Output is a single YAML
   file conforming to the workflow-spec schema, using only the four
   allowed node types and referencing only existing agents.

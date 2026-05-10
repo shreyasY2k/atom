@@ -47,7 +47,7 @@ Task 02: Mock services — seed all 9 BFSI mocks, KYC demo profiles, SWIFT gatew
 - [x] All 9 mock services healthy (ports 8090–8098; Tesseract 5.5.0 confirmed in ocr-svc)
 - [x] KYC: CUST-100442 is_stale=False (422d), CUST-200119 is_stale=False (277d), CUST-300577 is_stale=True (1214d)
 - [x] OFAC clean (hit=False) for all 3 demo customers
-- [x] Task queue lifecycle: create → OPEN → RESOLVED (resolution=accept, resolved_by=user:demo@mphasis.com)
+- [x] Task queue lifecycle: create → OPEN → RESOLVED (resolution=accept, resolved_by=user:demo@atom.demo)
 - [x] SWIFT gateway: instruction_id=SWIFT-3F1F962549FA, status=ACCEPTED, MT103 message correct
 - [x] OCR spot-check: auto-repair-windshield.png → 650 chars extracted; Robert Chen / POL-882-447-AC text confirmed; consistent with fnol_svc seeded data
 
@@ -123,7 +123,7 @@ Task 03b: Workflow backend + Temporal worker
   - `core/registry_db.py`: SQLite workflow registry at /work/wf-registry.db
   - `worker/audit_helpers.py`: structured SSE+audit emit from activities
   - `worker/activities.py`: 4 activities (invoke_agent, http_call, decision, human_task); http fail-soft
-  - `worker/runner.py`: MphasisWorkflowRunner interpreting spec; confidence-threshold routing
+  - `worker/runner.py`: AtomWorkflowRunner interpreting spec; confidence-threshold routing
   - Routes: specs (validate/generate), workflows (register/list/get), runs (start/get/SSE/cancel)
   - `main.py`: FastAPI + background Temporal worker via asyncio.create_task
 
@@ -448,7 +448,7 @@ Task 04d: Runtime fix + MinIO population + Full observability (Alloy/Loki/Tempo/
 
 ### Notes for Task 05
 - Grafana at http://localhost:3001 — anonymous admin, no login required
-- Loki: `{compose_project="mphasis-agent-platform"}` shows all platform logs
+- Loki: `{compose_project="atom"}` shows all platform logs
 - Tempo: trace search works once OTEL traces start flowing from workflow runs
 - agent-artifacts bucket path: `<name>/<version>/agent.py|spec.yaml|metadata.json`
 - specs bucket path: `agents/<name>/<version>/spec.yaml` and `workflows/<name>/<version>/<ts>.yaml`
@@ -488,9 +488,9 @@ Task 04e: Agent redeployment via LocalDeployManager + pending clearance (rolled 
 - ATS workflow run `run-6cf05744e5ec` completed (XFER-RT-WFA-001, CUST-100442, $40K)
   - KYC: confidence=0.92, PASS
   - asset-recon: REVIEW (transfer ID XFER-RT-WFA-001 not in securities-ops mock → correctly routed to compliance-review)
-  - compliance-review + final-accept: resolved by user:demo@mphasis.com
+  - compliance-review + final-accept: resolved by user:demo@atom.demo
   - `workflow-artifacts/ats-asset-transfer/run-6cf05744e5ec/events.json` (4.6 KiB) + `result.json` (560 B) confirmed in MinIO
-- Loki log delivery verified: 2 streams at `{compose_project="mphasis-agent-platform"}` (litellm + kyc-refresh agent)
+- Loki log delivery verified: 2 streams at `{compose_project="atom"}` (litellm + kyc-refresh agent)
 
 **Part D — Q&A doc and README updated:**
 - Created `docs/qa-prep.md` — 20 questions with prepared answers covering: reliability, security, SR 11-7, Temporal, RPA comparison, Phase 2 deployment, data handling, commercial model
@@ -564,7 +564,7 @@ Task 05: ATS workflow end-to-end — three demo paths reliable, full audit trail
 - [x] CUST-300577 KYC confidence = 0.65 on all runs (8/8 calibration, consistent)
 - [x] CUST-100442 and CUST-200119 KYC confidence ≥ 0.82 on all runs (stable)
 - [x] Memory isolation verified: CUST-300577→CUST-200119 sequence gives correct separate values
-- [x] Audit trail for Path A shows all three actor types: agent (svc-acct-kyc-refresh-..., svc-acct-asset-recon-...), system (workflow-engine), human (user:demo@mphasis.com)
+- [x] Audit trail for Path A shows all three actor types: agent (svc-acct-kyc-refresh-..., svc-acct-asset-recon-...), system (workflow-engine), human (user:demo@atom.demo)
 - [x] SWIFT call succeeds: instruction_id populated, swift_status=ACCEPTED in task context
 - [x] receive-request and notify nodes work: incoming-queue mock live on port 8101
 - [x] `pre-warm.sh`, `run-path.sh`, `validate-paths.sh` created and executable
@@ -579,3 +579,105 @@ Task 05: ATS workflow end-to-end — three demo paths reliable, full audit trail
 
 ### What's next
 Task 06: CLI polish (`atom agent scaffold`, `atom workflow init`)
+
+---
+
+## Session 05b — Part F: Rebrand sweep (mphasis → atom)
+**Date**: 2026-05-10
+**Status**: COMPLETE ✅
+
+### What was done
+- **docker-compose.yml**: Added `name: atom` (sets compose project name); added `image: atom-runtime-sandbox` to runtime-sandbox service; updated header comment.
+- **container.py**: `DOCKER_NETWORK` → `atom_agentnet`; `FROM atom-runtime-sandbox` in dynamic Dockerfile.
+- **identity.py**, **registry_db.py**, **codegen.py**: `user:demo@mphasis.com` → `user:demo@atom.demo`; `apiVersion` → `atom.platform/v1`.
+- **litellm_client.py**: default key → `sk-atom-demo-master-2024`.
+- **agentscope_skills/__init__.py**: tracing tag → `"atom"`.
+- **mocks/task_queue/app.py**, **frontend/src/api/workflow.ts**, **scripts/run-path.sh**: `user:demo@mphasis.com` → `user:demo@atom.demo`.
+- **frontend** (Builder.tsx, Composer.tsx, ComposerLanding.tsx): `apiVersion` → `atom.platform/v1`; drag-drop MIME type → `application/atom-nodetype`.
+- **frontend/package.json + package-lock.json**: `name` → `atom-ui`.
+- **Grafana dashboard**: Loki `compose_project` label → `atom`.
+- **cli/mphasis.py** → **cli/atom.py**; `setup.py` `py_modules` + `console_scripts` → `atom`.
+- **specs/agents/*.yaml**, **specs/workflows/*.yaml**: `apiVersion`, `owner` fields updated.
+- **`MphasisWorkflowRunner`** → **`AtomWorkflowRunner`** in temporal/worker.py, workflow-backend/app/worker/runner.py, workflow-backend/app/routes/runs.py, workflow-backend/app/main.py.
+- **codegen.py LLM prompts**: "Mphasis Platform" → "Atom Platform".
+- **CLAUDE.md**: CLI name → `atom`; UI branding → "Atom Workflow Composer".
+- **docs/**: architecture.md, identity-and-audit.md, workflow-spec-format.md, task docs updated.
+- **temporal/worker.py**, **skills/composer/SKILL.md**: "Mphasis Workflow" → "Atom Workflow".
+
+### DoD checklist (Part F)
+- [x] `grep -ri "mphasis" .` returns only: (1) company-name references in 07-rehearsal.md Q&A, (2) 05b task file (documents the rebrand itself), (3) .claude/settings (tool allowlist paths)
+- [x] `cli/atom.py` exists; `cli/mphasis.py` removed; `setup.py` console_scripts → `atom=atom:cli`
+- [x] `docker-compose.yml` has `name: atom`; runtime-sandbox has `image: atom-runtime-sandbox`
+- [x] All agent actor domains → `@atom.demo`; `apiVersion: atom.platform/v1` in all specs
+- [x] `AtomWorkflowRunner` used consistently across temporal + workflow-backend
+- [ ] `docker compose down --remove-orphans && docker compose up` — run before next session to verify renamed containers start cleanly
+
+## Session 05b — Part A: Auth model (role-button login + X-Atom-Actor)
+**Date**: 2026-05-10
+**Status**: COMPLETE ✅
+
+### What was done
+**Backend (builder-backend):**
+- `app/routes/auth.py` (new): `/auth/login`, `/auth/logout`, `/auth/me`. Three hardcoded roles: builder, approver, platform_admin.
+- `app/main.py`: registered `auth.router`.
+- `app/routes/agents.py`: `deploy_agent` and `compile_agent` accept `Request`; read `X-Atom-Actor`; used as `actor` in audit, registry owner, identity metadata.
+- `app/core/identity.py`: `issue_identity` accepts `owner` parameter.
+
+**Frontend:**
+- `src/context/AuthContext.tsx` (new): `AuthProvider`, `useAuth`, `getActorHeader()`. State in `localStorage` as `atom_auth`.
+- `src/pages/auth/Login.tsx` (new): Three role-card buttons with V1 disclaimer.
+- `src/App.tsx`: `/login` route; `AuthGuard` redirects unauthenticated requests to `/login`.
+- `src/components/Layout.tsx`: Role-badge chip (Builder=gray, Approver=blue, Admin=purple); logout menu.
+- `src/api/builder.ts` + `src/api/workflow.ts`: Every call adds `X-Atom-Actor` header via `getActorHeader()`.
+
+**Docs:**
+- `docs/identity-and-audit.md`: `## V1 Security Boundary` section with explicit rehearsal Q&A guidance.
+
+### DoD checklist (Part A)
+- [x] /auth/login, /auth/me, /auth/logout implemented
+- [x] Login page with three role cards
+- [x] Top bar role badge (color-coded) + logout
+- [x] Auth guard redirects unauthenticated to /login
+- [x] Every API call sends X-Atom-Actor header
+- [x] deploy_agent reads X-Atom-Actor for owner/audit
+- [x] V1 Security Boundary documented in identity-and-audit.md
+- [x] TypeScript type-check passes
+- [ ] Live smoke-test: login as Builder, deploy agent, verify audit shows user:builder@atom.demo
+
+## Session 05b — Part B: Deployment versioning
+**Date**: 2026-05-10
+**Status**: COMPLETE ✅
+
+### What was done
+**Storage layer:**
+- `builder-backend/app/core/deployments_store.py` (new): MinIO `atom-deployments` bucket CRUD (`create_record`, `get_record`, `update_record`, `list_records`) + `emit_deployment_audit` → `audit-logs/deployment/` (object-locked bucket).
+- `workflow-backend/app/core/deployments_store.py` (new): identical copy (separate service, no cross-import).
+- `docker-compose.yml`: `atom-deployments` bucket added to minio-init; `WORKFLOW_BACKEND_URL=http://workflow-backend:8081` added to builder-backend env.
+
+**builder-backend:**
+- `app/routes/agents.py`: Factored deploy logic into `_do_deploy_agent(name, actor)`. Added `POST /agents/{name}/deploy-request`, `POST /agents/{name}/deploy-direct`, `GET /agents/{name}/deployments`, `_bg_deploy_agent` background task.
+- `app/routes/deployments.py` (new): `GET /deployments`, `GET /deployments/{id}`, `POST /deployments/{id}/approve` (triggers `_bg_deploy_agent` or `_bg_deploy_workflow` in background via BackgroundTasks), `POST /deployments/{id}/reject`, `POST /deployments/{id}/request-changes`.
+- `app/main.py`: registered `deployments.router`.
+
+**workflow-backend:**
+- `app/routes/workflows.py`: Factored register logic into `_do_register(name, yaml_text, actor)`. `register_workflow` route now calls it.
+- `app/routes/deployments.py` (new): `POST /workflows/{name}/deploy-request`, `POST /workflows/{name}/deploy-direct` (calls `_do_register` synchronously), `GET /workflows/{name}/deployments`.
+- `app/main.py`: registered `wf_deployments.router`.
+
+### Key design decisions
+- **Approval is async** (FastAPI BackgroundTasks) — approve endpoint returns immediately; container build happens in background. Deployment record transitions: pending → deploying → deployed/failed.
+- **builder-backend is source of truth** for all deployment records. Workflow approval calls `_bg_deploy_workflow` which POSTs to `http://workflow-backend:8081/workflows/{name}/register`.
+- **Bypass deploys** (deploy-direct) create a record with `approval_status: "bypassed"`, emit `deployment_bypassed` audit event, then deploy immediately (agent: background, workflow: synchronous).
+- **`atom-deployments` bucket**: no object lock (records mutate on state transitions). Audit events in `audit-logs/deployment/` ARE object-locked.
+
+### DoD checklist (Part B)
+- [x] `deployments_store.py` syntax-clean in both backends
+- [x] All new route files syntax-clean (7/7 files pass `ast.parse`)
+- [x] `POST /agents/{name}/deploy-request` → creates pending record
+- [x] `POST /deployments/{id}/approve` → triggers background deploy
+- [x] `POST /deployments/{id}/reject` → marks rejected + emits audit
+- [x] `POST /deployments/{id}/request-changes` → marks changes_requested
+- [x] `POST /agents/{name}/deploy-direct` → bypassed record + immediate deploy
+- [x] `GET /deployments` with filters; `GET /deployments/{id}`; `GET /agents/{name}/deployments`
+- [x] `POST /workflows/{name}/deploy-request`, `GET /workflows/{name}/deployments`
+- [ ] Live smoke-test after docker compose up: submit request → approve → verify record transitions pending→deploying→deployed

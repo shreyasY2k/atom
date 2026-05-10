@@ -2,7 +2,7 @@
 Docker lifecycle for deployed agent containers.
 
 Each agent runs as a container named agent-{name}-{version-slug}
-on the mphasis-agent-platform_agentnet network.
+on the atom_agentnet network.
 Build context is created in /work/agents/{name}-{version}/
 
 Deployment is managed through LocalDeployManager, a thin facade over docker-py
@@ -22,7 +22,7 @@ from docker.errors import DockerException, NotFound
 
 WORK_DIR = Path(os.environ.get("WORK_DIR", "/work"))
 AGENT_PORT = 8100
-DOCKER_NETWORK = "mphasis-agent-platform_agentnet"
+DOCKER_NETWORK = "atom_agentnet"
 STUDIO_URL = os.environ.get("STUDIO_URL", "http://studio:3000")
 
 
@@ -41,7 +41,7 @@ def _build_dir(name: str, version: str) -> Path:
 
 def _agent_dockerfile(name: str, version: str) -> str:
     return textwrap.dedent(f"""
-        FROM mphasis-agent-platform-runtime-sandbox
+        FROM atom-runtime-sandbox
         WORKDIR /app
         COPY requirements-agent.txt requirements.txt
         RUN pip install --no-cache-dir -r requirements.txt

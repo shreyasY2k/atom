@@ -1,5 +1,5 @@
 """
-MphasisWorkflowRunner — generic Temporal workflow that interprets a
+AtomWorkflowRunner — generic Temporal workflow that interprets a
 workflow-spec dict as a node graph and executes it activity by activity.
 
 Supports:
@@ -110,7 +110,7 @@ def _eval_condition(expr: str, ctx: dict) -> bool:
 # ── Workflow ──────────────────────────────────────────────────────────────────
 
 @workflow.defn(sandboxed=False)
-class MphasisWorkflowRunner:
+class AtomWorkflowRunner:
     """Generic interpreter for workflow-spec node graphs."""
 
     @workflow.run

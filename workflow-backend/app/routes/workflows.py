@@ -42,16 +42,14 @@ def _load_spec(name: str, yaml_text: str | None) -> tuple[WorkflowSpec, dict]:
     return spec, spec_dict
 
 
-@router.post("/{name}/register")
-def register_workflow(name: str, req: RegisterRequest = RegisterRequest()):
-    spec, spec_dict = _load_spec(name, req.yaml_text)
+def _do_register(name: str, yaml_text: str | None = None, actor: str = "system") -> dict:
+    """Core register logic — callable without an HTTP request."""
+    spec, spec_dict = _load_spec(name, yaml_text)
 
-    # Full structural validation
     errors = validate(spec, check_agents=False)
     if errors:
         raise HTTPException(400, {"valid": False, "errors": errors})
 
-    # Soft agent-existence check (warn only, don't block)
     agent_errors = validate(spec, check_agents=True)
     agent_warnings = [e for e in agent_errors if "not found" in e["reason"]
                       or "not deployed" in e["reason"]]
@@ -77,6 +75,11 @@ def register_workflow(name: str, req: RegisterRequest = RegisterRequest()):
         "spec_hash": spec_hash,
         "warnings": agent_warnings or [],
     }
+
+
+@router.post("/{name}/register")
+def register_workflow(name: str, req: RegisterRequest = RegisterRequest()):
+    return _do_register(name, req.yaml_text)
 
 
 @router.get("")

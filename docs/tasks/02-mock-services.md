@@ -60,7 +60,7 @@ All nine mock services are running, healthy, and serve seeded data that supports
    # Resolve it
    curl -s -X POST http://localhost:8098/tasks/$TASK_ID/resolve \
      -H "Content-Type: application/json" \
-     -d '{"resolution": "accept", "resolved_by": "user:demo@mphasis.com"}' | jq
+     -d '{"resolution": "accept", "resolved_by": "user:demo@atom.demo"}' | jq
 
    # Confirm resolved
    curl -s "http://localhost:8098/tasks/$TASK_ID" | jq '.status'  # "RESOLVED"

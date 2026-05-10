@@ -1,4 +1,4 @@
-apiVersion: mphasis.platform/v1
+apiVersion: atom.platform/v1
 kind: AgentDeployment
 metadata:
   name: medical-claim-classifier
@@ -6,7 +6,7 @@ metadata:
   version: 1.0.0
   description: Medical claim document classifier for PDF pages to categorize bills,
     lab reports, and summaries.
-  owner: user:demo@mphasis.com
+  owner: user:demo@atom.demo
 spec:
   agents:
   - name: document-classifier

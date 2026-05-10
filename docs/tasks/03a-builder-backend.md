@@ -33,7 +33,7 @@ When `/agents/{name}/deploy` is called:
        "actor_type": "agent",
        "agent_name": "kyc-refresh",
        "version": "1.0.0",
-       "owner": "user:demo@mphasis.com",
+       "owner": "user:demo@atom.demo",
        "tool_allowlist": ["get_customer_profile", "get_kyc_documents", "get_external_screening"]
      }
    }

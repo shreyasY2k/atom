@@ -60,7 +60,7 @@ export default function ComposerLanding() {
     mutationFn: async () => {
       const name = `workflow-${Date.now()}`
       const stub = [
-        'apiVersion: mphasis.platform/v1',
+        'apiVersion: atom.platform/v1',
         'kind: WorkflowDeployment',
         'metadata:',
         `  name: ${name}`,

@@ -1,24 +1,42 @@
 import React, { useContext, useState } from 'react'
-import { Outlet } from 'react-router-dom'
+import { Outlet, useNavigate } from 'react-router-dom'
 import {
-  AppBar, Box, Drawer, IconButton, Toolbar, Tooltip, Typography, useTheme,
+  AppBar, Box, Chip, Drawer, IconButton, Menu, MenuItem,
+  Toolbar, Tooltip, Typography, useTheme,
 } from '@mui/material'
 import MenuIcon from '@mui/icons-material/Menu'
 import MenuOpenIcon from '@mui/icons-material/MenuOpen'
 import Brightness4Icon from '@mui/icons-material/Brightness4'
 import Brightness7Icon from '@mui/icons-material/Brightness7'
+import AccountCircleIcon from '@mui/icons-material/AccountCircle'
 import { ColorModeContext } from '../App'
+import { useAuth } from '../context/AuthContext'
 import Sidebar from './Sidebar'
 
 const APPBAR_H     = 64
 const DRAWER_FULL  = 220
 const DRAWER_MINI  = 52
 
+const ROLE_COLORS: Record<string, 'default' | 'info' | 'secondary'> = {
+  builder:        'default',
+  approver:       'info',
+  platform_admin: 'secondary',
+}
+
 export default function Layout() {
   const theme = useTheme()
   const colorMode = useContext(ColorModeContext)
+  const { displayName, role, identity, logout } = useAuth()
+  const navigate = useNavigate()
   const [collapsed, setCollapsed] = useState(false)
+  const [anchorEl, setAnchorEl] = useState<null | HTMLElement>(null)
   const drawerW = collapsed ? DRAWER_MINI : DRAWER_FULL
+
+  const handleLogout = async () => {
+    setAnchorEl(null)
+    await logout()
+    navigate('/login', { replace: true })
+  }
 
   return (
     <Box sx={{ display: 'flex', height: '100vh', overflow: 'hidden' }}>
@@ -35,7 +53,6 @@ export default function Layout() {
         }}
       >
         <Toolbar sx={{ height: APPBAR_H, minHeight: `${APPBAR_H}px !important` }}>
-          {/* Collapse/expand toggle */}
           <Tooltip title={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}>
             <IconButton
               edge="start"
@@ -53,9 +70,43 @@ export default function Layout() {
 
           <Box sx={{ flexGrow: 1 }} />
 
-          <IconButton color="inherit" onClick={colorMode.toggle} title="Toggle light/dark">
+          <IconButton color="inherit" onClick={colorMode.toggle} title="Toggle light/dark" sx={{ mr: 1 }}>
             {theme.palette.mode === 'dark' ? <Brightness7Icon /> : <Brightness4Icon />}
           </IconButton>
+
+          {/* User badge */}
+          {role && (
+            <>
+              <Chip
+                size="small"
+                label={displayName}
+                color={ROLE_COLORS[role] ?? 'default'}
+                variant="outlined"
+                sx={{ mr: 1, fontWeight: 600, fontSize: '0.75rem' }}
+              />
+              <Tooltip title={identity}>
+                <IconButton
+                  size="small"
+                  color="inherit"
+                  onClick={e => setAnchorEl(e.currentTarget)}
+                >
+                  <AccountCircleIcon />
+                </IconButton>
+              </Tooltip>
+              <Menu
+                anchorEl={anchorEl}
+                open={Boolean(anchorEl)}
+                onClose={() => setAnchorEl(null)}
+                transformOrigin={{ horizontal: 'right', vertical: 'top' }}
+                anchorOrigin={{ horizontal: 'right', vertical: 'bottom' }}
+              >
+                <MenuItem disabled sx={{ fontSize: '0.8rem', opacity: 0.7 }}>
+                  {identity}
+                </MenuItem>
+                <MenuItem onClick={handleLogout}>Log out</MenuItem>
+              </Menu>
+            </>
+          )}
         </Toolbar>
       </AppBar>
 

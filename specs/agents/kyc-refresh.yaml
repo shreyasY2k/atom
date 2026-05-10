@@ -1,4 +1,4 @@
-apiVersion: mphasis.platform/v1
+apiVersion: atom.platform/v1
 kind: AgentDeployment
 
 metadata:
@@ -9,7 +9,7 @@ metadata:
     Refresh customer KYC: pull current profile, identify what's stale,
     flag any items needing human attention, return a refreshed profile
     with a confidence score.
-  owner: mphasis-bfsi-platform-team
+  owner: atom-bfsi-platform-team
 
 spec:
   agents:

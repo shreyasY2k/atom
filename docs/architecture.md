@@ -36,7 +36,7 @@ Every deployed agent runs as a containerised FastAPI service managed by
 docker-py underneath; Phase 2 replaces the internals with
 `KubernetesDeployManager` / `KruiseDeployManager` with no interface change.
 
-The container is built from `mphasis-agent-platform-runtime-sandbox` (AgentScope
+The container is built from `atom-runtime-sandbox` (AgentScope
 built from source) and runs `uvicorn agent:app --host 0.0.0.0 --port 8100`.
 
 The deployment env injects:
@@ -146,7 +146,7 @@ Every actor in an audit log entry is one of three types:
 | `actor_type` | `actor_id` example | Issued by | Visible in |
 |---|---|---|---|
 | `agent` | `svc-acct-kyc-refresh-001` | builder-backend at deploy | LiteLLM virtual keys |
-| `human` | `user:demo@mphasis.com` | hardcoded in demo | login session |
+| `human` | `user:demo@atom.demo` | hardcoded in demo | login session |
 | `system` | `system:workflow-engine` | platform | static |
 
 When the Builder deploys an agent, it:

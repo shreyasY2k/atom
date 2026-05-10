@@ -17,7 +17,7 @@ def _init():
                 version            TEXT NOT NULL,
                 service_account_id TEXT NOT NULL,
                 virtual_key        TEXT NOT NULL,
-                owner              TEXT NOT NULL DEFAULT 'user:demo@mphasis.com',
+                owner              TEXT NOT NULL DEFAULT 'user:demo@atom.demo',
                 deployed_at        TEXT NOT NULL,
                 endpoint           TEXT,
                 container_id       TEXT,

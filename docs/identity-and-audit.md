@@ -12,7 +12,7 @@ This is the load-bearing document for the security/audit talk track. Every claim
 ┌──────────┬───────────────────────────────┬──────────────────────────────┐
 │ type     │ examples                      │ how identity is established   │
 ├──────────┼───────────────────────────────┼──────────────────────────────┤
-│ human    │ user:demo@mphasis.com         │ login session                │
+│ human    │ user:demo@atom.demo         │ login session                │
 │          │ user:ops-rachel@bigbank.com   │ (in production: Okta/AAD)    │
 ├──────────┼───────────────────────────────┼──────────────────────────────┤
 │ agent    │ svc-acct-kyc-refresh-001      │ issued by builder-backend at │
@@ -46,9 +46,9 @@ When `POST /agents/{name}/deploy` is called:
      "agent_name": "kyc-refresh",
      "version": "1.0.0",
      "service_account_id": "svc-acct-kyc-refresh-a3f9b2c1",
-     "owner": "user:demo@mphasis.com",
+     "owner": "user:demo@atom.demo",
      "deployed_at": "2026-05-08T...",
-     "deployed_by": "user:demo@mphasis.com",
+     "deployed_by": "user:demo@atom.demo",
      "endpoint": "http://agent-kyc-refresh-1-0-0:8100",
      "spec_hash": "...",
      "code_hash": "...",
@@ -67,7 +67,7 @@ This distinction matters in the talk track:
 - "Who made this LLM call?" → service-account ID (the agent itself)
 - "Who approved the agent's output?" → human user from the workflow's human_task resolution
 
-In Phase 2 (real bank deployment), the owner field maps to the bank's IAM identity and an approval workflow gates the deploy action. In V1 demo, the owner is the hardcoded demo user.
+In V1 (Task 05b+), the owner is the `X-Atom-Actor` header value sent by the frontend for the logged-in role (e.g. `user:builder@atom.demo`). In Phase 2, this maps to the bank's IAM identity, and an approval workflow gates the deploy action.
 
 ## Workflow execution identity
 
@@ -114,9 +114,32 @@ If the audience pushes harder ("we're under SR 11-7 model risk management"):
 - Output is testable against golden cases (Phase 2 deliverable)
 - Drift detection: compare current behavior against golden cases on a schedule
 
+## V1 Security Boundary — read before rehearsal Q&A
+
+> **This section must be understood by everyone who runs the demo.**
+
+The V1 auth model is deliberately minimal:
+
+1. **Role-button login** — clicking Builder / Approver / Platform Admin sets a session cookie and populates `X-Atom-Actor` header in all API calls. There is no password, no JWT, no signature.
+
+2. **Backends trust `X-Atom-Actor` unconditionally.** The header is read and recorded as the audit `actor_id`. No signature verification. No gateway enforcement. Anyone who can reach the API with a crafted header can claim any identity.
+
+3. **This is intentional for the demo.** The platform runs on a single host with no public access. The threat model for a conference demo is not the same as production. The attack surface is zero because there is no real network perimeter to attack.
+
+4. **In production, Phase 2 adds:** API gateway enforcement (the gateway validates the IDP token before forwarding; `X-Atom-Actor` is set by the gateway, not the client), IDP integration (Okta / Azure AD; the role-button login is replaced with real SSO), and audit log correlation with IDP session IDs.
+
+**What to say in rehearsal Q&A if someone asks "is this secure?":**
+> "V1 is a governance demo, not a production deployment. The role-button login shows the UX pattern — Builder submits, Approver reviews, deploy proceeds with both identities recorded. In production, those roles map to your IDP groups and the header is set by the gateway after validating your session token. The audit trail shape is identical; the enforcement layer is added in Phase 2."
+
+**What NOT to say:**
+- "Yes, the audit is secured" (without clarifying V1 vs production)
+- "The header is validated" (it is not, in V1)
+
+---
+
 ## What this is NOT
 
-- **Not an identity provider.** We do not authenticate humans. In V1, demo user is hardcoded; in Phase 2, integrate with the bank's IDP.
+- **Not an identity provider.** We do not authenticate humans. In V1, role-button login sets a session cookie; in Phase 2, integrate with the bank's IDP.
 - **Not a key vault.** LiteLLM virtual keys are stored in LiteLLM's Postgres. In Phase 2, integrate with HashiCorp Vault or AWS Secrets Manager.
 - **Not a SIEM.** Audit logs are stored; analyzing them at scale is downstream tooling. We can stream to Splunk/Elastic in Phase 2.
 

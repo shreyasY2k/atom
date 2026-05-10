@@ -1,11 +1,11 @@
-apiVersion: mphasis.platform/v1
+apiVersion: atom.platform/v1
 kind: AgentDeployment
 metadata:
   name: kyc-extraction-agent
   domain: banking-kyc
   version: 1.0.0
   description: Agent that extracts customer name information from KYC images and documents.
-  owner: user:demo@mphasis.com
+  owner: user:demo@atom.demo
 spec:
   agents:
   - name: kyc-extractor

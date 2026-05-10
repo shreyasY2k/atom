@@ -57,7 +57,7 @@ workflow-backend/
     │   └── codegen.py           # NL → workflow-spec (Mode C, optional)
     └── worker/
         ├── __init__.py
-        ├── runner.py            # MphasisWorkflowRunner (the one in temporal/worker.py — moved here and finished)
+        ├── runner.py            # AtomWorkflowRunner (the one in temporal/worker.py — moved here and finished)
         ├── activities.py        # invoke_agent / http_call / decision / human_task
         └── audit_helpers.py     # structured event emission from inside activities
 ```
@@ -71,7 +71,7 @@ When `POST /workflows/ats-asset-transfer/runs` is called with payload:
 1. Validate input against `workflow-spec.input_schema`
 2. Generate `run_id = f"run-{uuid4()}"`
 3. Look up agent endpoints for every `agent` node by querying builder-backend `/agents/{name}` — pass the resulting `agent_endpoints` dict to the worker
-4. Start a Temporal workflow execution: `MphasisWorkflowRunner` with args `{spec, input, agent_endpoints, task_queue_url}`
+4. Start a Temporal workflow execution: `AtomWorkflowRunner` with args `{spec, input, agent_endpoints, task_queue_url}`
 5. Emit run-start audit event
 6. Return `run_id` immediately (don't block on completion)
 

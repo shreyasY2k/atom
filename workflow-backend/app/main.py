@@ -7,14 +7,14 @@ import os
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.routes import audit, runs, specs, tasks, workflows
+from app.routes import audit, runs, specs, tasks, workflows, deployments as wf_deployments
 from app.worker.activities import (
     decision_activity,
     http_call_activity,
     human_task_activity,
     invoke_agent_activity,
 )
-from app.worker.runner import MphasisWorkflowRunner
+from app.worker.runner import AtomWorkflowRunner
 from app.core.observability import setup
 
 logger = logging.getLogger(__name__)
@@ -37,6 +37,7 @@ app.include_router(workflows.router)
 app.include_router(runs.router)
 app.include_router(audit.router)
 app.include_router(tasks.router)
+app.include_router(wf_deployments.router)
 
 
 @app.get("/health")
@@ -69,7 +70,7 @@ async def _run_worker():
             worker = Worker(
                 client,
                 task_queue=tq,
-                workflows=[MphasisWorkflowRunner],
+                workflows=[AtomWorkflowRunner],
                 activities=[
                     invoke_agent_activity,
                     http_call_activity,

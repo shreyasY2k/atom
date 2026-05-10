@@ -35,7 +35,7 @@ def web_search(query: str, max_results: int = 3) -> str:
                 "format": "json",
                 "no_html": 1,
                 "skip_disambig": 1,
-                "t": "mphasis-agent-platform",
+                "t": "atom",
             },
             timeout=10,
             follow_redirects=True,
