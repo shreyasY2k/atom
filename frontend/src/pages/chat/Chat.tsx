@@ -547,53 +547,22 @@ export default function Chat() {
   useEffect(() => {
     const p = searchParams.get('agent')
     const found = p ? deployed.find(a => a.name===p) : null
-    if (found) setSelectedAgent(found)
-    else if (!selectedAgent && deployed.length>0) setSelectedAgent(deployed[0])
-  }, [deployed, searchParams, selectedAgent])
+    if (found && found.name !== selectedAgent?.name) setSelectedAgent(found)
+    else if (!selectedAgent && deployed.length > 0) setSelectedAgent(deployed[0])
+  }, [deployed, searchParams]) // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Avatar seeds per agent
-  const [seeds, setSeeds] = useState<Record<string,[number,number]>>({})
-  const getSeeds = (name: string): [number,number] => seeds[name] ?? [
+  // Avatar seed — deterministic per agent name
+  const getSeeds = (name: string): [number,number] => [
     Math.abs(name.split('').reduce((s,c)=>s+c.charCodeAt(0),0)) % COLORS.length,
     Math.abs(name.split('').reduce((s,c)=>s*31+c.charCodeAt(0),7)) % EMOJIS.length,
   ]
-
   const saId = selectedAgent?.service_account_id ?? ''
-  const agentRoleName = (selectedAgent as AgentRecord & { agent_role_name?: string } | null)?.agent_role_name ?? ''
   const [ci, ei] = selectedAgent ? getSeeds(selectedAgent.name) : [0,0]
 
-  // Studio runs (Socket.io, filtered by SA ID)
-  const { data: runsData, refetch: refetchRuns } = useQuery({
-    queryKey: ['studio-runs', saId],
-    queryFn: () => studioGet<{ runs: StudioRun[] }>(`/runs?project=${encodeURIComponent(saId)}`),
-    enabled: !!saId,
-    refetchInterval: 15000,
-  })
-  const runs = runsData?.runs ?? []
-
-  // OTEL traces (filtered by agent role name)
-  const { data: tracesData, refetch: refetchTraces } = useQuery({
-    queryKey: ['studio-traces-all', saId],
-    queryFn: () => studioGet<{ data: { list: StudioTrace[] } }>(`/trpc/getTraces?input=${encodeURIComponent(JSON.stringify({ pagination:{page:1,pageSize:100} }))}`),
-    enabled: !!saId,
-    refetchInterval: 15000,
-  })
-  const filteredTraces = (tracesData?.data?.list ?? []).filter(t =>
-    agentRoleName ? t.traceName.toLowerCase().includes(agentRoleName.toLowerCase()) : false
-  )
-
-  const runIds = new Set(runs.map(r => r.id))
-  const historyItems: { id: string; name: string; status: string; time: string; totalTokens?: number }[] = [
-    ...runs.map(r => ({ id:r.id, name:r.name, status:r.status, time:r.timestamp })),
-    ...filteredTraces.filter(t => !runIds.has(t.traceId)).map(t => ({
-      id:t.traceId, name:t.traceName, status:t.status===1?'finished':'running', time:t.startTime, totalTokens:t.totalTokens
-    })),
-  ]
-
-  // Selected run (for data view + history conversation)
+  // Selected run for DataView panel (set when user clicks "View trace")
   const [selectedRunId, setSelectedRunId] = useState<string|null>(null)
 
-  // Local conversation — current session messages (user+agent pairs)
+  // Live conversation messages
   const [messages, setMessages] = useState<LocalMessage[]>([])
   const [input, setInput] = useState('')
   const [loading, setLoading] = useState(false)
@@ -608,7 +577,7 @@ export default function Chat() {
   // Clear conversation when switching agents
   useEffect(() => { setMessages([]); setSelectedRunId(null) }, [selectedAgent?.name])
 
-  // Auto-scroll
+  // Auto-scroll on new message
   useEffect(() => { bottomRef.current?.scrollIntoView({ behavior:'smooth' }) }, [messages, loading])
 
   const send = async () => {
@@ -617,7 +586,8 @@ export default function Chat() {
     const userMsgId = `u${Date.now()}`
     const agentMsgId = `a${Date.now()+1}`
 
-    setMessages(prev => [...prev,
+    setMessages(prev => [
+      ...prev,
       { id:userMsgId, role:'user', text: text || `[${attachment?.name}]` },
       { id:agentMsgId, role:'agent', text:'', loading:true },
     ])
@@ -630,16 +600,12 @@ export default function Chat() {
         text, ...(attachment?.name ? { file_name:attachment.name } : {})
       })
       const raw = result as Record<string,unknown>
-      setMessages(prev => prev.map(m => m.id===agentMsgId
-        ? { ...m, text:formatResponse(raw), loading:false, runId:run_id }
-        : m
+      setMessages(prev => prev.map(m =>
+        m.id === agentMsgId ? { ...m, text:formatResponse(raw), loading:false, runId:run_id } : m
       ))
-      // Refresh run lists to pick up the new entry
-      setTimeout(() => { refetchRuns(); refetchTraces() }, 3000)
     } catch (e) {
-      setMessages(prev => prev.map(m => m.id===agentMsgId
-        ? { ...m, text:`Error: ${String(e)}`, loading:false, error:true }
-        : m
+      setMessages(prev => prev.map(m =>
+        m.id === agentMsgId ? { ...m, text:`Error: ${String(e)}`, loading:false, error:true } : m
       ))
     } finally {
       setLoading(false)
@@ -650,35 +616,23 @@ export default function Chat() {
     if (e.key==='Enter' && !e.shiftKey) { e.preventDefault(); send() }
   }
 
-  const fmtAge = (ts: string) => {
-    try {
-      const ms = ts.includes('T')
-        ? Date.now()-new Date(ts).getTime()
-        : Date.now()-Number(BigInt(ts)/BigInt(1_000_000))
-      const m = Math.floor(ms/60000)
-      return m<60 ? `${m}m ago` : `${Math.floor(m/60)}h ago`
-    } catch { return '' }
-  }
-
-  // Whether to show the history view or live session
-  const showHistory = selectedRunId !== null && messages.length === 0
-
   return (
     <Box sx={{ display:'flex', height:'100%', overflow:'hidden' }}>
 
-      {/* ── Col 1: Run list + agent dropdown (260px) ── */}
-      <Box sx={{ width:260, flexShrink:0, borderRight:1, borderColor:'divider', display:'flex', flexDirection:'column', bgcolor:'background.paper' }}>
-        {/* Agent dropdown */}
-        <Box sx={{ px:1.5, pt:1.25, pb:1, borderBottom:1, borderColor:'divider' }}>
-          <FormControl size="small" fullWidth>
-            <InputLabel sx={{ fontSize:'0.78rem' }}>Agent</InputLabel>
+      {/* ── Main chat area ── */}
+      <Box sx={{ flex:1, display:'flex', flexDirection:'column', minWidth:0 }}>
+
+        {/* Agent header bar */}
+        <Box sx={{ px:3, py:1, borderBottom:1, borderColor:'divider', bgcolor:'background.paper', display:'flex', alignItems:'center', gap:1.5 }}>
+          <FormControl size="small" sx={{ minWidth:200 }}>
             <Select
-              label="Agent"
               value={selectedAgent?.name ?? ''}
-              onChange={e => { const a = deployed.find(x => x.name === e.target.value); if (a) setSelectedAgent(a) }}
+              onChange={e => { const a = deployed.find(x => x.name===e.target.value); if (a) setSelectedAgent(a) }}
+              displayEmpty
               sx={{ fontSize:'0.8rem' }}
               renderValue={v => {
-                const a = deployed.find(x => x.name === v)
+                if (!v) return <Typography variant="caption" color="text.secondary">Select agent…</Typography>
+                const a = deployed.find(x => x.name===v)
                 const [c,e_] = a ? getSeeds(a.name) : [0,0]
                 return (
                   <Box sx={{ display:'flex', alignItems:'center', gap:0.75 }}>
@@ -692,79 +646,46 @@ export default function Chat() {
                 const [c,e_] = getSeeds(a.name)
                 return (
                   <MenuItem key={a.name} value={a.name} sx={{ gap:1 }}>
-                    <AgentAvatar name={a.name} c={c} e={e_} size={20} />
-                    <Box sx={{ minWidth:0 }}>
-                      <Typography variant="body2" fontWeight={600} noWrap>{a.name}</Typography>
-                      <Typography variant="caption" fontFamily="monospace" color="text.secondary" sx={{ fontSize:'0.6rem' }}>{a.service_account_id?.slice(-10)}</Typography>
-                    </Box>
+                    <AgentAvatar name={a.name} c={c} e={e_} size={18} />
+                    <Typography variant="body2" fontWeight={600} noWrap>{a.name}</Typography>
                   </MenuItem>
                 )
               })}
             </Select>
           </FormControl>
-          {selectedAgent && (
-            <Box sx={{ display:'flex', alignItems:'center', gap:0.5, mt:0.75 }}>
-              <Tooltip title="Randomize avatar">
-                <IconButton size="small" onClick={() => setSeeds(p => ({...p, [selectedAgent.name]:[Math.floor(Math.random()*8),Math.floor(Math.random()*8)]}))}>
-                  <CasinoIcon sx={{ fontSize:13 }} />
-                </IconButton>
-              </Tooltip>
-              <Tooltip title="Open in Studio">
-                <IconButton size="small" component="a" href={`${STUDIO}/projects/${saId}`} target="_blank">
-                  <OpenInNewIcon sx={{ fontSize:13 }} />
-                </IconButton>
-              </Tooltip>
-              <Typography variant="caption" fontFamily="monospace" color="text.secondary" sx={{ fontSize:'0.6rem', ml:'auto', overflow:'hidden', textOverflow:'ellipsis' }}>
-                {saId.slice(-14)}
-              </Typography>
-            </Box>
+          {saId && (
+            <Chip label={saId.slice(-16)} size="small"
+              sx={{ fontFamily:'monospace', fontSize:'0.6rem', bgcolor:'rgba(74,20,140,0.08)', color:'#7b1fa2' }} />
+          )}
+          {saId && (
+            <Tooltip title="Open in Studio">
+              <IconButton size="small" component="a" href={`${STUDIO}/projects/${saId}`} target="_blank" sx={{ ml:'auto' }}>
+                <OpenInNewIcon sx={{ fontSize:14 }} />
+              </IconButton>
+            </Tooltip>
+          )}
+          {messages.length > 0 && (
+            <Tooltip title="Clear conversation">
+              <IconButton size="small" onClick={() => { setMessages([]); setSelectedRunId(null) }} sx={{ color:'text.secondary' }}>
+                <CasinoIcon sx={{ fontSize:14 }} />
+              </IconButton>
+            </Tooltip>
           )}
         </Box>
-        <Box sx={{ flex:1, overflowY:'auto' }}>
-          {!selectedAgent && <Box sx={{ p:1.5 }}><Typography variant="caption" color="text.secondary">Select an agent</Typography></Box>}
-          {selectedAgent && historyItems.length===0 && (
-            <Box sx={{ p:1.5 }}><Typography variant="caption" color="text.secondary">No runs yet. Send a message to start.</Typography></Box>
-          )}
-          {historyItems.map(item => {
-            const sel = selectedRunId===item.id
-            return (
-              <Box key={item.id} component="button"
-                onClick={() => { setSelectedRunId(sel ? null : item.id); if (!sel) setMessages([]) }}
-                sx={{ display:'flex', flexDirection:'column', width:'100%', textAlign:'left', px:1.5, py:0.875, background:'none', border:'none', cursor:'pointer', borderBottom:1, borderColor:'divider', bgcolor:sel?'primary.main':'transparent', color:sel?'primary.contrastText':'text.primary', '&:hover':{ bgcolor:sel?'primary.main':'action.hover' } }}>
-                <Box sx={{ display:'flex', alignItems:'center', gap:0.75 }}>
-                  <Box sx={{ width:6, height:6, borderRadius:'50%', bgcolor:item.status==='finished'?'#3B6D11':'#534AB7', flexShrink:0 }} />
-                  <Typography variant="caption" fontFamily="monospace" fontWeight={500}
-                    sx={{ flex:1, minWidth:0, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap', fontSize:'0.7rem' }}>
-                    {item.name}
-                  </Typography>
-                </Box>
-                <Box sx={{ display:'flex', gap:1, mt:0.2, ml:1.5 }}>
-                  <Typography variant="caption" color={sel?'primary.contrastText':'text.secondary'} sx={{ fontSize:'0.62rem', opacity:0.85 }}>{fmtAge(item.time)}</Typography>
-                  {item.totalTokens != null && (
-                    <Typography variant="caption" color={sel?'primary.contrastText':'text.secondary'} sx={{ fontSize:'0.62rem', opacity:0.85 }}>{item.totalTokens.toLocaleString()} tokens</Typography>
-                  )}
-                </Box>
-              </Box>
-            )
-          })}
-        </Box>
-      </Box>
 
-      {/* ── Col 3: Chat area (flex) — messages + full-width input ── */}
-      <Box sx={{ flex:1, display:'flex', flexDirection:'column', minWidth:0, bgcolor:'rgb(246,247,248)' }}>
+        {/* Messages scroll area */}
+        <Box sx={{ flex:1, overflowY:'auto', px:4, py:3, bgcolor:'rgb(246,247,248)' }}>
 
-        {/* Messages area */}
-        <Box sx={{ flex:1, overflowY:'auto', px:3, py:2 }}>
           {/* Empty state */}
-          {messages.length===0 && !selectedRunId && selectedAgent && (
-            <Box sx={{ display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center', height:'100%', gap:1.5, textAlign:'center' }}>
+          {messages.length === 0 && selectedAgent && (
+            <Box sx={{ display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center', height:'100%', gap:2, textAlign:'center' }}>
               <AgentAvatar name={selectedAgent.name} c={ci} e={ei} size={52} />
               <Typography variant="h6" fontWeight={600}>{selectedAgent.name}</Typography>
-              <Typography variant="body2" color="text.secondary" sx={{ maxWidth:380 }}>
-                {historyItems.length > 0 ? `${historyItems.length} run${historyItems.length!==1?'s':''} in history. Select one or send a new message.` : 'Type a message below to invoke this agent.'}
+              <Typography variant="body2" color="text.secondary" sx={{ maxWidth:400 }}>
+                Type a message to invoke this agent. Each message is an independent call.
               </Typography>
               {samplePrompts.length > 0 && (
-                <Box sx={{ display:'flex', gap:0.75, flexWrap:'wrap', justifyContent:'center' }}>
+                <Box sx={{ display:'flex', gap:0.75, flexWrap:'wrap', justifyContent:'center', mt:0.5 }}>
                   {samplePrompts.map(p => (
                     <Box key={p} component="button" onClick={() => setInput(p)}
                       sx={{ px:1.25, py:0.5, border:'1px solid', borderColor:'divider', borderRadius:4, background:'background.paper', cursor:'pointer', fontSize:'0.75rem', '&:hover':{ bgcolor:'action.hover' } }}>
@@ -776,47 +697,48 @@ export default function Chat() {
             </Box>
           )}
 
-          {/* History view — selected historical run */}
-          {showHistory && selectedRunId && (
-            <Box>
-              <Typography variant="caption" color="text.secondary" display="block" sx={{ mb:1.5, textAlign:'center' }}>
-                Historical run — click a message to view trace
-              </Typography>
-              <HistoryConversation runId={selectedRunId} agentName={selectedAgent?.name ?? ''} c={ci} e={ei} />
+          {!selectedAgent && (
+            <Box sx={{ display:'flex', alignItems:'center', justifyContent:'center', height:'100%' }}>
+              <Typography variant="body2" color="text.secondary">Select an agent above to start chatting.</Typography>
             </Box>
           )}
 
-          {/* Live session messages */}
-          {messages.map((msg, idx) => (
-            <Box key={msg.id}>
-              {idx > 0 && messages[idx-1].role === msg.role && <Box sx={{ height:4 }} />}
-              {msg.role==='user' ? (
-                <Box sx={{ display:'flex', justifyContent:'flex-end', mb:1, gap:1, alignItems:'flex-end' }}>
-                  <Paper sx={{ maxWidth:'72%', bgcolor:'primary.main', color:'primary.contrastText', px:2, py:1.25, borderRadius:'18px 18px 4px 18px' }}>
-                    <Typography variant="body2">{msg.text}</Typography>
+          {/* All messages in one stream */}
+          {messages.map(msg => (
+            <Box key={msg.id} sx={{ mb: msg.role === 'user' ? 1 : 2 }}>
+              {msg.role === 'user' ? (
+                <Box sx={{ display:'flex', justifyContent:'flex-end', gap:1, alignItems:'flex-end' }}>
+                  <Paper sx={{ maxWidth:'68%', bgcolor:'primary.main', color:'primary.contrastText', px:2, py:1.25, borderRadius:'18px 18px 4px 18px' }}>
+                    <Typography variant="body2" sx={{ whiteSpace:'pre-wrap' }}>{msg.text}</Typography>
                   </Paper>
-                  <Avatar sx={{ width:28, height:28, bgcolor:'grey.300', flexShrink:0, fontSize:14 }}>👤</Avatar>
+                  <Avatar sx={{ width:28, height:28, bgcolor:'grey.400', flexShrink:0, fontSize:14 }}>👤</Avatar>
                 </Box>
               ) : (
-                <Box sx={{ display:'flex', gap:1.25, mb:1.5, alignItems:'flex-start' }}>
+                <Box sx={{ display:'flex', gap:1.25, alignItems:'flex-start' }}>
                   <AgentAvatar name={selectedAgent?.name ?? 'agent'} c={ci} e={ei} size={28} />
                   <Box sx={{ flex:1, minWidth:0 }}>
-                    <Typography variant="caption" fontWeight={700} display="block" sx={{ mb:0.5 }}>{selectedAgent?.name}</Typography>
+                    <Typography variant="caption" fontWeight={700} display="block" sx={{ mb:0.5 }}>
+                      {selectedAgent?.name}
+                    </Typography>
                     {msg.loading ? (
                       <Box sx={{ display:'flex', gap:0.5, py:1 }}>
-                        {[0,120,240].map(d => <Box key={d} sx={{ width:6, height:6, borderRadius:'50%', bgcolor:'text.disabled', animation:'bounce 1s ease-in-out infinite', animationDelay:`${d}ms`, '@keyframes bounce':{'0%,100%':{transform:'translateY(0)'},'50%':{transform:'translateY(-4px)'}} }} />)}
+                        {[0,120,240].map(d => (
+                          <Box key={d} sx={{ width:6, height:6, borderRadius:'50%', bgcolor:'text.disabled',
+                            animation:'bounce 1s ease-in-out infinite', animationDelay:`${d}ms`,
+                            '@keyframes bounce':{'0%,100%':{transform:'translateY(0)'},'50%':{transform:'translateY(-4px)'}} }} />
+                        ))}
                       </Box>
                     ) : (
                       <Paper variant="outlined" sx={{ px:2, py:1.5, borderRadius:'4px 18px 18px 18px', bgcolor:'background.paper', borderColor:msg.error?'error.light':'divider' }}>
                         <Markdown text={msg.text} />
                       </Paper>
                     )}
-                    {/* Click to open trace */}
                     {msg.runId && !msg.loading && (
-                      <Box component="button" onClick={() => setSelectedRunId(prev => prev===msg.runId ? null : (msg.runId ?? null))}
-                        sx={{ mt:0.5, background:'none', border:'none', cursor:'pointer', display:'flex', alignItems:'center', gap:0.5, color:'text.secondary', fontSize:'0.68rem', px:0, '&:hover':{ color:'text.primary' } }}>
+                      <Box component="button"
+                        onClick={() => setSelectedRunId(prev => prev===msg.runId ? null : (msg.runId??null))}
+                        sx={{ mt:0.5, background:'none', border:'none', cursor:'pointer', display:'flex', alignItems:'center', gap:0.5, color:'text.secondary', fontSize:'0.68rem', px:0, '&:hover':{ color:'primary.main' } }}>
                         <ExpandMoreIcon sx={{ fontSize:13 }} />
-                        View trace
+                        {selectedRunId===msg.runId ? 'Hide trace' : 'View trace'}
                       </Box>
                     )}
                   </Box>
@@ -827,7 +749,7 @@ export default function Chat() {
           <div ref={bottomRef} />
         </Box>
 
-        {/* Sample prompts strip (above input when there are messages) */}
+        {/* Sample prompts strip */}
         {samplePrompts.length > 0 && messages.length > 0 && (
           <Box sx={{ px:3, py:0.75, display:'flex', gap:0.5, flexWrap:'wrap', bgcolor:'background.paper', borderTop:1, borderColor:'divider' }}>
             {samplePrompts.map(p => (
@@ -839,78 +761,47 @@ export default function Chat() {
           </Box>
         )}
 
-        {/* ── Full-width input (Studio style) ── */}
+        {/* Input bar */}
         <Box sx={{ px:3, py:1.5, bgcolor:'background.paper', borderTop:1, borderColor:'divider' }}>
-          <Paper variant="outlined" sx={{ display:'flex', flexDirection:'column', borderRadius:2, bgcolor:'white', overflow:'hidden' }}>
-            {/* Attachment preview */}
+          <Paper variant="outlined" sx={{ display:'flex', flexDirection:'column', borderRadius:2, overflow:'hidden' }}>
             {attachment && (
               <Box sx={{ px:1.5, pt:0.75, display:'flex', alignItems:'center', gap:1 }}>
                 <Chip icon={<AttachFileIcon />} label={attachment.name} size="small" variant="outlined" onDelete={() => setAttachment(null)} />
               </Box>
             )}
-
-            {/* Textarea */}
-            <Box
-              component="textarea"
-              ref={textareaRef}
-              value={input}
+            <Box component="textarea" ref={textareaRef} value={input}
               onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) => setInput(e.target.value)}
               onKeyDown={handleKey}
-              placeholder={!selectedAgent ? 'Select an agent to start chatting…' : voiceOn ? '🎤 Listening…' : 'Message… (Enter to send, Shift+Enter for newline)'}
-              disabled={!selectedAgent || loading}
-              rows={3}
-              sx={{
-                width:'100%', border:'none', outline:'none', resize:'none', fontFamily:'inherit',
-                fontSize:'0.875rem', px:1.5, pt:1.25, pb:0.5, bgcolor:'transparent', lineHeight:1.6,
-                '::placeholder':{ color:'text.disabled' },
-              }}
+              placeholder={!selectedAgent ? 'Select an agent above…' : voiceOn ? '🎤 Listening…' : 'Message… (Enter to send, Shift+Enter for newline)'}
+              disabled={!selectedAgent || loading} rows={3}
+              sx={{ width:'100%', border:'none', outline:'none', resize:'none', fontFamily:'inherit', fontSize:'0.875rem', px:1.5, pt:1.25, pb:0.5, bgcolor:'transparent', lineHeight:1.6, '::placeholder':{ color:'text.disabled' } }}
             />
-
-            {/* Action bar */}
             <Box sx={{ display:'flex', alignItems:'center', gap:0.5, px:1, pb:1, pt:0.25 }}>
               <input type="file" ref={fileRef} style={{ display:'none' }} accept="image/*,.pdf"
                 onChange={e => { const f=e.target.files?.[0]; if(f) setAttachment(f); e.target.value='' }} />
-
-              <Tooltip title="Attach file">
-                <span>
-                  <IconButton size="small" onClick={() => fileRef.current?.click()} disabled={!selectedAgent||loading} sx={{ color:'text.secondary' }}>
-                    <AttachFileIcon sx={{ fontSize:18 }} />
-                  </IconButton>
-                </span>
-              </Tooltip>
-
+              <Tooltip title="Attach file"><span>
+                <IconButton size="small" onClick={() => fileRef.current?.click()} disabled={!selectedAgent||loading} sx={{ color:'text.secondary' }}>
+                  <AttachFileIcon sx={{ fontSize:18 }} />
+                </IconButton>
+              </span></Tooltip>
               {voiceOk && (
-                <Tooltip title={voiceOn ? 'Stop listening' : 'Voice input'}>
+                <Tooltip title={voiceOn ? 'Stop' : 'Voice input'}>
                   <IconButton size="small" onClick={voiceToggle} disabled={!selectedAgent||loading}
                     sx={{ color:voiceOn?'error.main':'text.secondary' }}>
                     {voiceOn ? <MicOffIcon sx={{ fontSize:18 }} /> : <MicIcon sx={{ fontSize:18 }} />}
                   </IconButton>
                 </Tooltip>
               )}
-
               <Box sx={{ flex:1 }} />
-
-              {/* Character count */}
               <Typography variant="caption" color="text.disabled" sx={{ fontSize:'0.68rem', mr:0.5 }}>
-                {input.length} {input.length === 1 ? 'character' : 'characters'}
+                {input.length} characters
               </Typography>
-
-              {/* Send button */}
-              <Tooltip title={loading ? 'Sending…' : 'Send (Enter)'}>
-                <span>
-                  <IconButton
-                    onClick={send}
-                    disabled={(!input.trim() && !attachment) || !selectedAgent || loading}
-                    sx={{
-                      bgcolor:'primary.main', color:'white', width:32, height:32, borderRadius:'50%',
-                      '&:hover':{ bgcolor:'primary.dark' },
-                      '&.Mui-disabled':{ bgcolor:'action.disabledBackground', color:'action.disabled' },
-                    }}
-                  >
-                    {loading ? <CircularProgress size={16} color="inherit" /> : <SendIcon sx={{ fontSize:16 }} />}
-                  </IconButton>
-                </span>
-              </Tooltip>
+              <Tooltip title={loading ? 'Sending…' : 'Send (Enter)'}><span>
+                <IconButton onClick={send} disabled={(!input.trim()&&!attachment)||!selectedAgent||loading}
+                  sx={{ bgcolor:'primary.main', color:'white', width:32, height:32, borderRadius:'50%', '&:hover':{ bgcolor:'primary.dark' }, '&.Mui-disabled':{ bgcolor:'action.disabledBackground', color:'action.disabled' } }}>
+                  {loading ? <CircularProgress size={16} color="inherit" /> : <SendIcon sx={{ fontSize:16 }} />}
+                </IconButton>
+              </span></Tooltip>
             </Box>
           </Paper>
           <Typography variant="caption" color="text.disabled" sx={{ display:'block', mt:0.5, textAlign:'center', fontSize:'0.65rem' }}>
@@ -919,13 +810,13 @@ export default function Chat() {
         </Box>
       </Box>
 
-      {/* ── Col 4: Data View (opens when run selected) ── */}
+      {/* DataView panel — opens when user clicks "View trace" on a message */}
       {selectedRunId && <DataView runId={selectedRunId} />}
     </Box>
   )
 }
 
-// ── Historical conversation — uses FullConversation from spans ────────────────
+// ── Kept for DataView MESSAGE tab (single-run spans only) ─────────────────────
 
 function HistoryConversation({ runId, agentName, c, e }: { runId: string; agentName: string; c: number; e: number }) {
   const { data, isLoading } = useQuery({
