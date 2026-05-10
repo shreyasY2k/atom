@@ -58,13 +58,6 @@ class AgentConfig(BaseModel):
             raise ValueError("temperature must be 1.0 for Gemini 3 (invariant)")
         return v
 
-    @field_validator("tools")
-    @classmethod
-    def tools_not_empty(cls, v: list) -> list:
-        if not v:
-            raise ValueError("tools list cannot be empty")
-        return v
-
     @field_validator("agentscope_skills")
     @classmethod
     def validate_upstream_skills(cls, v: list[str]) -> list[str]:

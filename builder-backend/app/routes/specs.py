@@ -2,6 +2,7 @@
 
 import os
 from pathlib import Path
+from typing import Any
 
 import yaml
 from fastapi import APIRouter, HTTPException
@@ -11,6 +12,22 @@ from app.core.codegen import generate_skill, generate_spec
 from app.core.schema import AgentSpec
 
 router = APIRouter(prefix="/specs/agent", tags=["specs"])
+
+
+def _safe_errors(e: ValidationError) -> list[dict[str, Any]]:
+    """Return Pydantic validation errors with all ctx values stringified.
+
+    Pydantic's e.errors() can include non-JSON-serializable objects (e.g.
+    ValueError instances) in the 'ctx' dict. FastAPI can't serialize those,
+    causing a secondary TypeError. This converts everything to safe types.
+    """
+    safe = []
+    for err in e.errors():
+        cleaned = {k: v for k, v in err.items() if k != "ctx"}
+        if "ctx" in err:
+            cleaned["ctx"] = {ck: str(cv) for ck, cv in err["ctx"].items()}
+        safe.append(cleaned)
+    return safe
 
 SPECS_PATH  = Path(os.environ.get("SPECS_PATH", "/app/specs"))
 SKILLS_PATH = Path(os.environ.get("SKILLS_PATH", "/app/skills"))
@@ -35,7 +52,7 @@ def validate_spec(req: ValidateRequest):
     try:
         spec = AgentSpec.model_validate(spec_dict)
     except ValidationError as e:
-        raise HTTPException(422, {"errors": e.errors()})
+        raise HTTPException(422, {"errors": _safe_errors(e)})
 
     return {
         "valid": True,
@@ -67,7 +84,7 @@ def generate(req: GenerateRequest):
         raise HTTPException(422, {
             "message": "Generated spec failed schema validation",
             "spec_dict": spec_dict,
-            "errors": e.errors(),
+            "errors": _safe_errors(e),
         })
 
     spec_yaml = yaml.dump(spec_dict, sort_keys=False, allow_unicode=True)
