@@ -9,9 +9,11 @@ import Login from './pages/auth/Login'
 import Home from './pages/Home'
 import Builder from './pages/agents/Builder'
 import AgentList from './pages/agents/List'
+import AgentDetail from './pages/agents/Detail'
 import Composer from './pages/workflows/Composer'
 import ComposerLanding from './pages/workflows/ComposerLanding'
 import WorkflowList from './pages/workflows/List'
+import WorkflowDetail from './pages/workflows/Detail'
 import WorkflowRuns from './pages/workflows/Runs'
 import Chat from './pages/chat/Chat'
 import Tasks from './pages/tasks/Tasks'
@@ -55,10 +57,12 @@ function AppRoutes() {
       >
         <Route index element={<Home />} />
         <Route path="agents/build" element={<Builder />} />
+        <Route path="agents/:name" element={<AgentDetail />} />
         <Route path="agents" element={<AgentList />} />
         <Route path="workflows/compose" element={<ComposerLanding />} />
         <Route path="workflows/compose/:name" element={<ComposerParam />} />
         <Route path="workflows/runs" element={<WorkflowRuns />} />
+        <Route path="workflows/:name" element={<WorkflowDetail />} />
         <Route path="workflows" element={<WorkflowList />} />
         <Route path="chat" element={<Chat />} />
         <Route path="tasks" element={<Tasks />} />

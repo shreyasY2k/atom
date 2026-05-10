@@ -93,11 +93,17 @@ export const builderApi = {
   listAgentDeployments: (name: string): Promise<{ deployments: DeploymentRecord[] }> =>
     fetch(`${BASE}/agents/${name}/deployments`, { headers: actor() }).then(json),
 
-  listDeployments: (params?: { approval_status?: string; requester?: string; target_type?: string }): Promise<{ deployments: DeploymentRecord[]; total: number }> => {
+  listWorkflowDeployments: (name: string): Promise<{ deployments: DeploymentRecord[] }> =>
+    fetch(`${BASE}/deployments?target_type=workflow&target_name=${encodeURIComponent(name)}`, { headers: actor() })
+      .then(json)
+      .then(d => ({ deployments: d.deployments ?? [] })),
+
+  listDeployments: (params?: { approval_status?: string; requester?: string; target_type?: string; target_name?: string }): Promise<{ deployments: DeploymentRecord[]; total: number }> => {
     const qs = new URLSearchParams()
     if (params?.approval_status) qs.set('approval_status', params.approval_status)
     if (params?.requester) qs.set('requester', params.requester)
     if (params?.target_type) qs.set('target_type', params.target_type)
+    if (params?.target_name) qs.set('target_name', params.target_name)
     return fetch(`${BASE}/deployments?${qs}`, { headers: actor() }).then(json)
   },
 

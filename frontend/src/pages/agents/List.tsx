@@ -1,4 +1,5 @@
 import React from 'react'
+import { useNavigate, Link } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import {
   Box, Chip, IconButton, Paper, Stack, Tooltip, Typography,
@@ -6,6 +7,7 @@ import {
 import DeleteOutlineIcon from '@mui/icons-material/DeleteOutline'
 import RefreshIcon from '@mui/icons-material/Refresh'
 import SmartToyIcon from '@mui/icons-material/SmartToy'
+import HistoryIcon from '@mui/icons-material/History'
 import { builderApi } from '../../api/builder'
 import type { AgentRecord } from '../../types'
 
@@ -23,6 +25,7 @@ function StatusBadge({ status }: { status: string }) {
 
 export default function AgentList() {
   const qc = useQueryClient()
+  const navigate = useNavigate()
   const { data, isLoading } = useQuery({ queryKey: ['agents'], queryFn: builderApi.listAgents })
   const del = useMutation({
     mutationFn: builderApi.deleteAgent,
@@ -55,7 +58,11 @@ export default function AgentList() {
                 <SmartToyIcon sx={{ fontSize: 18, color: 'primary.main', mt: 0.25 }} />
                 <Box>
                   <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, flexWrap: 'wrap' }}>
-                    <Typography variant="body2" fontWeight={600}>{a.name}</Typography>
+                    <Typography variant="body2" fontWeight={600}
+                      sx={{ cursor: 'pointer', '&:hover': { color: 'primary.main', textDecoration: 'underline' } }}
+                      onClick={() => navigate(`/agents/${a.name}`)}>
+                      {a.name}
+                    </Typography>
                     <Typography variant="caption" fontFamily="monospace" color="text.secondary">v{a.version}</Typography>
                     <StatusBadge status={a.status} />
                   </Box>
@@ -74,11 +81,20 @@ export default function AgentList() {
                   </Typography>
                 </Box>
               </Box>
-              <Tooltip title="Undeploy agent">
-                <IconButton size="small" onClick={() => del.mutate(a.name)} sx={{ color: 'text.secondary', '&:hover': { color: 'error.main' } }}>
-                  <DeleteOutlineIcon fontSize="small" />
-                </IconButton>
-              </Tooltip>
+              <Box sx={{ display: 'flex', gap: 0.5 }}>
+                <Tooltip title="Deployment history">
+                  <IconButton size="small" onClick={() => navigate(`/agents/${a.name}?tab=deployments`)}
+                    sx={{ color: 'text.secondary', '&:hover': { color: 'primary.main' } }}>
+                    <HistoryIcon fontSize="small" />
+                  </IconButton>
+                </Tooltip>
+                <Tooltip title="Undeploy agent">
+                  <IconButton size="small" onClick={() => del.mutate(a.name)}
+                    sx={{ color: 'text.secondary', '&:hover': { color: 'error.main' } }}>
+                    <DeleteOutlineIcon fontSize="small" />
+                  </IconButton>
+                </Tooltip>
+              </Box>
             </Box>
           </Paper>
         ))}

@@ -1,7 +1,7 @@
 import React, { useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import {
-  Alert, Box, Button, Chip, CircularProgress, Dialog, DialogActions,
+  Alert, Box, Button, Chip, CircularProgress, Collapse, Dialog, DialogActions,
   DialogContent, DialogTitle, Divider, Paper, Stack, Tab, Tabs, TextField,
   Typography,
 } from '@mui/material'
@@ -10,7 +10,10 @@ import CancelOutlinedIcon from '@mui/icons-material/CancelOutlined'
 import EditNoteIcon from '@mui/icons-material/EditNote'
 import SmartToyIcon from '@mui/icons-material/SmartToy'
 import AccountTreeIcon from '@mui/icons-material/AccountTree'
+import ExpandMoreIcon from '@mui/icons-material/ExpandMore'
+import ExpandLessIcon from '@mui/icons-material/ExpandLess'
 import { builderApi, type DeploymentRecord } from '../../api/builder'
+import DeploymentThread from '../../components/DeploymentThread'
 
 const APPROVAL_STATUS_COLOR: Record<string, 'warning' | 'success' | 'error' | 'default' | 'info'> = {
   pending: 'warning',
@@ -115,6 +118,7 @@ function ActionDialog({ record, action, onClose }: ActionDialogProps) {
 
 function RequestCard({ rec, showActions }: { rec: DeploymentRecord; showActions: boolean }) {
   const [dialog, setDialog] = useState<'approve' | 'reject' | 'changes' | null>(null)
+  const [threadOpen, setThreadOpen] = useState(false)
   const Icon = rec.target_type === 'agent' ? SmartToyIcon : AccountTreeIcon
 
   return (
@@ -177,6 +181,23 @@ function RequestCard({ rec, showActions }: { rec: DeploymentRecord; showActions:
           </Box>
         )}
       </Box>
+
+      {/* Approval thread — expandable */}
+      <Box
+        sx={{ px: 2, pb: 0.5, display: 'flex', alignItems: 'center', gap: 0.5, cursor: 'pointer', color: 'text.secondary', '&:hover': { color: 'primary.main' } }}
+        onClick={() => setThreadOpen(v => !v)}
+      >
+        {threadOpen ? <ExpandLessIcon sx={{ fontSize: 14 }} /> : <ExpandMoreIcon sx={{ fontSize: 14 }} />}
+        <Typography variant="caption">
+          {threadOpen ? 'Hide thread' : 'View approval thread'}
+        </Typography>
+      </Box>
+      <Collapse in={threadOpen}>
+        <Divider />
+        <Box sx={{ px: 2, py: 1.5, bgcolor: 'action.hover' }}>
+          <DeploymentThread record={rec} />
+        </Box>
+      </Collapse>
 
       {dialog && (
         <ActionDialog record={rec} action={dialog} onClose={() => setDialog(null)} />

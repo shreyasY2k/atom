@@ -1,6 +1,7 @@
 import React from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { useNavigate } from 'react-router-dom'
+
 import {
   Box, Button, Chip, IconButton, Paper, Stack, Tooltip, Typography,
 } from '@mui/material'
@@ -55,7 +56,11 @@ export default function WorkflowList() {
                 <AccountTreeIcon sx={{ fontSize: 18, color: '#60a5fa', mt: 0.25 }} />
                 <Box>
                   <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, flexWrap: 'wrap' }}>
-                    <Typography variant="body2" fontWeight={600}>{w.name}</Typography>
+                    <Typography variant="body2" fontWeight={600}
+                      sx={{ cursor: 'pointer', '&:hover': { color: 'primary.main', textDecoration: 'underline' } }}
+                      onClick={() => navigate(`/workflows/${w.name}`)}>
+                      {w.name}
+                    </Typography>
                     <Typography variant="caption" fontFamily="monospace" color="text.secondary">v{w.version}</Typography>
                     <Chip label={w.status} size="small" color="success" variant="outlined" sx={{ height: 18, fontSize: '0.65rem', fontFamily: 'monospace' }} />
                   </Box>
