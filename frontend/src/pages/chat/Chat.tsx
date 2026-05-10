@@ -84,7 +84,7 @@ function Markdown({ text }: { text: string }) {
     if (l.startsWith('```')) {
       const code: string[] = []; i++
       while (i < lines.length && !lines[i].startsWith('```')) { code.push(lines[i]); i++ }
-      out.push(<Box key={i} component="pre" sx={{ bgcolor:'grey.100', p:1, borderRadius:1, my:0.5, overflow:'auto', fontSize:'0.75rem', fontFamily:'monospace', m:0 }}>{code.join('\n')}</Box>)
+      out.push(<Box key={i} component="pre" sx={{ bgcolor:'action.hover', p:1, borderRadius:1, my:0.5, overflow:'auto', fontSize:'0.75rem', fontFamily:'monospace', m:0 }}>{code.join('\n')}</Box>)
       i++; continue
     }
     if (l.trim() === '') { out.push(<Box key={i} sx={{ height:4 }} />); i++; continue }
@@ -736,7 +736,7 @@ export default function Chat() {
         </Box>
 
         {/* Messages scroll area */}
-        <Box sx={{ flex:1, overflowY:'auto', px:4, py:3, bgcolor:'rgb(246,247,248)' }}>
+        <Box sx={{ flex:1, overflowY:'auto', px:4, py:3, bgcolor:'background.default' }}>
 
           {/* Empty state */}
           {messages.length === 0 && selectedAgent && (
