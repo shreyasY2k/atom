@@ -17,6 +17,8 @@ import Chat from './pages/chat/Chat'
 import Tasks from './pages/tasks/Tasks'
 import AuditEvents from './pages/audit/Events'
 import Identities from './pages/audit/Identities'
+import Approvals from './pages/approvals/Approvals'
+import Settings from './pages/settings/Settings'
 
 export const ColorModeContext = createContext({ toggle: () => {} })
 
@@ -62,6 +64,8 @@ function AppRoutes() {
         <Route path="tasks" element={<Tasks />} />
         <Route path="audit" element={<AuditEvents />} />
         <Route path="audit/identities" element={<Identities />} />
+        <Route path="approvals" element={<Approvals />} />
+        <Route path="settings" element={<Settings />} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Route>
     </Routes>

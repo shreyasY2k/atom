@@ -10,6 +10,26 @@ const json = (r: Response) => {
 
 const actor = () => ({ 'X-Atom-Actor': getActorHeader() })
 
+export interface DeploymentRecord {
+  deployment_id: string
+  target_type: 'agent' | 'workflow'
+  target_name: string
+  target_version: string
+  spec_hash: string
+  code_hash?: string | null
+  requested_by: string
+  requested_at: string
+  approval_status: 'pending' | 'approved' | 'rejected' | 'bypassed' | 'changes_requested' | 'n/a'
+  approved_by?: string | null
+  approved_at?: string | null
+  deploy_status: 'pending' | 'deploying' | 'deployed' | 'failed' | 'undeployed'
+  deployed_at?: string | null
+  deploy_error?: string | null
+  service_account_id?: string | null
+  notes: string
+  previous_request_id?: string | null
+}
+
 export const builderApi = {
   // Agents
   listAgents: (): Promise<{ agents: AgentRecord[] }> =>
@@ -54,4 +74,51 @@ export const builderApi = {
 
   compileAgent: (name: string): Promise<{ code: string; code_hash: string }> =>
     fetch(`${BASE}/agents/${name}/compile`, { method: 'POST', headers: actor() }).then(json),
+
+  // Deployment requests
+  submitDeployRequest: (name: string, notes = ''): Promise<DeploymentRecord> =>
+    fetch(`${BASE}/agents/${name}/deploy-request`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...actor() },
+      body: JSON.stringify({ notes }),
+    }).then(json),
+
+  deployDirect: (name: string, notes = ''): Promise<DeploymentRecord> =>
+    fetch(`${BASE}/agents/${name}/deploy-direct`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...actor() },
+      body: JSON.stringify({ notes }),
+    }).then(json),
+
+  listAgentDeployments: (name: string): Promise<{ deployments: DeploymentRecord[] }> =>
+    fetch(`${BASE}/agents/${name}/deployments`, { headers: actor() }).then(json),
+
+  listDeployments: (params?: { approval_status?: string; requester?: string; target_type?: string }): Promise<{ deployments: DeploymentRecord[]; total: number }> => {
+    const qs = new URLSearchParams()
+    if (params?.approval_status) qs.set('approval_status', params.approval_status)
+    if (params?.requester) qs.set('requester', params.requester)
+    if (params?.target_type) qs.set('target_type', params.target_type)
+    return fetch(`${BASE}/deployments?${qs}`, { headers: actor() }).then(json)
+  },
+
+  approveDeployment: (id: string, notes = ''): Promise<DeploymentRecord> =>
+    fetch(`${BASE}/deployments/${id}/approve`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...actor() },
+      body: JSON.stringify({ notes }),
+    }).then(json),
+
+  rejectDeployment: (id: string, reason: string): Promise<DeploymentRecord> =>
+    fetch(`${BASE}/deployments/${id}/reject`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...actor() },
+      body: JSON.stringify({ reason }),
+    }).then(json),
+
+  requestChanges: (id: string, comments: string): Promise<DeploymentRecord> =>
+    fetch(`${BASE}/deployments/${id}/request-changes`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...actor() },
+      body: JSON.stringify({ comments }),
+    }).then(json),
 }

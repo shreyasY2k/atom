@@ -12,7 +12,8 @@ import TerminalIcon from '@mui/icons-material/Terminal'
 import CodeIcon from '@mui/icons-material/Code'
 import CheckCircleOutlineIcon from '@mui/icons-material/CheckCircleOutline'
 import ChatIcon from '@mui/icons-material/Chat'
-import { builderApi } from '../../api/builder'
+import { builderApi, type DeploymentRecord } from '../../api/builder'
+import { useAuth } from '../../context/AuthContext'
 import type { AgentRecord } from '../../types'
 
 type Mode = 'ai' | 'cli' | 'yaml'
@@ -96,8 +97,9 @@ function AIMode() {
   const [specYaml, setSpecYaml] = useState('')
   const [skillContent, setSkillContent] = useState('')
   const [agentName, setAgentName] = useState('')
-  const [deployResult, setDeployResult] = useState<AgentRecord | null>(null)
+  const [deployResult, setDeployResult] = useState<AgentRecord | DeploymentRecord | null>(null)
   const [error, setError] = useState('')
+  const { role } = useAuth()
 
   const generate = useMutation({
     mutationFn: () => builderApi.generateSpec(prose),
@@ -106,10 +108,20 @@ function AIMode() {
   })
 
   const deploy = useMutation({
-    mutationFn: () => builderApi.deployAgent(agentName),
+    mutationFn: (): Promise<AgentRecord | DeploymentRecord> => {
+      if (role === 'builder') return builderApi.submitDeployRequest(agentName)
+      if (role === 'platform_admin') return builderApi.deployDirect(agentName)
+      return builderApi.deployAgent(agentName)
+    },
     onSuccess: (d) => { setDeployResult(d); qc.invalidateQueries({ queryKey: ['agents'] }); setError('') },
     onError: (e: unknown) => setError(String(e)),
   })
+
+  const deployLabel = role === 'builder'
+    ? 'Compile & Submit for Approval'
+    : role === 'platform_admin'
+      ? 'Compile & Deploy (bypass)'
+      : 'Compile & Deploy'
 
   return (
     <Box sx={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0, gap: 2 }}>
@@ -182,15 +194,18 @@ function AIMode() {
           <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, flexShrink: 0 }}>
             <Button
               variant="contained"
-              color="success"
+              color={role === 'builder' ? 'primary' : 'success'}
               startIcon={deploy.isPending ? <CircularProgress size={14} color="inherit" /> : <CheckCircleOutlineIcon />}
               onClick={() => deploy.mutate()}
               disabled={deploy.isPending || !agentName}
             >
-              Compile &amp; Deploy
+              {deployLabel}
             </Button>
             <Typography variant="caption" color="text.secondary">
-              Deploys <Box component="span" fontFamily="monospace">{agentName}</Box> — issues a service-account identity
+              {role === 'builder'
+                ? <>Submits <Box component="span" fontFamily="monospace">{agentName}</Box> for approval</>
+                : <>Deploys <Box component="span" fontFamily="monospace">{agentName}</Box> — issues a service-account identity</>
+              }
             </Typography>
           </Box>
         </>
@@ -205,29 +220,45 @@ function AIMode() {
 
       {deployResult && (
         <Paper variant="outlined" sx={{ p: 2, flexShrink: 0 }}>
-          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 1 }}>
-            <CheckCircleOutlineIcon color="success" fontSize="small" />
-            <Typography variant="body2" fontWeight={600}>Agent deployed</Typography>
-          </Box>
-          <Typography variant="caption" color="text.secondary">
-            <Box component="span" fontFamily="monospace">{deployResult.name}</Box> v{deployResult.version}
-          </Typography>
-          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mt: 1 }}>
-            <Typography variant="caption" color="text.secondary">Non-human identity:</Typography>
-            <Chip label={deployResult.service_account_id} size="small" sx={{ fontFamily: 'monospace', bgcolor: '#4a148c', color: '#ce93d8', fontSize: '0.65rem' }} />
-          </Box>
-          <Typography variant="caption" fontFamily="monospace" color="text.secondary" display="block" sx={{ mt: 0.5 }}>
-            owner: {deployResult.owner} · endpoint: {deployResult.endpoint}
-          </Typography>
-          <Button
-            size="small"
-            variant="outlined"
-            startIcon={<ChatIcon />}
-            onClick={() => navigate(`/chat?agent=${deployResult.name}`)}
-            sx={{ mt: 1.5 }}
-          >
-            Test in Chat →
-          </Button>
+          {'deployment_id' in deployResult ? (
+            // Deployment request submitted
+            <>
+              <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 1 }}>
+                <CheckCircleOutlineIcon color="primary" fontSize="small" />
+                <Typography variant="body2" fontWeight={600}>Deployment request submitted</Typography>
+              </Box>
+              <Typography variant="caption" color="text.secondary">
+                Request ID: <Box component="span" fontFamily="monospace">{deployResult.deployment_id}</Box>
+              </Typography>
+              <Typography variant="caption" color="text.secondary" display="block" sx={{ mt: 0.5 }}>
+                Waiting for approver to review. Check the Approvals tab for status updates.
+              </Typography>
+            </>
+          ) : (
+            // Deployed directly
+            <>
+              <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 1 }}>
+                <CheckCircleOutlineIcon color="success" fontSize="small" />
+                <Typography variant="body2" fontWeight={600}>Agent deployed</Typography>
+              </Box>
+              <Typography variant="caption" color="text.secondary">
+                <Box component="span" fontFamily="monospace">{(deployResult as AgentRecord).name}</Box> v{(deployResult as AgentRecord).version}
+              </Typography>
+              {(deployResult as AgentRecord).service_account_id && (
+                <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mt: 1 }}>
+                  <Typography variant="caption" color="text.secondary">Non-human identity:</Typography>
+                  <Chip label={(deployResult as AgentRecord).service_account_id} size="small" sx={{ fontFamily: 'monospace', bgcolor: '#4a148c', color: '#ce93d8', fontSize: '0.65rem' }} />
+                </Box>
+              )}
+              <Button
+                size="small" variant="outlined" startIcon={<ChatIcon />}
+                onClick={() => navigate(`/chat?agent=${(deployResult as AgentRecord).name}`)}
+                sx={{ mt: 1.5 }}
+              >
+                Test in Chat →
+              </Button>
+            </>
+          )}
         </Paper>
       )}
     </Box>

@@ -1,10 +1,14 @@
 import React from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Box, Grid, Paper, Typography, Chip } from '@mui/material'
+import { useQuery } from '@tanstack/react-query'
+import { Box, Chip, Grid, Paper, Stack, Typography } from '@mui/material'
 import AutoFixHighIcon from '@mui/icons-material/AutoFixHigh'
 import AccountTreeIcon from '@mui/icons-material/AccountTree'
 import AssignmentIcon from '@mui/icons-material/Assignment'
 import HistoryIcon from '@mui/icons-material/History'
+import { useAuth } from '../context/AuthContext'
+import { builderApi, type DeploymentRecord } from '../api/builder'
+import { getActorHeader } from '../context/AuthContext'
 
 const cards = [
   {
@@ -45,8 +49,71 @@ const cards = [
   },
 ]
 
+const STATUS_COLOR: Record<string, 'warning' | 'success' | 'error' | 'default' | 'info'> = {
+  pending: 'warning',
+  approved: 'success',
+  rejected: 'error',
+  bypassed: 'info',
+  changes_requested: 'warning',
+  deployed: 'success',
+  failed: 'error',
+}
+
+function MyRequests() {
+  const { data } = useQuery({
+    queryKey: ['my-requests'],
+    queryFn: () => builderApi.listDeployments({ requester: getActorHeader() }),
+    refetchInterval: 10_000,
+  })
+  const navigate = useNavigate()
+  const requests = (data?.deployments ?? []).slice(0, 5)
+
+  if (requests.length === 0) return null
+
+  return (
+    <Box sx={{ mt: 4 }}>
+      <Typography variant="subtitle2" fontWeight={600} gutterBottom>My Deployment Requests</Typography>
+      <Stack spacing={1}>
+        {requests.map((r: DeploymentRecord) => (
+          <Paper
+            key={r.deployment_id}
+            variant="outlined"
+            sx={{ px: 2, py: 1, borderRadius: 1.5, cursor: 'pointer', '&:hover': { borderColor: 'primary.main' } }}
+            onClick={() => navigate('/approvals')}
+          >
+            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5, flexWrap: 'wrap' }}>
+              <Typography variant="caption" fontFamily="monospace" color="text.secondary">
+                {r.deployment_id.slice(0, 14)}
+              </Typography>
+              <Typography variant="caption" fontWeight={600}>
+                {r.target_type} {r.target_name} v{r.target_version}
+              </Typography>
+              <Chip
+                size="small"
+                label={r.approval_status.replace('_', ' ')}
+                color={STATUS_COLOR[r.approval_status] ?? 'default'}
+                sx={{ height: 18, fontSize: '0.65rem' }}
+              />
+              {r.deploy_status !== 'pending' && (
+                <Chip
+                  size="small"
+                  label={r.deploy_status}
+                  color={STATUS_COLOR[r.deploy_status] ?? 'default'}
+                  variant="outlined"
+                  sx={{ height: 18, fontSize: '0.65rem' }}
+                />
+              )}
+            </Box>
+          </Paper>
+        ))}
+      </Stack>
+    </Box>
+  )
+}
+
 export default function Home() {
   const navigate = useNavigate()
+  const { role } = useAuth()
 
   return (
     <Box sx={{ p: 4, maxWidth: 800 }}>
@@ -97,6 +164,8 @@ export default function Home() {
           </Grid>
         ))}
       </Grid>
+
+      {role === 'builder' && <MyRequests />}
     </Box>
   )
 }

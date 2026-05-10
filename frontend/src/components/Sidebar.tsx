@@ -13,6 +13,9 @@ import ChatIcon from '@mui/icons-material/Chat'
 import AssignmentIcon from '@mui/icons-material/Assignment'
 import HistoryIcon from '@mui/icons-material/History'
 import BadgeIcon from '@mui/icons-material/Badge'
+import FactCheckIcon from '@mui/icons-material/FactCheck'
+import SettingsIcon from '@mui/icons-material/Settings'
+import { useAuth } from '../context/AuthContext'
 
 interface NavItem {
   to: string
@@ -24,9 +27,10 @@ interface NavItem {
 interface NavGroup {
   heading: string
   items: NavItem[]
+  roles?: string[]  // undefined = visible to all
 }
 
-const groups: NavGroup[] = [
+const ALL_GROUPS: NavGroup[] = [
   {
     heading: 'AGENTS',
     items: [
@@ -43,6 +47,13 @@ const groups: NavGroup[] = [
     ],
   },
   {
+    heading: 'GOVERNANCE',
+    roles: ['approver', 'platform_admin'],
+    items: [
+      { to: '/approvals', label: 'Approvals', icon: <FactCheckIcon fontSize="small" /> },
+    ],
+  },
+  {
     heading: 'OPERATIONS',
     items: [
       { to: '/chat',   label: 'Chat',  icon: <ChatIcon fontSize="small" /> },
@@ -56,6 +67,13 @@ const groups: NavGroup[] = [
       { to: '/audit/identities',  label: 'Identities', icon: <BadgeIcon fontSize="small" /> },
     ],
   },
+  {
+    heading: 'ADMIN',
+    roles: ['platform_admin'],
+    items: [
+      { to: '/settings', label: 'Settings', icon: <SettingsIcon fontSize="small" /> },
+    ],
+  },
 ]
 
 interface Props {
@@ -65,17 +83,21 @@ interface Props {
 export default function Sidebar({ collapsed }: Props) {
   const navigate = useNavigate()
   const location = useLocation()
+  const { role } = useAuth()
 
   const isActive = (item: NavItem) =>
     item.exact ? location.pathname === item.to : location.pathname.startsWith(item.to)
 
+  const visibleGroups = ALL_GROUPS.filter(g =>
+    !g.roles || (role && g.roles.includes(role))
+  )
+
   return (
     <Box sx={{ display: 'flex', flexDirection: 'column', height: '100%', overflowY: 'auto', overflowX: 'hidden' }}>
-      {groups.map((group, gi) => (
+      {visibleGroups.map((group, gi) => (
         <React.Fragment key={group.heading}>
           {gi > 0 && <Divider sx={{ my: 0.5 }} />}
 
-          {/* Group heading — hidden when collapsed */}
           {!collapsed && (
             <Box sx={{ px: 1.5, pt: gi === 0 ? 1.5 : 1, pb: 0.5 }}>
               <Typography variant="caption" sx={{ fontWeight: 700, letterSpacing: '0.08em', color: 'text.secondary', px: 1 }}>
