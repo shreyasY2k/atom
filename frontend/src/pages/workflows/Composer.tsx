@@ -80,27 +80,64 @@ function applyDagre(nodes: Node[], edges: Edge[]): Node[] {
 function deriveEdges(wfNodes: WorkflowNode[]): Edge[] {
   const edges: Edge[] = []
   const base = { markerEnd: { type: MarkerType.ArrowClosed, color: '#94a3b8' }, style: { stroke: '#94a3b8' } }
+  const decisionEdge = (id: string, source: string, target: string, label: string) => ({
+    id,
+    source,
+    target,
+    label,
+    labelStyle: { fontSize: 10, fill: '#854F0B' },
+    ...base,
+    style: { stroke: '#854F0B' },
+    markerEnd: { type: MarkerType.ArrowClosed, color: '#854F0B' },
+  })
+
   for (const n of wfNodes) {
     if (n.next) {
       edges.push({ id: `${n.id}→${n.next}`, source: n.id, target: n.next, ...base })
     }
+
+    // Binary decision: branches.true / branches.false
     if (n.branches) {
       for (const [label, target] of Object.entries(n.branches)) {
         if (target) {
           edges.push({
-            id: `${n.id}→${target}@${label}`,
-            source: n.id,
+            ...decisionEdge(`${n.id}→${target}@${label}`, n.id, target, label),
             sourceHandle: label,
-            target,
-            label,
-            labelStyle: { fontSize: 10, fill: '#854F0B' },
-            ...base,
-            style: { stroke: '#854F0B' },
-            markerEnd: { type: MarkerType.ArrowClosed, color: '#854F0B' },
           })
         }
       }
     }
+
+    // Multi-way decision: cases[].target + default
+    if (n.cases?.length) {
+      // Deduplicate: if multiple cases share a target, show combined labels
+      const targetMap = new Map<string, string[]>()
+      for (const c of n.cases) {
+        if (!c.target) continue
+        const existing = targetMap.get(c.target) ?? []
+        existing.push(c.label ?? c.condition?.slice(0, 20) ?? 'case')
+        targetMap.set(c.target, existing)
+      }
+      let idx = 0
+      for (const [target, labels] of targetMap) {
+        edges.push(decisionEdge(
+          `${n.id}→${target}@case${idx++}`,
+          n.id,
+          target,
+          labels.join(' / '),
+        ))
+      }
+    }
+
+    if (n.default) {
+      edges.push(decisionEdge(
+        `${n.id}→${n.default}@default`,
+        n.id,
+        n.default,
+        'default',
+      ))
+    }
+
     if (n.fallback_node) {
       edges.push({
         id: `${n.id}→${n.fallback_node}@fallback`,
