@@ -137,9 +137,9 @@ function SpanRow({ span, all, depth = 0 }: { span: Span; all: Span[]; depth?: nu
               if (!text) return null
               return <Box key={mi} sx={{ mb:0.25 }}>
                 <Chip label={String(msg.role||'user')} size="small" sx={{ height:14, fontSize:'0.58rem', mb:0.25 }} />
-                <Typography variant="caption" fontFamily="monospace" sx={{ display:'block', fontSize:'0.68rem', color:'text.secondary', ml:0.5, whiteSpace:'pre-wrap', maxHeight:80, overflow:'hidden' }}>
-                  {text.slice(0,250)}{text.length>250?'…':''}
-                </Typography>
+                <Box component="pre" sx={{ display:'block', fontSize:'0.68rem', fontFamily:'monospace', color:'text.secondary', ml:0.5, whiteSpace:'pre-wrap', overflow:'auto', maxHeight:200, m:0 }}>
+                  {text}
+                </Box>
               </Box>
             })}
             {outputM.slice(0,1).map((m: unknown, mi) => {
@@ -153,9 +153,9 @@ function SpanRow({ span, all, depth = 0 }: { span: Span; all: Span[]; depth?: nu
               const preview = text.replace(/^```(?:json)?\n?/, '').replace(/\n?```$/, '').trim()
               return <Box key={`o${mi}`} sx={{ borderTop:1, borderColor:'divider', pt:0.25 }}>
                 <Chip label="→ response" size="small" sx={{ height:14, fontSize:'0.58rem', mb:0.25, bgcolor:'rgba(59,109,17,0.1)' }} />
-                <Typography variant="caption" fontFamily="monospace" sx={{ display:'block', fontSize:'0.68rem', color:'text.primary', ml:0.5, whiteSpace:'pre-wrap', maxHeight:120, overflow:'hidden' }}>
-                  {preview.slice(0,350)}{preview.length>350?'…':''}
-                </Typography>
+                <Box component="pre" sx={{ display:'block', fontSize:'0.68rem', fontFamily:'monospace', color:'text.primary', ml:0.5, whiteSpace:'pre-wrap', overflow:'auto', maxHeight:300, m:0 }}>
+                  {preview}
+                </Box>
               </Box>
             })}
           </Box>
@@ -302,7 +302,7 @@ function FullConversation({ spans, agentName, c, e }: { spans: Span[]; agentName
 
                   turnElements.push(
                     <ContentBlock key={key} title={`${agentName} response`} accent="#3B6D11" defaultOpen={true}>
-                      <Box component="pre" sx={{ fontSize:'0.75rem', fontFamily:'monospace', whiteSpace:'pre-wrap', overflow:'auto', maxHeight:300, m:0, color:'text.primary' }}>
+                      <Box component="pre" sx={{ fontSize:'0.75rem', fontFamily:'monospace', whiteSpace:'pre-wrap', overflow:'auto', m:0, color:'text.primary' }}>
                         {display}
                       </Box>
                     </ContentBlock>
@@ -499,9 +499,9 @@ function DataView({ agentName, runId, userText, agentText }: {
                 {ev.response_content && (
                   <Box sx={{ px:1, py:0.5 }}>
                     <Typography variant="caption" color="text.secondary" sx={{ fontSize:'0.6rem', display:'block', mb:0.25 }}>→ response</Typography>
-                    <Typography variant="caption" fontFamily="monospace" sx={{ fontSize:'0.68rem', whiteSpace:'pre-wrap', color:'text.primary', display:'block', maxHeight:100, overflow:'hidden' }}>
-                      {ev.response_content.slice(0,300)}{ev.response_content.length>300?'…':''}
-                    </Typography>
+                    <Box component="pre" sx={{ fontSize:'0.68rem', fontFamily:'monospace', whiteSpace:'pre-wrap', color:'text.primary', m:0, overflow:'auto', maxHeight:400 }}>
+                      {ev.response_content}
+                    </Box>
                   </Box>
                 )}
               </Box>
