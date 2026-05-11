@@ -1,5 +1,6 @@
 import React, { useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { extractErrorMessage } from '../../utils/errors'
 import {
   Alert, Box, Button, Chip, CircularProgress, Collapse, Dialog, DialogActions,
   DialogContent, DialogTitle, Divider, Paper, Stack, Tab, Tabs, TextField,
@@ -88,7 +89,7 @@ function ActionDialog({ record, action, onClose }: ActionDialogProps) {
           </Alert>
         )}
         {mut.isError && (
-          <Alert severity="error" sx={{ mb: 2 }}>{String(mut.error)}</Alert>
+          <Alert severity="error" sx={{ mb: 2 }}>{extractErrorMessage(mut.error)}</Alert>
         )}
         <TextField
           label={labels[action]}

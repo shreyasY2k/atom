@@ -1,6 +1,7 @@
 import React, { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { extractErrorMessage } from '../../utils/errors'
 import MonacoEditor from '@monaco-editor/react'
 import {
   Alert, Box, Button, Chip, CircularProgress,
@@ -104,7 +105,7 @@ function AIMode() {
   const generate = useMutation({
     mutationFn: () => builderApi.generateSpec(prose),
     onSuccess: (d) => { setSpecYaml(d.spec_yaml); setSkillContent(d.skill_content ?? ''); setAgentName(d.name); setError('') },
-    onError: (e: unknown) => setError(String(e)),
+    onError: (e: unknown) => setError(extractErrorMessage(e)),
   })
 
   const deploy = useMutation({
@@ -114,7 +115,7 @@ function AIMode() {
       return builderApi.deployAgent(agentName)
     },
     onSuccess: (d) => { setDeployResult(d); qc.invalidateQueries({ queryKey: ['agents'] }); setError('') },
-    onError: (e: unknown) => setError(String(e)),
+    onError: (e: unknown) => setError(extractErrorMessage(e)),
   })
 
   const deployLabel = role === 'builder'
@@ -348,14 +349,14 @@ function YAMLMode() {
   const validate = useMutation({
     mutationFn: () => builderApi.validateSpec(yamlVal),
     onSuccess: (d) => { setValidateResult(d as Record<string, unknown>); setError('') },
-    onError: (e: unknown) => setError(String(e)),
+    onError: (e: unknown) => setError(extractErrorMessage(e)),
   })
 
   const agentName = yamlVal.match(/\s+name:\s+(\S+)/)?.[1] ?? ''
   const deploy = useMutation({
     mutationFn: () => builderApi.deployAgent(agentName),
     onSuccess: (d) => { setDeployResult(d); qc.invalidateQueries({ queryKey: ['agents'] }) },
-    onError: (e: unknown) => setError(String(e)),
+    onError: (e: unknown) => setError(extractErrorMessage(e)),
   })
 
   return (

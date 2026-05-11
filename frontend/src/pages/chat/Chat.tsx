@@ -33,6 +33,7 @@ import ExpandMoreIcon from '@mui/icons-material/ExpandMore'
 import ExpandLessIcon from '@mui/icons-material/ExpandLess'
 import { builderApi } from '../../api/builder'
 import type { AgentRecord } from '../../types'
+import { extractErrorMessage } from '../../utils/errors'
 
 // ── Studio proxy ──────────────────────────────────────────────────────────────
 
@@ -699,7 +700,7 @@ export default function Chat() {
       ))
     } catch (e) {
       setMessages(prev => prev.map(m =>
-        m.id === agentMsgId ? { ...m, text:`Error: ${String(e)}`, loading:false, error:true } : m
+        m.id === agentMsgId ? { ...m, text:`Error: ${extractErrorMessage(e)}`, loading:false, error:true } : m
       ))
     } finally {
       setLoading(false)

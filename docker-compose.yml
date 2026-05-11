@@ -336,13 +336,33 @@ services:
   # ============================================================
   # PLATFORM
   # ============================================================
+
+  # GATE — Go reverse-proxy that owns all external runtime traffic.
+  # Takes over ports 8080 and 8081. Backends are internal-only.
+  gate:
+    build: { context: ./gate }
+    container_name: gate
+    restart: unless-stopped
+    ports: ["8080:8080", "8081:8081"]
+    environment:
+      - BUILDER_BACKEND_URL=http://builder-backend:8080
+      - WORKFLOW_BACKEND_URL=http://workflow-backend:8081
+      - MINIO_ENDPOINT=minio:9000
+      - MINIO_ACCESS_KEY=${MINIO_ACCESS_KEY:-minioadmin}
+      - MINIO_SECRET_KEY=${MINIO_SECRET_KEY:-minioadmin}
+    depends_on:
+      builder-backend: { condition: service_started }
+      workflow-backend: { condition: service_started }
+      minio: { condition: service_started }
+    networks: [agentnet]
+
   builder-backend:
     build:
       context: .
       dockerfile: builder-backend/Dockerfile
     container_name: builder-backend
     restart: unless-stopped
-    ports: ["8080:8080"]
+    # No host port — external traffic enters via gate only.
     environment:
       - LITELLM_BASE_URL=http://litellm:4000
       - LITELLM_MASTER_KEY=${LITELLM_MASTER_KEY:-sk-master-change-me}
@@ -388,7 +408,7 @@ services:
     build: { context: ./workflow-backend }
     container_name: workflow-backend
     restart: unless-stopped
-    ports: ["8081:8081"]
+    # No host port — external traffic enters via gate only.
     environment:
       - TEMPORAL_HOST=temporal:7233
       - TEMPORAL_NAMESPACE=default
@@ -424,8 +444,7 @@ services:
       - VITE_STUDIO_URL=http://localhost:3000
       - VITE_TEMPORAL_UI_URL=http://localhost:8233
     depends_on:
-      - builder-backend
-      - workflow-backend
+      - gate
     networks: [agentnet]
 
 volumes:

@@ -86,6 +86,9 @@ The workflow execution itself (start, pause, resume, complete) logs as `actor_ty
 
 | Event | Logger | Bucket path | Actor recorded | Retention |
 |---|---|---|---|---|
+| **Agent invoke (gate pre)** | **gate** | `audit-logs/gate/{date}/{gate-run-id}-pre.json` | caller identity | 90d locked |
+| **Agent invoke (gate post)** | **gate** | `audit-logs/gate/{date}/{gate-run-id}-post.json` | caller identity + status + duration | 90d locked |
+| **Workflow run start/status/events (gate pre/post)** | **gate** | `audit-logs/gate/{date}/{gate-run-id}-{phase}.json` | caller identity | 90d locked |
 | LLM call | LiteLLM s3 callback | `audit-logs/llm/{date}/{vk-id}/...` | agent (via virtual key) | 90d locked |
 | Tool / MCP call | LiteLLM s3 callback | `audit-logs/tool/{date}/{vk-id}/...` | agent | 90d locked |
 | ReMe op (read/write) | LiteLLM (ReMe routes through it) | `audit-logs/llm/...` (embeds) | agent | 90d locked |
@@ -95,6 +98,28 @@ The workflow execution itself (start, pause, resume, complete) logs as `actor_ty
 | Workflow execution events (per node) | workflow-backend | `audit-logs/workflow-run/{date}/{run-id}/...` | varies | 90d locked |
 | Human task resolution | workflow-backend | `audit-logs/human-task/{date}/{run-id}/...` | human | 90d locked |
 | Object lock retention check | MinIO daily | (intrinsic) | system | n/a |
+
+### Gate audit record schema
+
+```json
+{
+  "gate_run_id":  "gate-a3f9b2c1d4e5",
+  "timestamp":    "2026-05-11T10:23:45.123Z",
+  "actor_id":     "user-builder",
+  "actor_type":   "human",
+  "target_type":  "agent",
+  "target_name":  "kyc-reviewer",
+  "run_id":       "",
+  "method":       "POST",
+  "path":         "/agents/kyc-reviewer/invoke",
+  "backend":      "builder-backend",
+  "status_code":  200,
+  "duration_ms":  342,
+  "phase":        "post"
+}
+```
+
+The `gate_run_id` is forwarded to the backend as `X-Gate-Run-Id` and returned in the response header, enabling cross-service correlation.
 
 ## The SOC 2 talk track (memorize)
 

@@ -1,5 +1,6 @@
 import 'reactflow/dist/style.css'
 import React, { useCallback, useEffect, useRef, useState } from 'react'
+import { extractErrorMessage } from '../../utils/errors'
 import { useNavigate, useParams } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import ReactFlow, {
@@ -1420,7 +1421,7 @@ export default function Composer({ workflowName: propName }: { workflowName?: st
       subscribeSSE(d.run_id)
       qc.invalidateQueries({ queryKey: ['runs', wfName] })
     },
-    onError: (e: unknown) => setRunError(String(e)),
+    onError: (e: unknown) => setRunError(extractErrorMessage(e)),
   })
 
   const subscribeSSE = useCallback((id: string) => {

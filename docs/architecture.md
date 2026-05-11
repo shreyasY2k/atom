@@ -60,7 +60,7 @@ two registries serve different purposes and are not the same.
 
 ```
 ┌─────────────────────────────────────────────────────────────────────┐
-│                       Atom Agent Platform UI                      │
+│                       Atom Agent Platform UI                        │
 │  ┌─────────────────────────┐         ┌────────────────────────────┐ │
 │  │     AGENT BUILDER       │         │     WORKFLOW COMPOSER      │ │
 │  │                         │         │                            │ │
@@ -70,34 +70,51 @@ two registries serve different purposes and are not the same.
 │  │  agent gets             │         │  workflow ──▶ Temporal     │ │
 │  │  service-account ID     │         │  executes                  │ │
 │  └─────────────────────────┘         └────────────────────────────┘ │
-└────────────────┬─────────────────────────────────┬──────────────────┘
-                 │                                 │
-                 ▼                                 ▼
-       ┌───────────────────┐             ┌──────────────────────┐
-       │  Builder Backend  │             │  Workflow Backend    │
-       │  (FastAPI)        │             │  (FastAPI + Temporal │
-       │                   │             │   Python SDK)        │
-       │  - validate spec  │             │  - validate spec     │
-       │  - compile code   │             │  - register workflow │
-       │  - issue service- │             │  - run worker        │
-       │    account in     │             │  - expose human task │
-       │    LiteLLM        │             │    queue             │
-       │  - deploy agent   │             │  - emit audit events │
-       └─────────┬─────────┘             └──────────┬───────────┘
-                 │                                  │
-                 ▼                                  ▼
-       ┌───────────────────────────────────────────────────────────┐
-       │                LiteLLM Gateway (4000)                      │
-       │  - Gemini-only model_list                                  │
-       │  - virtual keys per service account (= NHI for agents)    │
-       │  - MCP gateway for tool calls                              │
-       │  - guardrails: per-agent tool allowlists                   │
-       │  - S3 callback ──▶ MinIO audit-logs                       │
-       └────────┬───────────────────────────────────────────────────┘
-                │
-                ├──▶ Gemini API (the only LLM provider)
-                ├──▶ Mock services (KYC, OFAC, SWIFT, treasury, FNOL, OCR)
-                └──▶ MinIO (audit logs, immutable)
+└────────────────────────────────┬────────────────────────────────────┘
+                                 │ all external traffic
+                                 ▼
+                    ┌────────────────────────┐
+                    │   GATE  (Go, :8080/81) │  ◀── audit chokepoint
+                    │                        │
+                    │  :8080  builder surface│
+                    │  :8081 workflow surface│
+                    │                        │
+                    │  every runtime call:   │
+                    │  • stamp gate_run_id   │
+                    │  • pre-audit → MinIO   │
+                    │  • proxy to backend    │
+                    │  • post-audit → MinIO  │
+                    │  • log → stdout/Loki   │
+                    └────────┬───────────────┘
+                             │
+              ┌──────────────┴───────────────┐
+              ▼                              ▼
+    ┌───────────────────┐         ┌──────────────────────┐
+    │  Builder Backend  │         │  Workflow Backend     │
+    │  (FastAPI, :8080) │         │  (FastAPI + Temporal  │
+    │  internal only    │         │   SDK, :8081)         │
+    │                   │         │  internal only        │
+    │  - validate spec  │         │  - validate spec      │
+    │  - compile code   │         │  - register workflow  │
+    │  - issue service- │         │  - run worker         │
+    │    account in     │         │  - expose human task  │
+    │    LiteLLM        │         │    queue              │
+    │  - deploy agent   │         │  - emit audit events  │
+    └─────────┬─────────┘         └──────────┬────────────┘
+              │                              │
+              ▼                              ▼
+    ┌───────────────────────────────────────────────────────────┐
+    │                LiteLLM Gateway (4000)                      │
+    │  - Gemini-only model_list                                  │
+    │  - virtual keys per service account (= NHI for agents)    │
+    │  - MCP gateway for tool calls                              │
+    │  - guardrails: per-agent tool allowlists                   │
+    │  - S3 callback ──▶ MinIO audit-logs                       │
+    └────────┬───────────────────────────────────────────────────┘
+             │
+             ├──▶ Gemini API (the only LLM provider)
+             ├──▶ Mock services (KYC, OFAC, SWIFT, treasury, FNOL, OCR)
+             └──▶ MinIO (audit logs, immutable)
 ```
 
 ## Component map
@@ -105,8 +122,9 @@ two registries serve different purposes and are not the same.
 | Service | Port | Purpose | Source |
 |---|---|---|---|
 | `frontend` | 5173 | React UI: Builder + Composer + Audit + Tasks | local |
-| `builder-backend` | 8080 | FastAPI: agent spec → code → deploy + identity issuance | local |
-| `workflow-backend` | 8081 | FastAPI: workflow spec → Temporal registration; human task queue | local |
+| `gate` | **8080, 8081** | Go reverse-proxy: intercepts all runtime calls, stamps gate_run_id, writes pre/post audit to MinIO, logs every request. External-only — backends are internal. | local |
+| `builder-backend` | 8080 (internal) | FastAPI: agent spec → code → deploy + identity issuance | local |
+| `workflow-backend` | 8081 (internal) | FastAPI: workflow spec → Temporal registration; human task queue | local |
 | `temporal` | 7233 (gRPC) / 8233 (web) | Workflow engine | image |
 | `temporal-db` | 5432 (internal) | Postgres for Temporal | image |
 | `litellm` | 4000 | Gemini gateway, MCP, virtual keys, audit | image |
