@@ -378,9 +378,9 @@ services:
       - ./specs:/app/specs
       - builder-workdir:/work
     depends_on:
-      - litellm
-      - minio
-      - reme
+      litellm: { condition: service_started }
+      minio: { condition: service_started }
+      reme: { condition: service_started }
       platform-db: { condition: service_healthy }
     networks: [agentnet]
 
@@ -407,9 +407,9 @@ services:
       - ./specs:/app/specs
       - ./skills:/app/skills:ro
     depends_on:
-      - temporal
-      - builder-backend
-      - task-queue
+      temporal: { condition: service_started }
+      builder-backend: { condition: service_started }
+      task-queue: { condition: service_started }
       platform-db: { condition: service_healthy }
     networks: [agentnet]
 
