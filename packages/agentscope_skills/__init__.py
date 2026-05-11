@@ -1,5 +1,5 @@
 """
-agentscope_skills — upstream capability layer for Mphasis Agent Platform.
+agentscope_skills — upstream capability layer for Atom Agent Platform.
 
 Provides reusable callable tools that agents can declare in their spec under
 agentscope_skills: [web_search, ...].  These are generic capabilities that

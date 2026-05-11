@@ -1,32 +1,36 @@
-"""SQLite-backed agent registry at /work/registry.db."""
+"""PostgreSQL-backed agent registry."""
 
 import os
-import sqlite3
 from contextlib import contextmanager
-from pathlib import Path
 
-_DB_PATH = Path(os.environ.get("WORK_DIR", "/work")) / "registry.db"
+import psycopg2
+import psycopg2.extras
+
+DATABASE_URL = os.environ.get(
+    "DATABASE_URL",
+    "postgresql://atom:atom@platform-db:5432/atom",
+)
 
 
 def _init():
-    _DB_PATH.parent.mkdir(parents=True, exist_ok=True)
-    with _conn() as conn:
-        conn.execute("""
+    with _cursor() as cur:
+        cur.execute("""
             CREATE TABLE IF NOT EXISTS agents (
                 name               TEXT PRIMARY KEY,
                 version            TEXT NOT NULL,
                 service_account_id TEXT NOT NULL,
                 virtual_key        TEXT NOT NULL,
-                owner              TEXT NOT NULL DEFAULT 'user:demo@atom.demo',
+                owner              TEXT NOT NULL DEFAULT 'user:demo@atom.io',
                 deployed_at        TEXT NOT NULL,
                 endpoint           TEXT,
                 container_id       TEXT,
                 spec_hash          TEXT,
                 code_hash          TEXT,
-                status             TEXT NOT NULL DEFAULT 'deployed'
+                status             TEXT NOT NULL DEFAULT 'deployed',
+                agent_role_name    TEXT
             )
         """)
-        conn.execute("""
+        cur.execute("""
             CREATE TABLE IF NOT EXISTS agent_runs (
                 run_id             TEXT PRIMARY KEY,
                 agent_name         TEXT NOT NULL,
@@ -41,120 +45,107 @@ def _init():
 
 
 @contextmanager
-def _conn():
-    conn = sqlite3.connect(str(_DB_PATH))
-    conn.row_factory = sqlite3.Row
+def _cursor():
+    conn = psycopg2.connect(DATABASE_URL)
     try:
-        yield conn
+        with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+            yield cur
         conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
     finally:
         conn.close()
 
 
 def upsert(record: dict) -> None:
-    with _conn() as conn:
-        conn.execute("""
+    rec = {"agent_role_name": None, **record}
+    with _cursor() as cur:
+        cur.execute("""
             INSERT INTO agents
               (name, version, service_account_id, virtual_key, owner,
                deployed_at, endpoint, container_id, spec_hash, code_hash, status,
                agent_role_name)
             VALUES
-              (:name, :version, :service_account_id, :virtual_key, :owner,
-               :deployed_at, :endpoint, :container_id, :spec_hash, :code_hash, :status,
-               :agent_role_name)
-            ON CONFLICT(name) DO UPDATE SET
-              version=excluded.version,
-              service_account_id=excluded.service_account_id,
-              virtual_key=excluded.virtual_key,
-              deployed_at=excluded.deployed_at,
-              endpoint=excluded.endpoint,
-              container_id=excluded.container_id,
-              spec_hash=excluded.spec_hash,
-              code_hash=excluded.code_hash,
-              status=excluded.status,
-              agent_role_name=COALESCE(excluded.agent_role_name, agents.agent_role_name)
-        """, {"agent_role_name": None, **record})
+              (%(name)s, %(version)s, %(service_account_id)s, %(virtual_key)s, %(owner)s,
+               %(deployed_at)s, %(endpoint)s, %(container_id)s, %(spec_hash)s, %(code_hash)s, %(status)s,
+               %(agent_role_name)s)
+            ON CONFLICT (name) DO UPDATE SET
+              version=EXCLUDED.version,
+              service_account_id=EXCLUDED.service_account_id,
+              virtual_key=EXCLUDED.virtual_key,
+              deployed_at=EXCLUDED.deployed_at,
+              endpoint=EXCLUDED.endpoint,
+              container_id=EXCLUDED.container_id,
+              spec_hash=EXCLUDED.spec_hash,
+              code_hash=EXCLUDED.code_hash,
+              status=EXCLUDED.status,
+              agent_role_name=COALESCE(EXCLUDED.agent_role_name, agents.agent_role_name)
+        """, rec)
 
 
 def get(name: str) -> dict | None:
-    with _conn() as conn:
-        row = conn.execute("SELECT * FROM agents WHERE name=?", (name,)).fetchone()
+    with _cursor() as cur:
+        cur.execute("SELECT * FROM agents WHERE name=%s", (name,))
+        row = cur.fetchone()
         return dict(row) if row else None
 
 
 def list_all() -> list[dict]:
-    with _conn() as conn:
-        rows = conn.execute("SELECT * FROM agents ORDER BY deployed_at DESC").fetchall()
-        return [dict(r) for r in rows]
+    with _cursor() as cur:
+        cur.execute("SELECT * FROM agents ORDER BY deployed_at DESC")
+        return [dict(r) for r in cur.fetchall()]
 
 
 def set_agent_role_name(name: str, role_name: str) -> None:
-    """Backfill the agent_role_name for an existing agent record."""
-    with _conn() as conn:
-        conn.execute("UPDATE agents SET agent_role_name=? WHERE name=?", (role_name, name))
+    with _cursor() as cur:
+        cur.execute("UPDATE agents SET agent_role_name=%s WHERE name=%s", (role_name, name))
 
 
 def mark_undeployed(name: str) -> None:
-    with _conn() as conn:
-        conn.execute("UPDATE agents SET status='undeployed' WHERE name=?", (name,))
+    with _cursor() as cur:
+        cur.execute("UPDATE agents SET status='undeployed' WHERE name=%s", (name,))
 
 
 def upsert_run(run: dict) -> None:
-    with _conn() as conn:
-        conn.execute("""
-            INSERT INTO agent_runs (run_id, agent_name, service_account_id, started_at, completed_at, status, user_message, agent_response)
-            VALUES (:run_id, :agent_name, :service_account_id, :started_at, :completed_at, :status, :user_message, :agent_response)
-            ON CONFLICT(run_id) DO UPDATE SET
-              completed_at=excluded.completed_at,
-              status=excluded.status,
-              user_message=COALESCE(excluded.user_message, agent_runs.user_message),
-              agent_response=COALESCE(excluded.agent_response, agent_runs.agent_response)
-        """, {
-            "user_message": None,
-            "agent_response": None,
-            **run,
-        })
+    rec = {"user_message": None, "agent_response": None, **run}
+    with _cursor() as cur:
+        cur.execute("""
+            INSERT INTO agent_runs (run_id, agent_name, service_account_id, started_at,
+                                    completed_at, status, user_message, agent_response)
+            VALUES (%(run_id)s, %(agent_name)s, %(service_account_id)s, %(started_at)s,
+                    %(completed_at)s, %(status)s, %(user_message)s, %(agent_response)s)
+            ON CONFLICT (run_id) DO UPDATE SET
+              completed_at=EXCLUDED.completed_at,
+              status=EXCLUDED.status,
+              user_message=COALESCE(EXCLUDED.user_message, agent_runs.user_message),
+              agent_response=COALESCE(EXCLUDED.agent_response, agent_runs.agent_response)
+        """, rec)
 
 
 def get_run(run_id: str) -> dict | None:
-    with _conn() as conn:
-        row = conn.execute("SELECT * FROM agent_runs WHERE run_id=?", (run_id,)).fetchone()
+    with _cursor() as cur:
+        cur.execute("SELECT * FROM agent_runs WHERE run_id=%s", (run_id,))
+        row = cur.fetchone()
         return dict(row) if row else None
 
 
 def list_runs(agent_name: str, limit: int = 50) -> list[dict]:
-    with _conn() as conn:
-        rows = conn.execute(
-            "SELECT * FROM agent_runs WHERE agent_name=? ORDER BY started_at DESC LIMIT ?",
-            (agent_name, limit)
-        ).fetchall()
-        return [dict(r) for r in rows]
+    with _cursor() as cur:
+        cur.execute(
+            "SELECT * FROM agent_runs WHERE agent_name=%s ORDER BY started_at DESC LIMIT %s",
+            (agent_name, limit),
+        )
+        return [dict(r) for r in cur.fetchall()]
 
 
 def list_all_runs(limit: int = 200) -> list[dict]:
-    """List all runs across all agents, newest first."""
-    with _conn() as conn:
-        rows = conn.execute(
-            "SELECT * FROM agent_runs ORDER BY started_at DESC LIMIT ?",
-            (limit,)
-        ).fetchall()
-        return [dict(r) for r in rows]
+    with _cursor() as cur:
+        cur.execute(
+            "SELECT * FROM agent_runs ORDER BY started_at DESC LIMIT %s",
+            (limit,),
+        )
+        return [dict(r) for r in cur.fetchall()]
 
 
-def _migrate():
-    """Add new columns to existing tables without breaking old installs."""
-    with _conn() as conn:
-        for sql in [
-            "ALTER TABLE agents ADD COLUMN agent_role_name TEXT",
-            "ALTER TABLE agent_runs ADD COLUMN user_message TEXT",
-            "ALTER TABLE agent_runs ADD COLUMN agent_response TEXT",
-        ]:
-            try:
-                conn.execute(sql)
-            except Exception:
-                pass  # column already exists
-
-
-# Initialise on import
 _init()
-_migrate()

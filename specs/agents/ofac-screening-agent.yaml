@@ -1,0 +1,48 @@
+apiVersion: atom.platform/v1
+kind: AgentDeployment
+metadata:
+  name: ofac-screening-agent
+  domain: banking-kyc
+  version: 1.0.0
+  description: Screens a customer against the OFAC sanctions list prior to a securities
+    transfer.
+  owner: user:demo@atom.demo
+spec:
+  agents:
+  - name: ofac-screener
+    role: standalone
+    agent_role_file: agent-roles/banking-kyc/ofac-screener.role.md
+    reasoning_mode: prescribed
+    model: gemini-3.1-pro
+    temperature: 1.0
+    reasoning_effort: medium
+    max_iterations: 6
+    tools:
+    - get_customer_profile
+    - get_external_screening
+    input_schema:
+      type: object
+      properties:
+        customer_id:
+          type: string
+          description: Customer identifier
+        transfer_id:
+          type: string
+          description: Transfer request ID
+      required:
+      - customer_id
+    memory:
+      type: short_term
+      cross_conversation:
+        enabled: true
+        kind: personal
+        identity_field: input.customer_id
+  flow:
+    type: standalone
+  audit:
+    log_to: minio://audit-logs/agent/ofac-screening-agent
+    retention_days: 90
+  deployment:
+    runtime: agentscope
+    sandbox: base
+    replicas: 1

@@ -24,7 +24,7 @@ const cards = [
     to: '/workflows/compose',
     icon: <AccountTreeIcon sx={{ fontSize: 22, color: '#60a5fa' }} />,
     title: 'Workflow Composer',
-    desc: 'Load the ATS 9-step workflow. Replace routine human steps with agents live. Watch the execution timeline update node by node.',
+    desc: 'Load your existing processes as graphs. Replace routine human steps with agents. Watch the execution timeline update node by node.',
     badge: 'React Flow canvas',
     borderColor: 'rgba(96,165,250,0.3)',
     borderHover: 'rgba(96,165,250,0.7)',
@@ -34,7 +34,7 @@ const cards = [
     icon: <AssignmentIcon sx={{ fontSize: 22, color: '#4ade80' }} />,
     title: 'Human Tasks',
     desc: 'Open tasks waiting for a human decision. Accept, reject, or edit. Resolving a task resumes the paused Temporal workflow.',
-    badge: 'BFSI invariant',
+    badge: 'Safety gate',
     borderColor: 'rgba(74,222,128,0.3)',
     borderHover: 'rgba(74,222,128,0.7)',
   },
@@ -122,11 +122,11 @@ export default function Home() {
           Atom Agent Platform
         </Typography>
         <Typography variant="body2" color="text.secondary" sx={{ maxWidth: 560, mb: 2 }}>
-          We don't sell agents. We help you remove routine human work from your existing processes —
-          keeping humans on the calls that matter, with one audit trail across every step.
+          Build, deploy, and govern AI agents for your processes — keeping humans at critical decision points,
+          with one audit trail across every step.
         </Typography>
         <Chip
-          label="Gemini-only · Temporal · MinIO object lock"
+          label="Gemini · Temporal · MinIO object lock"
           size="small"
           sx={{ fontFamily: 'monospace', fontSize: '0.7rem' }}
           variant="outlined"

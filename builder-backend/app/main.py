@@ -8,7 +8,7 @@ from app.core.observability import setup
 app = FastAPI(
     title="ATOM Agent Platform — Agent Builder",
     version="1.0.0",
-    description="Validates, generates, compiles, and deploys BFSI agents.",
+    description="Validates, generates, compiles, and deploys agents.",
 )
 
 app.include_router(auth.router)

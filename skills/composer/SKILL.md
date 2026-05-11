@@ -1,7 +1,7 @@
 ---
 name: workflow-composer
 description: |
-  Compiles a natural-language description of a BFSI workflow into a
+  Compiles a natural-language description of a workflow into a
   Atom Workflow Composer workflow-spec.yaml. Used by Mode C
   (full natural-language workflow generation). Output is a single YAML
   file conforming to the workflow-spec schema, using only the four
@@ -12,7 +12,7 @@ trigger: |
 
 # Workflow Composer Skill
 
-You are compiling a natural-language description of a BFSI process into a `workflow-spec.yaml`. Your output is parsed by the workflow-backend; deviations break the build.
+You are compiling a natural-language description of a process into a `workflow-spec.yaml`. Your output is parsed by the workflow-backend; deviations break the build.
 
 ## Hard rules — never violate
 
@@ -46,7 +46,7 @@ A single `workflow-spec.yaml` as a fenced YAML block. Exact schema in `docs/work
 3. **Assign IDs** in kebab-case based on step purpose.
 4. **Wire `next` and `branches`** for sequential flow and decision branching.
 5. **Add `confidence_threshold` and `fallback_node`** to every agent node.
-6. **Verify the BFSI invariant**: every state-changing `http` call has a `human_task` neighbor.
+6. **Verify the safety invariant**: every state-changing `http` call has a `human_task` neighbor.
 7. **Emit YAML.**
 
 ## Common rationalizations to reject

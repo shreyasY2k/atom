@@ -375,7 +375,7 @@ Node executes
 | **human_task** | Each action in `{accept, reject, edit}` |
 | **human_task** | `escalation_policy.action=escalate` requires `escalate_to_group` |
 | **human_task** | `skip_if.condition` passes safe-AST check |
-| **BFSI gate** | Any non-GET http call to a state-changing service (`swift-gw`) must have a `human_task` immediately before or after it |
+| **Safety gate** | Any non-GET http call to a state-changing service (`swift-gw`) must have a `human_task` immediately before or after it |
 | **audit** | `retention_days >= 90` |
 
 ---

@@ -4,7 +4,7 @@ This is the load-bearing document for the security/audit talk track. Every claim
 
 ## The core principle
 
-**Every action the platform takes is performed by an identifiable actor.** Three actor types exist. They are recorded uniformly in audit logs. They are governed by the same controls. This is what makes the platform's audit story symmetric across human and non-human actors — which is what BFSI compliance frameworks (SOC 2, ISO 27001, NIST CSF) increasingly require.
+**Every action the platform takes is performed by an identifiable actor.** Three actor types exist. They are recorded uniformly in audit logs. They are governed by the same controls. This is what makes the platform's audit story symmetric across human and non-human actors — which is what enterprise compliance frameworks (SOC 2, ISO 27001, NIST CSF) increasingly require.
 
 ## The three actor types
 

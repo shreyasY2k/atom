@@ -1,0 +1,20 @@
+apiVersion: atom.platform/v1
+kind: WorkflowDeployment
+metadata:
+  name: workflow-1778431828688
+  domain: banking
+  version: 0.1.0
+  description: New workflow
+  owner: demo-user
+spec:
+  input_schema:
+    type: object
+    required: []
+    properties: {}
+  nodes: []
+  audit:
+    log_to: minio://audit-logs/workflow/workflow-1778431828688
+    retention_days: 90
+  deployment:
+    runtime: temporal
+    task_queue: default-task-queue

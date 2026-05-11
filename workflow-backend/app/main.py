@@ -22,7 +22,7 @@ logger = logging.getLogger(__name__)
 app = FastAPI(
     title="ATOM Agent Platform — Workflow Engine",
     version="1.0.0",
-    description="Validates, registers, and executes BFSI workflows via Temporal.",
+    description="Validates, registers, and executes workflows via Temporal.",
 )
 
 app.include_router(specs.router)

@@ -17,7 +17,7 @@ scrape_configs:
     static_configs:
       - targets: ["litellm:4000"]
 
-  - job_name: mock-bfsi
+  - job_name: mock-services-a
     static_configs:
       - targets:
           - "treasury-dw:8090"
@@ -26,7 +26,7 @@ scrape_configs:
           - "fnol-svc:8093"
           - "ocr-svc:8094"
 
-  - job_name: mock-ats
+  - job_name: mock-services-b
     static_configs:
       - targets:
           - "kyc-svc:8095"

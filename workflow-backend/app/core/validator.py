@@ -1,5 +1,5 @@
 """
-Workflow spec validation — structural rules, type rules, and BFSI invariants.
+Workflow spec validation — structural rules, type rules, and safety invariants.
 Returns a list of {node_id, reason} dicts; empty list = valid.
 """
 
@@ -87,8 +87,8 @@ def validate(spec: WorkflowSpec, check_agents: bool = False) -> list[dict]:
         elif n.type == "human_task":
             errors.extend(_validate_human_task_node(n, node_ids))
 
-    # ── BFSI human-gate invariant ─────────────────────────────────────────────
-    errors.extend(_check_bfsi_invariant(nodes, node_ids))
+    # ── Safety human-gate invariant ──────────────────────────────────────────
+    errors.extend(_check_safety_invariant(nodes, node_ids))
 
     return errors
 
@@ -254,10 +254,10 @@ def _validate_expression(node_id: str, expr: str, suffix: str = "") -> list[dict
     return errors
 
 
-# ── BFSI human-gate invariant ─────────────────────────────────────────────────
+# ── Safety human-gate invariant ──────────────────────────────────────────────
 
-def _check_bfsi_invariant(nodes: list[WorkflowNode],
-                           node_ids: set[str]) -> list[dict]:
+def _check_safety_invariant(nodes: list[WorkflowNode],
+                             node_ids: set[str]) -> list[dict]:
     """
     Every path reaching a state-changing http call must have a human_task
     node immediately before or after it.
@@ -297,7 +297,7 @@ def _check_bfsi_invariant(nodes: list[WorkflowNode],
         if not (pred_has_human or succ_has_human):
             errors.append({
                 "node_id": n.id,
-                "reason": (f"BFSI invariant: state-changing http call to '{svc}' "
+                "reason": (f"Safety invariant: state-changing http call to '{svc}' "
                             "has no adjacent human_task node"),
             })
     return errors

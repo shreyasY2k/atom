@@ -1,0 +1,33 @@
+apiVersion: atom.platform/v1
+kind: AgentDeployment
+metadata:
+  name: string-reverser
+  domain: banking-kyc
+  version: 1.0.0
+  description: Reverses a string and returns it uppercase.
+  owner: user:demo@atom.demo
+spec:
+  agents:
+  - name: string-reverser-agent
+    role: standalone
+    agent_role_file: agent-roles/banking-kyc/string-reverser.role.md
+    reasoning_mode: prescribed
+    model: gemini-3.1-pro
+    temperature: 1.0
+    reasoning_effort: medium
+    max_iterations: 6
+    tools: []
+    input_schema: {}
+    memory:
+      type: short_term
+      cross_conversation:
+        enabled: false
+  flow:
+    type: standalone
+  audit:
+    log_to: minio://audit-logs/agent/string-reverser
+    retention_days: 90
+  deployment:
+    runtime: agentscope
+    sandbox: base
+    replicas: 1

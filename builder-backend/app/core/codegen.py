@@ -507,7 +507,7 @@ _SPEC_GEN_SYSTEM = textwrap.dedent("""
     kind: AgentDeployment
     metadata:
       name: <kebab-case-name>
-      domain: <banking-kyc|banking-securities-ops|banking-treasury|insurance-claims>
+      domain: <domain-name>
       version: 1.0.0
       description: <one sentence>
       owner: user:demo@atom.demo
@@ -546,7 +546,7 @@ _SPEC_GEN_SYSTEM = textwrap.dedent("""
     processes:
 
     ```yaml
-          # For agents that work with structured domain entities (most BFSI agents):
+          # For agents that work with structured domain entities:
           input_schema:
             type: object
             properties:
@@ -569,20 +569,14 @@ _SPEC_GEN_SYSTEM = textwrap.dedent("""
           input_schema: {}
     ```
 
-    Valid tools per domain:
-    - banking-kyc: get_customer_profile, get_kyc_documents, get_external_screening
-    - banking-securities-ops: get_customer_positions, get_security_master, check_position_lots
-    - banking-treasury: get_overnight_positions, get_market_data, compute_lcr, get_trailing_metrics, validate_hqla_composition
-    - insurance-claims: extract_document_text, parse_repair_estimate, lookup_policy, get_claims_history, verify_arithmetic, check_coverage, get_red_flag_signals
+    Tools are domain-specific — specify tools relevant to your domain.
 
     Input schema inference rules (apply in order):
     1. If the description mentions documents, files, PDF, images, OCR, or scans → use the file_base64 schema.
-    2. If the domain is banking-kyc → required field is customer_id (string).
-    3. If the domain is banking-securities-ops → required fields are customer_id + transfer_id (strings).
-    4. If the domain is banking-treasury → required field is report_date (string, YYYY-MM-DD).
-    5. If the domain is insurance-claims and NOT document scanning → required field is claim_id (string).
-    6. If the agent performs pure text transformation with no domain entity → use `input_schema: {}`.
-    7. memory.identity_field must reference a field that exists in input_schema (e.g. input.customer_id).
+    2. If the domain processes structured entities → add required fields that identify those entities.
+    3. If the domain processes documents/files → use the file_base64 schema.
+    4. If the agent processes free text → use `input_schema: {}`
+    5. memory.identity_field must reference a field that exists in input_schema (e.g. input.customer_id).
        If the schema has no customer identifier, set cross_conversation.enabled to false.
 
     Rules:
@@ -598,30 +592,27 @@ _SKILL_GEN_SYSTEM = textwrap.dedent("""
 
     Study the following two reference skills carefully — yours must match this quality:
 
-    === REFERENCE 1: KYC Refresh Analyst ===
-    You are an agent in a US bank's Asset Transfer workflow. You are invoked when a
-    customer initiates a transfer and KYC needs to be refreshed before the transfer
-    can proceed. Your output is consumed by the workflow engine.
+    === REFERENCE 1: Document Processing Agent ===
+    You are an agent in a document processing workflow. You are invoked when a
+    document arrives and needs to be classified before it can proceed.
+    Your output is consumed by the workflow engine.
 
-    Process: 1. Call get_customer_profile. 2. Call get_kyc_documents — note staleness
-    (>730 days). 3. Call get_external_screening. 4. Compose refreshed profile with
-    confidence score (0.95+ if fresh; 0.85–0.94 if minor staleness; <0.85 if stale
-    or adverse hits).
+    Process: 1. Decode file_base64 content. 2. Identify document type. 3. Extract
+    key fields. 4. Compute confidence score based on extraction completeness.
 
-    Output: valid JSON with customer_id, refreshed_profile, issues_found, screening_result,
-    confidence, recommendation (PASS|REVIEW|ESCALATE), notes_for_reviewer.
+    Output: valid JSON with document_type, extracted_fields, confidence,
+    recommendation (PASS|REVIEW|ESCALATE), notes_for_reviewer.
     No markdown fences. No prose before or after the JSON.
 
     Critical rules: confidence <0.85 → recommendation REVIEW or ESCALATE.
-    Any screening hit → cannot be PASS. Documents >730 days → cannot be PASS.
 
-    === REFERENCE 2: Asset Reconciliation Analyst ===
-    You compare incoming transfer CUSIPs/quantities against customer records.
-    Process: 1. get_customer_positions. 2. get_security_master. 3. check_position_lots.
-    4. Classify each security: match | quantity_mismatch | unknown_cusip | lot_mismatch.
-    Output: JSON with transfer_id, securities_count, reconciled[], issues[], confidence,
+    === REFERENCE 2: Data Reconciliation Agent ===
+    You compare incoming data records against master records to identify discrepancies.
+    Process: 1. Fetch source records. 2. Fetch master records. 3. Compare fields.
+    4. Classify each record: match | field_mismatch | missing_record | extra_record.
+    Output: JSON with records_count, reconciled[], issues[], confidence,
     recommendation (PASS|REVIEW), notes_for_reviewer.
-    Confidence <0.80 → REVIEW. Unknown CUSIP → cannot PASS.
+    Confidence <0.80 → REVIEW. Missing master record → cannot PASS.
 
     === YOUR TASK ===
     Given the agent's name, domain, description, tools, and expected I/O,

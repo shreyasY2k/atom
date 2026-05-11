@@ -1,0 +1,36 @@
+apiVersion: atom.platform/v1
+kind: AgentDeployment
+metadata:
+  name: string-reversal-agent
+  domain: banking-securities-ops
+  version: 1.0.0
+  description: An agent that reverses strings and inverts their character cases.
+  owner: user:demo@atom.demo
+spec:
+  agents:
+  - name: string-processor
+    role: standalone
+    agent_role_file: agent-roles/banking-securities-ops/string-reversal-agent.role.md
+    reasoning_mode: prescribed
+    model: gemini-3.1-pro
+    temperature: 1.0
+    reasoning_effort: medium
+    max_iterations: 6
+    tools:
+    - get_security_master
+    memory:
+      type: short_term
+      cross_conversation:
+        enabled: true
+        kind: personal
+        identity_field: input.customer_id
+
+  flow:
+    type: standalone
+  audit:
+    log_to: minio://audit-logs/agent/string-reversal-agent
+    retention_days: 90
+  deployment:
+    runtime: agentscope
+    sandbox: base
+    replicas: 1

@@ -60,7 +60,7 @@ two registries serve different purposes and are not the same.
 
 ```
 ┌─────────────────────────────────────────────────────────────────────┐
-│                       Mphasis Agent Platform UI                      │
+│                       Atom Agent Platform UI                      │
 │  ┌─────────────────────────┐         ┌────────────────────────────┐ │
 │  │     AGENT BUILDER       │         │     WORKFLOW COMPOSER      │ │
 │  │                         │         │                            │ │
@@ -96,7 +96,7 @@ two registries serve different purposes and are not the same.
        └────────┬───────────────────────────────────────────────────┘
                 │
                 ├──▶ Gemini API (the only LLM provider)
-                ├──▶ Mock BFSI services (KYC, OFAC, SWIFT, treasury, FNOL, OCR)
+                ├──▶ Mock services (KYC, OFAC, SWIFT, treasury, FNOL, OCR)
                 └──▶ MinIO (audit logs, immutable)
 ```
 
@@ -330,7 +330,7 @@ AgentScope, AgentScope Runtime, AgentScope Studio, ReMe — built from source vi
 
 Adds 10–15 min to first build. Subsequent builds cached.
 
-## Deployment topology — Phase 1 (demo)
+## Deployment topology — Phase 1
 
 Single-host docker-compose. All services on one Docker network `agentnet`.
 
@@ -343,7 +343,7 @@ Single-host docker-compose. All services on one Docker network `agentnet`.
 - Temporal scaled to multi-worker; persistence on managed Postgres
 - Builder + Workflow backends get RBAC, multi-user, change approval workflow
 - Identity issuance integrated with bank IAM (Okta/Azure AD)
-- Out of scope for TechShift demo
+- Out of scope for Phase 1
 
 ## Out-of-scope
 
