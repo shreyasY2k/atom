@@ -24,7 +24,7 @@ Every LLM call flows through **GATE** — authenticated, policy-checked, rate-li
 
 ```bash
 # 1. Clone
-git clone https://gitlab.com/shreyasy2k/atom.git && cd atom
+git clone https://github.com/shreyasy2k/atom.git && cd atom
 
 # 2. Generate keys and configure
 cp .env.example .env
