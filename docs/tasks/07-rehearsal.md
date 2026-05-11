@@ -247,7 +247,7 @@ Maintain at `docs/qa-prep.md`. Coverage areas:
 22. **"What's the cost?"** → Two components: services engagement
     (sprint-priced), platform license (per-workflow or per-agent,
     your call). Concrete pricing in the follow-up.
-23. **"Who's used this?"** → *(Honest answer based on real Mphasis
+23. **"Who's used this?"** → *(Honest answer based on real
     deployments. Don't invent.)*
 24. **"What's the implementation team look like?"** → 2 engineers,
     1 BFSI domain expert, 0.5 program manager for a six-week sprint.

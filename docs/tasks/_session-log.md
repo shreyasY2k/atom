@@ -598,7 +598,6 @@ Task 06: CLI polish (`atom agent scaffold`, `atom workflow init`)
 - **Grafana dashboard**: Loki `compose_project` label → `atom`.
 - **cli/atom.py** → **cli/atom.py**; `setup.py` `py_modules` + `console_scripts` → `atom`.
 - **specs/agents/*.yaml**, **specs/workflows/*.yaml**: `apiVersion`, `owner` fields updated.
-- **`MphasisWorkflowRunner`** → **`AtomWorkflowRunner`** in temporal/worker.py, workflow-backend/app/worker/runner.py, workflow-backend/app/routes/runs.py, workflow-backend/app/main.py.
 - **codegen.py LLM prompts**: "platform Platform" → "Atom Platform".
 - **CLAUDE.md**: CLI name → `atom`; UI branding → "Atom Workflow Composer".
 - **docs/**: architecture.md, identity-and-audit.md, workflow-spec-format.md, task docs updated.
