@@ -241,15 +241,25 @@ services:
     restart: unless-stopped
     ports: ["8002:8002"]
     environment:
+      # Standard OpenAI env vars (read by the openai Python client)
       - OPENAI_BASE_URL=http://litellm:4000/v1
       - OPENAI_API_KEY=${LITELLM_MASTER_KEY:-sk-master-change-me}
+      # FlowLLM-specific env vars (Application.llm_api_base/key → these env vars)
+      - FLOW_LLM_BASE_URL=http://litellm:4000/v1
+      - FLOW_EMBEDDING_BASE_URL=http://litellm:4000/v1
+      - FLOW_LLM_API_KEY=${LITELLM_MASTER_KEY:-sk-master-change-me}
       - REME_DB_URL=postgresql://reme:reme@reme-db:5432/reme
       - REME_VECTOR_STORE=chroma
       - REME_EMBEDDING_MODEL=gemini-embedding
       - REME_LLM_MODEL=gemini-3-flash
     volumes:
       - reme-data:/app/.reme
+      # Mount our config to BOTH the path passed via --config and the
+      # path flowllm actually loads (--config flag is silently ignored).
       - ./reme/config.yaml:/app/config.yaml:ro
+      - ./reme/config.yaml:/src/reme_ai/config/default.yaml:ro
+      # Provide the .env file flowllm's load_env looks for in cwd (/app).
+      - ./reme/.env:/app/.env:ro
     depends_on:
       - litellm
       - reme-db

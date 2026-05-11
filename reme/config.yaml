@@ -1,47 +1,194 @@
-# ReMe service config.
-# All LLM and embedding calls route through LiteLLM at http://litellm:4000.
-# Storage backend is Postgres (reme-db service in compose).
-# Vector store is local Chroma for V1; upgrade path to pgvector or Qdrant in Phase 2.
+# ReMe v0.3.1.8 service config.
+# Full flow set from upstream default, with llm/embedding/vector_store overridden
+# to route through LiteLLM (http://litellm:4000/v1).
+# API key and base URL come from OPENAI_API_KEY / OPENAI_BASE_URL env vars.
 
-mode: service
+backend: http
+thread_pool_max_workers: 32
 
-llm:
-  # ReMe uses OpenAI-compatible client; LiteLLM presents this surface.
-  provider: openai
-  base_url: ${OPENAI_BASE_URL}     # http://litellm:4000/v1
-  api_key:  ${OPENAI_API_KEY}      # the LiteLLM master key
-  model:    ${REME_LLM_MODEL}      # gemini-3-flash (alias defined in litellm/config.yaml)
-
-embedding:
-  provider: openai
-  base_url: ${OPENAI_BASE_URL}
-  api_key:  ${OPENAI_API_KEY}
-  model:    ${REME_EMBEDDING_MODEL}    # gemini-embedding
-
-storage:
-  metadata:
-    type: postgres
-    url:  ${REME_DB_URL}
-  vector:
-    type: chroma
-    path: /app/.reme/chroma
-
-retrieval:
-  hybrid:
-    vector_weight: 0.7
-    bm25_weight: 0.3
-    min_score: 0.4
-    top_n: 10
-
-memory_kinds:
-  personal:
-    enabled: true
-    description: "Cross-session memory tied to a user/claimant identity (e.g., 'this claimant has had 3 prior claims')."
-  task:
-    enabled: true
-    description: "Pattern memory across runs of the same task (e.g., 'invoices from this repair shop tend to have inflated parts pricing')."
-
-server:
-  host: 0.0.0.0
+http:
+  host: "0.0.0.0"
   port: 8002
-  log_level: info
+  timeout_keep_alive: 600
+  limit_concurrency: 32
+
+# ── LLM: Gemini via LiteLLM ───────────────────────────────────────────────────
+# Base URL and API key come from FLOW_LLM_BASE_URL and FLOW_LLM_API_KEY env vars.
+llm:
+  default:
+    backend: openai_compatible
+    model_name: gemini-3-flash
+
+# ── Embedding: Gemini via LiteLLM ─────────────────────────────────────────────
+# Base URL comes from FLOW_EMBEDDING_BASE_URL env var.
+embedding_model:
+  default:
+    backend: openai_compatible
+    model_name: gemini-embedding
+
+# ── Vector store: local file-backed (persists in the reme-data volume) ─────────
+vector_store:
+  default:
+    backend: local
+    embedding_model: default
+
+# ── Memory flow pipelines (full upstream set) ─────────────────────────────────
+flow:
+  retrieve_task_memory:
+    flow_content: BuildQueryOp() >> RecallVectorStoreOp() >> RerankMemoryOp(enable_llm_rerank=False, enable_score_filter=False, top_k=5) >> RewriteMemoryOp(enable_llm_rewrite=False)
+    description: "Retrieve top-5 relevant task memories"
+    input_schema:
+      query:
+        type: string
+        description: "search query"
+        required: true
+
+  summary_task_memory:
+    flow_content: TrajectoryPreprocessOp(success_threshold=1.0) >> (SuccessExtractionOp()|FailureExtractionOp()|ComparativeExtractionOp(enable_soft_comparison=True)) >> MemoryValidationOp(validation_threshold=0.5) >> MemoryDeduplicationOp() >> UpdateVectorStoreOp()
+    description: "Extract and store task memory from conversation trajectories"
+    input_schema:
+      trajectories:
+        type: array
+        required: false
+
+  summary_task_memory_simple:
+    flow_content: SimpleSummaryOp() >> UpdateVectorStoreOp()
+    description: "Store task memory from simple text content (no trajectory preprocessing)"
+    input_schema:
+      trajectories:
+        type: array
+        required: false
+
+  retrieve_task_memory_simple:
+    flow_content: BuildQueryOp() >> RecallVectorStoreOp() >> MergeMemoryOp()
+    description: "Retrieve task memories (simplified, no reranking)"
+    input_schema:
+      query:
+        type: string
+        required: true
+
+  retrieve_personal_memory:
+    flow_content: SetQueryOp() >> (ExtractTimeOp() | (RetrieveMemoryOp() >> SemanticRankOp())) >> FuseRerankOp()
+    description: "Retrieve top personal memories for the query"
+    input_schema:
+      query:
+        type: string
+        required: true
+
+  summary_personal_memory:
+    flow_content: InfoFilterOp() >> (GetObservationOp() | GetObservationWithTimeOp() | LoadTodayMemoryOp()) >> ContraRepeatOp() >> UpdateVectorStoreOp()
+    description: "Extract and store personal memory from observations"
+    input_schema:
+      trajectories:
+        type: array
+        required: false
+
+  summary_personal_memory_simple:
+    flow_content: SimpleSummaryOp() >> UpdateVectorStoreOp()
+    description: "Store personal memory from simple text (no LLM preprocessing)"
+    input_schema:
+      trajectories:
+        type: array
+        required: false
+
+  retrieve_tool_memory:
+    flow_content: RetrieveToolMemoryOp()
+    description: "Retrieve tool usage patterns by tool name"
+    input_schema:
+      tool_names:
+        type: string
+        required: true
+
+  add_tool_call_result:
+    flow_content: ParseToolCallResultOp(max_history_tool_call_cnt=100, evaluation_sleep_interval=1.0) >> UpdateVectorStoreOp()
+    description: "Evaluate and store tool call results"
+    input_schema:
+      tool_call_results:
+        type: array
+        required: true
+
+  summary_tool_memory:
+    flow_content: SummaryToolMemoryOp(recent_call_count=20, summary_sleep_interval=1.0) >> UpdateVectorStoreOp()
+    description: "Summarise tool usage patterns"
+    input_schema:
+      tool_names:
+        type: string
+        required: true
+
+  vector_store:
+    flow_content: VectorStoreActionOp()
+    description: "Direct vector store management"
+    input_schema:
+      action:
+        type: string
+        required: true
+        enum: [copy, delete, delete_ids, dump, load, list]
+
+  record_task_memory:
+    flow_content: UpdateMemoryFreqOp() >> UpdateMemoryUtilityOp() >> UpdateVectorStoreOp()
+    description: "Update freq and utility attributes of retrieved task memories"
+    input_schema:
+      workspace_id:
+        type: string
+        required: true
+      memory_dicts:
+        type: array
+        required: true
+      update_utility:
+        type: boolean
+        required: true
+
+  delete_task_memory:
+    flow_content: DeleteMemoryOp() >> UpdateVectorStoreOp()
+    description: "Delete low-utility task memories"
+    input_schema:
+      workspace_id:
+        type: string
+        required: true
+      freq_threshold:
+        type: integer
+        required: true
+      utility_threshold:
+        type: number
+        required: true
+
+  react:
+    flow_content: SimpleReactOp()
+    description: "React-style agent execution"
+    input_schema:
+      query:
+        type: string
+        required: true
+
+  agentic_retrieve:
+    flow_content: AgenticRetrieveOp()
+
+  summary_working_memory:
+    flow_content: MessageOffloadOp() >> BatchWriteFileOp()
+    description: "Compact and compress working memory"
+    input_schema:
+      messages:
+        type: array
+        required: true
+      working_summary_mode:
+        type: string
+        required: false
+        enum: ["compact", "compress", "auto"]
+
+  grep_working_memory:
+    flow_content: GrepOp()
+
+  read_working_memory:
+    flow_content: ReadFileOp()
+
+  summary_working_memory_for_as:
+    flow_content: MessageOffloadOp()
+    description: "Working memory summary for AgentScope integration"
+    input_schema:
+      messages:
+        type: array
+        required: true
+      working_summary_mode:
+        type: string
+        required: false
+        enum: ["compact", "compress", "auto"]
