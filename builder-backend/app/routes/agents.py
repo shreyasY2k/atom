@@ -120,6 +120,20 @@ def _do_deploy_agent(name: str, actor: str) -> dict:
         "REME_URL": REME_URL,
         "STUDIO_URL": STUDIO_URL,
     }
+    # Inject memory config so the generated agent's hydrate_memory / persist_memory
+    # functions know which kind of cross-conversation store to use.
+    mem = spec.spec.agents[0].memory
+    if mem and mem.cross_conversation and mem.cross_conversation.enabled:
+        cc = mem.cross_conversation
+        # identity_field in spec is a path like "input.customer_id".
+        # The generated agent receives the payload directly (no "input." nesting),
+        # so strip the prefix before injecting.
+        identity_field = cc.identity_field or ""
+        if identity_field.startswith("input."):
+            identity_field = identity_field[len("input."):]
+        env["AGENT_MEMORY_KIND"] = cc.kind or ""
+        env["AGENT_MEMORY_IDENTITY_FIELD"] = identity_field
+        env["AGENT_MEMORY_TASK_KEY"] = cc.task_key or ""
     deploy_mgr = LocalDeployManager(
         workdir=str(WORK_DIR / "agents" / f"{name}-{spec.metadata.version}")
     )

@@ -163,29 +163,53 @@ for fn in <<agent_name>>_domain_tools:
 
 
 # ============================================================
-# Memory hooks — emit only for agents with cross_conversation enabled
+# Memory — env-var driven, always present, no-ops when disabled
 # ============================================================
+# Memory config is injected at deploy time via env vars derived from the spec:
+#   AGENT_MEMORY_KIND            = "personal" | "task" | ""
+#   AGENT_MEMORY_IDENTITY_FIELD  = field name inside payload, e.g. "customer_id"
+#   AGENT_MEMORY_TASK_KEY        = task key string, e.g. "kyc-refresh-patterns"
+#
+# Always emit these — the functions are no-ops when AGENT_MEMORY_KIND is "".
 
-async def hydrate_<<agent_name>>_memory(input_data: dict) -> str:
-    """Retrieve relevant cross-conversation memory before the agent runs."""
-    if "<<kind>>" == "personal":
-        identity = input_data.get("<<identity_field_after_input_dot>>")
-        if not identity: return ""
-        memories = await reme.retrieve_personal(user_id=identity, query=str(input_data))
+REME_URL = os.environ.get("REME_URL", "http://reme:8002")
+reme = ReMeClient(base_url=REME_URL, actor_id=SERVICE_ACCOUNT_ID)
+
+_MEM_KIND = os.environ.get("AGENT_MEMORY_KIND", "")
+_MEM_IDENTITY_FIELD = os.environ.get("AGENT_MEMORY_IDENTITY_FIELD", "")
+_MEM_TASK_KEY = os.environ.get("AGENT_MEMORY_TASK_KEY", "")
+
+
+async def hydrate_memory(input_data: dict) -> str:
+    """Retrieve relevant cross-conversation memory before the agent runs. No-op if disabled."""
+    if not _MEM_KIND:
+        return ""
+    query = str(input_data)[:300]
+    if _MEM_KIND == "personal":
+        identity = str(input_data.get(_MEM_IDENTITY_FIELD, "")) if _MEM_IDENTITY_FIELD else ""
+        if not identity:
+            return ""
+        memories = await reme.retrieve_personal(user_id=identity, query=query)
     else:
-        memories = await reme.retrieve_task(task_key="<<task_key>>", query=str(input_data))
-    if not memories: return ""
-    return "\n\n# Relevant prior context:\n" + "\n".join(f"- {m['summary']}" for m in memories)
+        memories = await reme.retrieve_task(task_key=_MEM_TASK_KEY, query=query)
+    if not memories:
+        return ""
+    return "\n\n# Relevant prior context:\n" + "\n".join(
+        f"- {m.get('content', m.get('summary', ''))}" for m in memories[:5]
+    )
 
 
-async def persist_<<agent_name>>_memory(input_data: dict, output_text: str):
-    """Persist takeaways to cross-conversation memory."""
-    if "<<kind>>" == "personal":
-        identity = input_data.get("<<identity_field_after_input_dot>>")
+async def persist_memory(input_data: dict, output_text: str) -> None:
+    """Persist invocation summary to cross-conversation memory. No-op if disabled."""
+    if not _MEM_KIND:
+        return
+    content = f"Input: {str(input_data)[:200]} → Output: {output_text[:400]}"
+    if _MEM_KIND == "personal":
+        identity = str(input_data.get(_MEM_IDENTITY_FIELD, "")) if _MEM_IDENTITY_FIELD else ""
         if identity:
-            await reme.write_personal(user_id=identity, content=output_text)
+            await reme.write_personal(user_id=identity, content=content)
     else:
-        await reme.write_task(task_key="<<task_key>>", content=output_text)
+        await reme.write_task(task_key=_MEM_TASK_KEY, content=content)
 
 
 # ============================================================
@@ -195,20 +219,20 @@ async def persist_<<agent_name>>_memory(input_data: dict, output_text: str):
 # Standalone (most ATS agents are standalone — they're called by workflow nodes):
 
 async def standalone_run(payload: dict) -> dict:
-    user_input = payload.get("input", payload)  # accept either {input: ...} or raw dict
-    user_msg = Msg(name="workflow", content=str(user_input), role="user")
+    await <<agent_name>>.memory.clear()
+    user_input = payload.get("text") or payload.get("input") or json.dumps(payload, default=str)
 
-    # Hydrate memory (if enabled)
-    memory_ctx = await hydrate_<<agent_name>>_memory(payload)
+    # Hydrate cross-conversation memory — no-op if AGENT_MEMORY_KIND is unset
+    memory_ctx = await hydrate_memory(payload)
     if memory_ctx:
-        # Inject memory as a system addendum
-        ...
+        user_input = user_input + memory_ctx
 
+    user_msg = Msg(name="workflow", content=user_input, role="user")
     response = await <<agent_name>>(user_msg)
     output_text = response.get_text_content()
 
-    # Persist memory
-    await persist_<<agent_name>>_memory(payload, output_text)
+    # Persist to cross-conversation memory — no-op if AGENT_MEMORY_KIND is unset
+    await persist_memory(payload, output_text)
 
     # Workflow expects parsed JSON output for agent nodes
     import json
@@ -267,8 +291,9 @@ if __name__ == "__main__":
 
 - "I'll hardcode SERVICE_ACCOUNT_ID for clarity" — **NO.** It comes from env at deploy time.
 - "I'll add a fallback to OpenAI if Gemini fails" — **NO.**
-- "Memory adds complexity, I'll skip it" — **NO.** If spec enables it, wire it.
+- "Memory adds complexity, I'll skip it" — **NO.** Always emit `hydrate_memory` and `persist_memory` — they are no-ops when env vars are absent. Never use `<<kind>>` or `<<identity_field_after_input_dot>>` literals in generated code.
 - "I'll cache the model instance globally for efficiency" — **NO.** Stick to the skeleton.
+- "I'll use AGENT_MEMORY_KIND == 'personal' as a string literal comparison" — **YES.** That is correct. Read from `os.environ.get("AGENT_MEMORY_KIND", "")` and compare at runtime.
 
 ## Output now
 

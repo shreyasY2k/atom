@@ -1,0 +1,162 @@
+apiVersion: atom.platform/v1
+kind: WorkflowDeployment
+
+metadata:
+  name: payment-risk-review
+  domain: payments
+  version: 1.0.0
+  description: >
+    Automated payment risk review and compliance workflow.
+    Analyzes transaction risk using fraud signals, KYC status, and OFAC screening.
+    Routine payments auto-approve; flagged payments route to a compliance officer.
+    All decisions are audited with agent service-account identities.
+  owner: platform-admin
+
+  layout:
+    nodes:
+      risk-analysis:     { x: 300, y: 0 }
+      risk-routing:      { x: 300, y: 160 }
+      compliance-review: { x: 560, y: 320 }
+      ofac-verify:       { x: 40,  y: 320 }
+      execute-payment:   { x: 300, y: 480 }
+      mark-complete:     { x: 300, y: 640 }
+
+  sample_inputs:
+    - label: "Routine $4,800 — auto-approve"
+      input:
+        customer_id: "CUST-100442"
+        transfer_id: "XFER-100442-DEMO"
+        amount_usd: 4800
+        payment_type: "wire"
+    - label: "Flagged $12,000 — human review"
+      input:
+        customer_id: "CUST-200119"
+        transfer_id: "XFER-200119-DEMO"
+        amount_usd: 12000
+        payment_type: "fx_wire"
+
+spec:
+  input_schema:
+    required:
+      - customer_id
+      - transfer_id
+      - amount_usd
+    optional:
+      - payment_type
+
+  nodes:
+
+    # ── Node 1: Agent analyzes fraud signals, KYC, transaction history ──────────
+    - id: risk-analysis
+      label: "Transaction Risk Analysis"
+      type: agent
+      description: >
+        Agent checks fraud score, KYC status, and OFAC screening.
+        Returns risk_score, risk_category, risk_flags, recommendation.
+      agent_ref:
+        name: transaction-risk-analyzer
+        version: "1.0.0"
+      input_mapping:
+        customer_id: "input.customer_id"
+        transfer_id: "input.transfer_id"
+        amount_usd:  "input.amount_usd"
+        payment_type: "input.payment_type"
+      output_capture: risk_result
+      confidence_threshold: 0.6
+      fallback_node: compliance-review
+      next: risk-routing
+
+    # ── Node 2: Route based on risk category ────────────────────────────────────
+    - id: risk-routing
+      label: "Risk-Based Routing"
+      type: decision
+      description: "High/medium risk → compliance officer. Low risk → OFAC verify then execute."
+      expression: "ctx.risk_result['risk_category'] in ['high', 'medium']"
+      branches:
+        "true":  compliance-review
+        "false": ofac-verify
+
+    # ── Node 3a: OFAC final screen (low-risk path) ───────────────────────────────
+    - id: ofac-verify
+      label: "OFAC Final Screen"
+      type: http
+      description: "Final OFAC sanctions check before releasing payment."
+      method: POST
+      url_template: "http://ofac-svc:8096/screen"
+      body_template:
+        customer_id: "{{input.customer_id}}"
+        amount_usd: "{{input.amount_usd}}"
+        transfer_id: "{{input.transfer_id}}"
+      extract:
+        ofac_match: "match"
+        ofac_score: "score"
+      expect_status: [200]
+      next: execute-payment
+
+    # ── Node 3b: Human compliance review (medium/high risk path) ────────────────
+    - id: compliance-review
+      label: "Compliance Officer Review"
+      type: human_task
+      description: >
+        Back-office compliance officer reviews the risk assessment and decides
+        whether to approve or reject the payment.
+      assignee_group: compliance
+      task_template:
+        title: "Payment Review Required — {{input.transfer_id}}"
+        description: >
+          Customer {{input.customer_id}} is requesting a {{input.payment_type}} payment
+          of ${{input.amount_usd}}. Risk category: {{risk_result.risk_category}}.
+          Risk flags: {{risk_result.risk_flags}}. Agent recommendation: {{risk_result.recommendation}}.
+          Please review and decide.
+        actions: ["accept", "reject"]
+      sla_seconds: 3600
+      priority: high
+      evidence:
+        - "risk_result.risk_flags"
+        - "risk_result.notes_for_reviewer"
+      next: execute-payment
+      on_error: null
+
+    # ── Node 4: Execute payment via gateway ─────────────────────────────────────
+    - id: execute-payment
+      label: "Execute Payment"
+      type: http
+      description: "Submit approved payment instruction to payment gateway."
+      method: POST
+      url_template: "http://swift-gw:8097/instructions"
+      body_template:
+        transfer_id: "{{input.transfer_id}}"
+        customer_id: "{{input.customer_id}}"
+        amount_usd: "{{input.amount_usd}}"
+        payment_type: "{{input.payment_type}}"
+        risk_category: "{{risk_result.risk_category}}"
+        approved: true
+      extract:
+        instruction_id: "instruction_id"
+        gateway_status: "status"
+      expect_status: [200]
+      next: mark-complete
+
+    # ── Node 5: Mark transfer complete ──────────────────────────────────────────
+    - id: mark-complete
+      label: "Mark Payment Complete"
+      type: http
+      description: "Update payment status in the incoming queue."
+      method: POST
+      url_template: "http://incoming-queue:8099/transfers/{{input.transfer_id}}/complete"
+      body_template:
+        final_decision: "approved"
+        instruction_id: "{{instruction_id}}"
+        risk_category: "{{risk_result.risk_category}}"
+      next: null
+
+  error_handler: null
+  timeout_seconds: 7200
+
+  audit:
+    log_to: "s3://audit-logs/workflow-run"
+    retention_days: 90
+
+  deployment:
+    runtime: temporal
+    task_queue: ats-task-queue

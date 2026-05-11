@@ -391,6 +391,78 @@ def _fix_generated_patterns(code: str) -> str:
 
     code = _ROUTING_RE.sub(_routing_replacement, code)
 
+    # 4. Deterministically inject ReMe env-var reads and memory helper functions.
+    #    Guards are idempotent — injection is skipped if already present.
+    #    Functions are no-ops when AGENT_MEMORY_KIND env var is empty.
+    if '_MEM_KIND' not in code:
+        _REME_BLOCK = textwrap.dedent("""\
+
+            # ── ReMe cross-conversation memory ─────────────────────────────────
+            REME_URL = os.environ.get("REME_URL", "http://reme:8002")
+            _MEM_KIND = os.environ.get("AGENT_MEMORY_KIND", "")
+            _MEM_IDENTITY_FIELD = os.environ.get("AGENT_MEMORY_IDENTITY_FIELD", "")
+            _MEM_TASK_KEY = os.environ.get("AGENT_MEMORY_TASK_KEY", "")
+            try:
+                from memory.reme_client import ReMeClient as _ReMeClient
+                _reme = _ReMeClient(base_url=REME_URL, actor_id=SERVICE_ACCOUNT_ID)
+            except Exception:
+                _reme = None
+
+            async def hydrate_memory(input_data: dict) -> str:
+                if not _MEM_KIND or _reme is None:
+                    return ""
+                query = str(input_data)[:300]
+                if _MEM_KIND == "personal":
+                    identity = str(input_data.get(_MEM_IDENTITY_FIELD, "")) if _MEM_IDENTITY_FIELD else ""
+                    if not identity:
+                        return ""
+                    mems = await _reme.retrieve_personal(user_id=identity, query=query)
+                else:
+                    mems = await _reme.retrieve_task(task_key=_MEM_TASK_KEY, query=query)
+                if not mems:
+                    return ""
+                return "\\n\\n# Relevant prior context:\\n" + "\\n".join(
+                    f"- {m.get('content', m.get('summary', ''))}" for m in mems[:5]
+                )
+
+            async def persist_memory(input_data: dict, output_text: str) -> None:
+                if not _MEM_KIND or _reme is None:
+                    return
+                content = f"Input: {str(input_data)[:200]} -> Output: {output_text[:400]}"
+                if _MEM_KIND == "personal":
+                    identity = str(input_data.get(_MEM_IDENTITY_FIELD, "")) if _MEM_IDENTITY_FIELD else ""
+                    if identity:
+                        await _reme.write_personal(user_id=identity, content=content)
+                else:
+                    await _reme.write_task(task_key=_MEM_TASK_KEY, content=content)
+
+        """)
+        # Insert before the standalone_run / flow function definition
+        for marker in ('async def standalone_run(', 'async def maker_checker_run('):
+            if marker in code:
+                code = code.replace(marker, _REME_BLOCK + marker, 1)
+                break
+
+    # 5. Wrap the flow-function call in standalone_run with memory hydrate/persist.
+    #    Pattern: `    result = await <fn_name>(structured)` inside the /invoke handler.
+    #    Only wraps if hydrate_memory is present and not already wrapped.
+    if 'hydrate_memory' in code and 'await hydrate_memory' not in code:
+        _FLOW_CALL_RE = re.compile(
+            r'(?P<ind>[ \t]+)(?P<stmt>result\s*=\s*await\s+\w+\(structured\))'
+        )
+
+        def _flow_call_wrap(m: re.Match) -> str:
+            ind = m.group('ind')
+            return (
+                f'{ind}_mem_ctx = await hydrate_memory(structured)\n'
+                f'{ind}if _mem_ctx:\n'
+                f'{ind}    structured["_memory_context"] = _mem_ctx\n'
+                f'{ind}{m.group("stmt")}\n'
+                f'{ind}await persist_memory(structured, str(result))'
+            )
+
+        code = _FLOW_CALL_RE.sub(_flow_call_wrap, code)
+
     return code
 
 
