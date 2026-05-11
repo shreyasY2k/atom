@@ -5,7 +5,7 @@ metadata:
   domain: banking-kyc
   version: 1.0.0
   description: Agent that extracts customer name information from KYC images and documents.
-  owner: user:demo@atom.demo
+  owner: user:default@atom.io
 spec:
   agents:
   - name: kyc-extractor

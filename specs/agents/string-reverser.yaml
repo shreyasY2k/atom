@@ -5,7 +5,7 @@ metadata:
   domain: banking-kyc
   version: 1.0.0
   description: Reverses a string and returns it uppercase.
-  owner: user:demo@atom.demo
+  owner: user:default@atom.io
 spec:
   agents:
   - name: string-reverser-agent

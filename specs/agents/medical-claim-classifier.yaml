@@ -6,7 +6,7 @@ metadata:
   version: 1.0.0
   description: Medical claim document classifier for PDF pages to categorize bills,
     lab reports, and summaries.
-  owner: user:demo@atom.demo
+  owner: user:default@atom.io
 spec:
   agents:
   - name: document-classifier

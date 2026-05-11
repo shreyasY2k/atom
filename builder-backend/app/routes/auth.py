@@ -14,15 +14,15 @@ router = APIRouter(prefix="/auth", tags=["auth"])
 
 _ROLES: dict[str, dict] = {
     "builder": {
-        "identity": "user:builder@atom.demo",
+        "identity": "user:builder@atom.io",
         "display_name": "Builder",
     },
     "approver": {
-        "identity": "user:approver@atom.demo",
+        "identity": "user:approver@atom.io",
         "display_name": "Approver",
     },
     "platform_admin": {
-        "identity": "user:admin@atom.demo",
+        "identity": "user:admin@atom.io",
         "display_name": "Platform Admin",
     },
 }

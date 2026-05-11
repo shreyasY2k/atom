@@ -76,7 +76,7 @@ def approve_deployment(
     request: Request,
     background_tasks: BackgroundTasks,
 ):
-    actor = request.headers.get("X-Atom-Actor", "user:demo@atom.demo")
+    actor = request.headers.get("X-Atom-Actor", "user:default@atom.io")
     record = _get_or_404(deployment_id)
 
     if record.get("approval_status") not in ("pending", "changes_requested"):
@@ -113,7 +113,7 @@ def approve_deployment(
 
 @router.post("/{deployment_id}/reject")
 def reject_deployment(deployment_id: str, body: RejectBody, request: Request):
-    actor = request.headers.get("X-Atom-Actor", "user:demo@atom.demo")
+    actor = request.headers.get("X-Atom-Actor", "user:default@atom.io")
     record = _get_or_404(deployment_id)
 
     if record.get("approval_status") not in ("pending", "changes_requested"):
@@ -136,7 +136,7 @@ def reject_deployment(deployment_id: str, body: RejectBody, request: Request):
 
 @router.post("/{deployment_id}/request-changes")
 def request_changes(deployment_id: str, body: ChangesBody, request: Request):
-    actor = request.headers.get("X-Atom-Actor", "user:demo@atom.demo")
+    actor = request.headers.get("X-Atom-Actor", "user:default@atom.io")
     record = _get_or_404(deployment_id)
 
     if record.get("approval_status") not in ("pending",):

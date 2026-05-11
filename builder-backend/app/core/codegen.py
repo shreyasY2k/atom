@@ -510,7 +510,7 @@ _SPEC_GEN_SYSTEM = textwrap.dedent("""
       domain: <domain-name>
       version: 1.0.0
       description: <one sentence>
-      owner: user:demo@atom.demo
+      owner: user:default@atom.io
     spec:
       agents:
         - name: <agent-name>

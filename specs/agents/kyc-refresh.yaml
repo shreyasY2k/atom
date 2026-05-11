@@ -9,7 +9,7 @@ metadata:
     Refresh customer KYC: pull current profile, identify what's stale,
     flag any items needing human attention, return a refreshed profile
     with a confidence score.
-  owner: atom-bfsi-platform-team
+  owner: atom-platform-team
 
 spec:
   agents:

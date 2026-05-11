@@ -83,7 +83,7 @@ export default function Login() {
         color="text.disabled"
         sx={{ mt: 3, maxWidth: 340, textAlign: 'center', lineHeight: 1.5 }}
       >
-        V1: demo role simulation. Production uses your IDP — Okta, Azure AD, or equivalent.
+        Role-based access — select your role. Integrate your IDP (Okta, Azure AD) in production settings.
       </Typography>
     </Box>
   )

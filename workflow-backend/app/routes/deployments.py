@@ -37,7 +37,7 @@ def _load_spec_yaml(name: str) -> tuple[str, dict]:
 @router.post("/workflows/{name}/deploy-request")
 def workflow_deploy_request(name: str, body: DeployRequestBody, request: Request):
     """Submit a workflow deployment request for approval."""
-    actor = request.headers.get("X-Atom-Actor", "user:demo@atom.demo")
+    actor = request.headers.get("X-Atom-Actor", "user:default@atom.io")
     raw, spec_dict = _load_spec_yaml(name)
     version = (spec_dict.get("metadata") or {}).get("version", "0.1.0")
     spec_hash = "sha256:" + hashlib.sha256(
@@ -63,7 +63,7 @@ def workflow_deploy_request(name: str, body: DeployRequestBody, request: Request
 def workflow_deploy_direct(name: str, body: DeployRequestBody, request: Request):
     """Platform Admin bypass — register workflow immediately, no approval."""
     from app.core.registry_db import upsert as wf_upsert
-    actor = request.headers.get("X-Atom-Actor", "user:demo@atom.demo")
+    actor = request.headers.get("X-Atom-Actor", "user:default@atom.io")
     raw, spec_dict = _load_spec_yaml(name)
     version = (spec_dict.get("metadata") or {}).get("version", "0.1.0")
     spec_hash = "sha256:" + hashlib.sha256(

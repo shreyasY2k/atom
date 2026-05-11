@@ -18,7 +18,7 @@ def compute_service_account_id(name: str, spec_dict: dict) -> str:
 
 
 def issue_identity(
-    name: str, spec_dict: dict, spec: AgentSpec, owner: str = "user:demo@atom.demo"
+    name: str, spec_dict: dict, spec: AgentSpec, owner: str = "user:default@atom.io"
 ) -> tuple[str, str]:
     """
     Issue a LiteLLM virtual key for the agent.

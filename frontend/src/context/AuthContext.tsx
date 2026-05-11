@@ -39,7 +39,7 @@ export function getActorHeader(): string {
       if (s.identity) return s.identity
     }
   } catch {}
-  return 'user:builder@atom.demo'
+  return 'user:builder@atom.io'
 }
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {

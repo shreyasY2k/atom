@@ -69,7 +69,7 @@ def _clear_session() -> None:
 
 def _get_actor() -> str:
     s = _load_session()
-    return s["identity"] if s and s.get("identity") else "user:builder@atom.demo"
+    return s["identity"] if s and s.get("identity") else "user:builder@atom.io"
 
 
 def _get_role() -> Optional[str]:

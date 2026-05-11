@@ -13,7 +13,7 @@ metadata:
     Reconcile incoming asset transfer positions against customer records.
     Identify mismatches in CUSIP, quantity, lot dates. Flag for human
     review when discrepancies exceed thresholds.
-  owner: atom-bfsi-platform-team
+  owner: atom-platform-team
 
 spec:
   agents:

@@ -10,7 +10,7 @@ metadata:
     anomalous. Guided reasoning mode — the agent decides which signals to
     investigate and in what order. Demonstrates agentscope_skills integration
     (web_search for unfamiliar merchant lookup).
-  owner: atom-bfsi-platform-team
+  owner: atom-platform-team
 
 spec:
   agents:

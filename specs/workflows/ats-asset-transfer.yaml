@@ -19,7 +19,7 @@ metadata:
     sanctions, branches by amount tier, reconciles assets or routes for
     compliance review, submits SWIFT/DTC instruction, captures human
     final approval, notifies.
-  owner: atom-bfsi-platform-team
+  owner: atom-platform-team
 
   layout:
     nodes:

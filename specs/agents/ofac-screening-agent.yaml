@@ -6,7 +6,7 @@ metadata:
   version: 1.0.0
   description: Screens a customer against the OFAC sanctions list prior to a securities
     transfer.
-  owner: user:demo@atom.demo
+  owner: user:default@atom.io
 spec:
   agents:
   - name: ofac-screener

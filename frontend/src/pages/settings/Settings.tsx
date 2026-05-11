@@ -3,9 +3,9 @@ import { Box, Chip, Divider, Paper, Typography } from '@mui/material'
 import LockIcon from '@mui/icons-material/Lock'
 
 const USERS = [
-  { role: 'builder',        identity: 'user:builder@atom.demo',  displayName: 'Builder',       color: 'default' as const },
-  { role: 'approver',       identity: 'user:approver@atom.demo', displayName: 'Approver',      color: 'info' as const },
-  { role: 'platform_admin', identity: 'user:admin@atom.demo',    displayName: 'Platform Admin', color: 'secondary' as const },
+  { role: 'builder',        identity: 'user:builder@atom.io',  displayName: 'Builder',       color: 'default' as const },
+  { role: 'approver',       identity: 'user:approver@atom.io', displayName: 'Approver',      color: 'info' as const },
+  { role: 'platform_admin', identity: 'user:admin@atom.io',    displayName: 'Platform Admin', color: 'secondary' as const },
 ]
 
 const ROLES = [
@@ -77,7 +77,7 @@ export default function Settings() {
       <Section title="FEATURE FLAGS">
         <Paper variant="outlined" sx={{ borderRadius: 2, overflow: 'hidden' }}>
           {[
-            { name: 'AI Composer (Mode C)', value: 'off', note: 'Natural-language workflow generation; disabled for demo stability' },
+            { name: 'AI Composer (Mode C)', value: 'off', note: 'Natural-language workflow generation; configure and enable via settings' },
             { name: 'Web search for agents', value: 'off', note: 'Agents can call web-search tool (not in current specs)' },
             { name: 'Free-text input adapter', value: 'on',  note: 'Enables chat-style invocation on Builder Test panel' },
           ].map((f, i) => (

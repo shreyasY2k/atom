@@ -53,7 +53,7 @@ def resolve(task_id: str, payload: dict):
     if not t: raise HTTPException(404)
     t["status"] = "RESOLVED"
     t["resolved_at"] = datetime.utcnow().isoformat()
-    t["resolved_by"] = payload.get("resolved_by", "user:demo@atom.demo")
+    t["resolved_by"] = payload.get("resolved_by", "user:default@atom.io")
     t["resolution"] = payload.get("resolution")  # accept | reject | edit
     t["edits"] = payload.get("edits")
     return t

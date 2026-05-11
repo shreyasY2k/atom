@@ -178,7 +178,7 @@ def _do_deploy_agent(name: str, actor: str) -> dict:
 @router.post("/{name}/deploy")
 def deploy_agent(name: str, request: Request):
     """Compile (if needed), issue identity, build+run container, register."""
-    actor = request.headers.get("X-Atom-Actor", "user:demo@atom.demo")
+    actor = request.headers.get("X-Atom-Actor", "user:default@atom.io")
     return _do_deploy_agent(name, actor)
 
 
@@ -192,7 +192,7 @@ def deploy_agent(name: str, request: Request):
 def deploy_request(name: str, body: DeployRequestBody, request: Request):
     """Submit a deployment request. Approver must approve before the agent deploys."""
     spec, spec_dict = _load_spec(name)
-    actor = request.headers.get("X-Atom-Actor", "user:demo@atom.demo")
+    actor = request.headers.get("X-Atom-Actor", "user:default@atom.io")
     spec_hash = "sha256:" + hashlib.sha256(
         yaml.dump(spec_dict, sort_keys=True).encode()
     ).hexdigest()
@@ -216,7 +216,7 @@ def deploy_request(name: str, body: DeployRequestBody, request: Request):
 def deploy_direct(name: str, body: DeployRequestBody, request: Request, background_tasks: BackgroundTasks):
     """Platform Admin bypass — create record + deploy immediately, no approval needed."""
     spec, spec_dict = _load_spec(name)
-    actor = request.headers.get("X-Atom-Actor", "user:demo@atom.demo")
+    actor = request.headers.get("X-Atom-Actor", "user:default@atom.io")
     spec_hash = "sha256:" + hashlib.sha256(
         yaml.dump(spec_dict, sort_keys=True).encode()
     ).hexdigest()
