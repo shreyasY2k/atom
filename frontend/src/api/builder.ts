@@ -76,8 +76,12 @@ export const builderApi = {
       body: JSON.stringify({ prose }),
     }).then(json),
 
-  compileAgent: (name: string): Promise<{ code: string; code_hash: string }> =>
-    fetch(`${BASE}/agents/${name}/compile`, { method: 'POST', headers: actor() }).then(json),
+  compileAgent: (name: string, specYaml?: string, skillContent?: string): Promise<{ code: string; code_hash: string }> =>
+    fetch(`${BASE}/agents/${name}/compile`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...actor() },
+      body: JSON.stringify({ spec_yaml: specYaml ?? null, skill_content: skillContent ?? null }),
+    }).then(json),
 
   // Deployment requests
   saveAgentSpec: (name: string, specYaml: string, skillContent?: string): Promise<{ saved: boolean }> =>

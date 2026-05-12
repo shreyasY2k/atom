@@ -22,6 +22,9 @@ router = APIRouter(prefix="/agents", tags=["agents"])
 class DeployRequestBody(BaseModel):
     notes: str = ""
     previous_request_id: str | None = None
+    # UI always sends current editor content so spec is saved before any action.
+    spec_yaml: str | None = None
+    skill_content: str | None = None
 
 
 class SaveAndDeployBody(BaseModel):
@@ -80,8 +83,11 @@ def _load_spec(name: str) -> tuple[AgentSpec, dict]:
 # ---------------------------------------------------------------------------
 
 @router.post("/{name}/compile")
-def compile_agent(name: str, request: Request):
-    """Generate and validate agent.py from the spec."""
+def compile_agent(name: str, body: SaveAndDeployBody = SaveAndDeployBody(), request: Request = None):
+    """Generate and validate agent.py from the spec.
+    If spec_yaml is provided in the body, save to disk first."""
+    if body.spec_yaml:
+        _save_spec_files(name, body.spec_yaml, body.skill_content)
     spec, spec_dict = _load_spec(name)
     actor = request.headers.get("X-Atom-Actor", spec.metadata.owner)
 
@@ -238,6 +244,8 @@ def deploy_agent(name: str, body: SaveAndDeployBody = SaveAndDeployBody(), reque
 @router.post("/{name}/deploy-request")
 def deploy_request(name: str, body: DeployRequestBody, request: Request):
     """Submit a deployment request. Approver must approve before the agent deploys."""
+    if body.spec_yaml:
+        _save_spec_files(name, body.spec_yaml, body.skill_content)
     spec, spec_dict = _load_spec(name)
     actor = request.headers.get("X-Atom-Actor", "user:default@atom.io")
     spec_hash = "sha256:" + hashlib.sha256(
@@ -262,6 +270,8 @@ def deploy_request(name: str, body: DeployRequestBody, request: Request):
 @router.post("/{name}/deploy-direct")
 def deploy_direct(name: str, body: DeployRequestBody, request: Request, background_tasks: BackgroundTasks):
     """Platform Admin bypass — create record + deploy immediately, no approval needed."""
+    if body.spec_yaml:
+        _save_spec_files(name, body.spec_yaml, body.skill_content)
     spec, spec_dict = _load_spec(name)
     actor = request.headers.get("X-Atom-Actor", "user:default@atom.io")
     spec_hash = "sha256:" + hashlib.sha256(
