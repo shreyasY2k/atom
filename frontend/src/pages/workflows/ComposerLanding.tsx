@@ -16,15 +16,16 @@ import { extractErrorMessage } from '../../utils/errors'
 import type { WorkflowRecord } from '../../types'
 
 const TILE_SX = {
-  p: 3,
+  p: 2.5,
   borderRadius: 2,
   border: '1.5px solid',
   cursor: 'pointer',
   transition: 'border-color 0.15s, box-shadow 0.15s',
   display: 'flex',
   flexDirection: 'column',
-  gap: 1,
-  minHeight: 140,
+  gap: 1.5,
+  height: '100%',   // fill grid cell height so all tiles in row are equal
+  boxSizing: 'border-box',
   '&:hover': { boxShadow: 3 },
 }
 
@@ -181,32 +182,39 @@ export default function ComposerLanding() {
         sx={{ textTransform: 'uppercase', letterSpacing: '0.08em' }}>
         Start a workflow
       </Typography>
-      <Box sx={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr 1fr', gap: 2, mt: 1, mb: 5 }}>
+      <Box sx={{
+        display: 'grid',
+        gridTemplateColumns: { xs: '1fr 1fr', md: '1fr 1fr 1fr 1fr' },
+        gridAutoRows: '1fr',   // force all rows to equal height
+        gap: 2,
+        mt: 1,
+        mb: 5,
+      }}>
 
         {/* AI composer — coming soon */}
-        <Paper variant="outlined" sx={{ ...TILE_SX, borderColor: 'divider', opacity: 0.55, cursor: 'not-allowed' }}>
+        <Paper variant="outlined" sx={{ ...TILE_SX, borderColor: 'divider', opacity: 0.5, cursor: 'not-allowed' }}>
           <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-            <AutoFixHighIcon sx={{ color: 'text.secondary' }} />
-            <Typography variant="body2" fontWeight={600} color="text.secondary">AI COMPOSER</Typography>
-            <Chip label="Soon" size="small" sx={{ ml: 'auto', fontSize: '0.65rem', height: 18 }} />
+            <AutoFixHighIcon sx={{ color: 'text.secondary', fontSize: 18 }} />
+            <Typography variant="body2" fontWeight={700} color="text.secondary">AI COMPOSER</Typography>
+            <Chip label="Soon" size="small" sx={{ ml: 'auto', fontSize: '0.62rem', height: 18 }} />
           </Box>
-          <Typography variant="caption" color="text.secondary" sx={{ lineHeight: 1.6 }}>
-            Describe a process in plain English — we draft the workflow spec for you.
+          <Typography variant="caption" color="text.secondary" sx={{ lineHeight: 1.6, flex: 1 }}>
+            Describe a process in plain English and we'll generate the full workflow spec.
           </Typography>
         </Paper>
 
         {/* CLI init */}
         <Paper variant="outlined" sx={{ ...TILE_SX, borderColor: 'divider' }}>
           <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-            <TerminalIcon sx={{ color: 'text.secondary' }} />
-            <Typography variant="body2" fontWeight={600}>CLI INIT</Typography>
-            <Chip label="Mode B" size="small" variant="outlined" sx={{ ml: 'auto', fontSize: '0.65rem', height: 18 }} />
+            <TerminalIcon sx={{ color: 'text.secondary', fontSize: 18 }} />
+            <Typography variant="body2" fontWeight={700}>CLI INIT</Typography>
+            <Chip label="Mode B" size="small" variant="outlined" sx={{ ml: 'auto', fontSize: '0.62rem', height: 18 }} />
           </Box>
-          <Typography variant="caption" color="text.secondary" sx={{ lineHeight: 1.6 }}>
-            Scaffold from terminal. CLI creates a stub you edit and open here.
+          <Typography variant="caption" color="text.secondary" sx={{ lineHeight: 1.6, flex: 1 }}>
+            Scaffold from terminal — CLI creates a stub YAML that you edit and open here.
           </Typography>
-          <Box component="pre" sx={{ mt: 'auto', bgcolor: 'action.hover', p: 1, borderRadius: 1,
-            fontSize: '0.68rem', fontFamily: 'monospace', m: 0, overflow: 'auto' }}>
+          <Box component="pre" sx={{ bgcolor: 'action.hover', p: 1, borderRadius: 1,
+            fontSize: '0.68rem', fontFamily: 'monospace', m: 0, overflow: 'auto', mt: 'auto' }}>
             {'atom workflow init <name>'}
           </Box>
         </Paper>
@@ -216,13 +224,13 @@ export default function ComposerLanding() {
           onClick={() => setImportOpen(true)}
           sx={{ ...TILE_SX, borderColor: 'warning.main', '&:hover': { borderColor: 'warning.dark', boxShadow: 3 } }}>
           <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-            <UploadFileIcon sx={{ color: 'warning.main' }} />
-            <Typography variant="body2" fontWeight={600} color="warning.main">IMPORT YAML</Typography>
+            <UploadFileIcon sx={{ color: 'warning.main', fontSize: 18 }} />
+            <Typography variant="body2" fontWeight={700} color="warning.main">IMPORT YAML</Typography>
           </Box>
-          <Typography variant="caption" color="text.secondary" sx={{ lineHeight: 1.6 }}>
-            Paste or upload a workflow spec YAML. Registers immediately and opens in the canvas.
+          <Typography variant="caption" color="text.secondary" sx={{ lineHeight: 1.6, flex: 1 }}>
+            Paste or upload a workflow spec YAML — saved, registered, and opened in one click.
           </Typography>
-          <Button variant="outlined" color="warning" size="small" startIcon={<UploadFileIcon />}
+          <Button variant="outlined" color="warning" size="small" startIcon={<UploadFileIcon sx={{ fontSize: 14 }} />}
             sx={{ mt: 'auto', alignSelf: 'flex-start' }}
             onClick={(e) => { e.stopPropagation(); setImportOpen(true) }}>
             Import YAML
@@ -234,14 +242,14 @@ export default function ComposerLanding() {
           onClick={() => newBlank.mutate()}
           sx={{ ...TILE_SX, borderColor: 'primary.main', '&:hover': { borderColor: 'primary.dark', boxShadow: 3 } }}>
           <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-            <AddIcon sx={{ color: 'primary.main' }} />
-            <Typography variant="body2" fontWeight={600} color="primary.main">EMPTY CANVAS</Typography>
-            <Chip label="Mode A" size="small" color="primary" sx={{ ml: 'auto', fontSize: '0.65rem', height: 18 }} />
+            <AddIcon sx={{ color: 'primary.main', fontSize: 18 }} />
+            <Typography variant="body2" fontWeight={700} color="primary.main">EMPTY CANVAS</Typography>
+            <Chip label="Mode A" size="small" color="primary" sx={{ ml: 'auto', fontSize: '0.62rem', height: 18 }} />
           </Box>
-          <Typography variant="caption" color="text.secondary" sx={{ lineHeight: 1.6 }}>
-            Start blank. Drag nodes, draw connections, configure in the inspector.
+          <Typography variant="caption" color="text.secondary" sx={{ lineHeight: 1.6, flex: 1 }}>
+            Start blank. Drag nodes from the palette, draw edges, configure in the inspector.
           </Typography>
-          <Button variant="contained" size="small" startIcon={<AddIcon />}
+          <Button variant="contained" size="small" startIcon={<AddIcon sx={{ fontSize: 14 }} />}
             disabled={newBlank.isPending} sx={{ mt: 'auto', alignSelf: 'flex-start' }}
             onClick={(e) => { e.stopPropagation(); newBlank.mutate() }}>
             New workflow

@@ -32,13 +32,13 @@ import type { NodeState, RunRecord, SSEEvent, WorkflowNode, WorkflowSpec } from 
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
-const NODE_W = 200
-const NODE_H = 72
+const NODE_W = 230
+const NODE_H = 80
 const APPBAR_H = 64
-const TOOLBAR_H = 48
-const INSPECTOR_W = 280
-const PALETTE_W = 156
-const RUN_PANE_H = 280
+const TOOLBAR_H = 52
+const INSPECTOR_W = 300
+const PALETTE_W = 148
+const RUN_PANE_H = 300
 
 // Light-theme fills per task spec
 const NODE_FILL: Record<string, string> = {
@@ -249,11 +249,11 @@ function BaseNode({
           transition: 'border-color 0.2s, outline 0.1s',
         }}
       >
-        <Handle type="target" position={Position.Top} style={{ background: stroke, border: `2px solid ${stroke}`, width: 8, height: 8 }} />
-        <Box sx={{ px: 1.5, py: 1 }}>
+        <Handle type="target" position={Position.Top} style={{ background: stroke, border: `2px solid ${stroke}`, width: 9, height: 9 }} />
+        <Box sx={{ px: 2, py: 1.25 }}>
           <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
             {icon}
-            <Typography variant="caption" sx={{ color: NODE_STROKE[type] || '#333', fontWeight: 600, flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+            <Typography variant="caption" sx={{ color: NODE_STROKE[type] || '#333', fontWeight: 700, flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontSize: '0.76rem' }}>
               {data.label}
             </Typography>
             {state && (
@@ -261,19 +261,19 @@ function BaseNode({
                 label={state}
                 size="small"
                 color={state === 'completed' ? 'success' : state === 'paused' ? 'warning' : state === 'error' ? 'error' : 'primary'}
-                sx={{ height: 16, fontSize: '0.6rem', ml: 'auto', flexShrink: 0 }}
+                sx={{ height: 18, fontSize: '0.62rem', ml: 'auto', flexShrink: 0 }}
               />
             )}
           </Box>
           {children}
           {state === 'completed' && data._outputSummary && (
-            <Typography variant="caption" sx={{ display: 'block', mt: 0.5, fontSize: '0.6rem', color: '#64748b', fontFamily: 'monospace', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+            <Typography variant="caption" sx={{ display: 'block', mt: 0.75, fontSize: '0.62rem', color: '#64748b', fontFamily: 'monospace', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
               {Object.entries(data._outputSummary).map(([k, v]) => `${k}:${v}`).join(' · ')}
             </Typography>
           )}
         </Box>
         {type !== 'decision'
-          ? <Handle type="source" position={Position.Bottom} style={{ background: stroke, border: `2px solid ${stroke}`, width: 8, height: 8 }} />
+          ? <Handle type="source" position={Position.Bottom} style={{ background: stroke, border: `2px solid ${stroke}`, width: 9, height: 9 }} />
           : null}
       </Paper>
     </Box>
@@ -1472,7 +1472,7 @@ export default function Composer({ workflowName: propName }: { workflowName?: st
       {/* Toolbar */}
       <Toolbar
         variant="dense"
-        sx={{ minHeight: `${TOOLBAR_H}px !important`, height: TOOLBAR_H, px: 2, gap: 1, borderBottom: 1, borderColor: 'divider', bgcolor: 'background.paper', flexShrink: 0 }}
+        sx={{ minHeight: `${TOOLBAR_H}px !important`, height: TOOLBAR_H, px: 2, gap: 1, borderBottom: 1, borderColor: 'divider', bgcolor: 'background.paper', flexShrink: 0, overflowX: 'auto' }}
       >
         <Tooltip title="Back to workflows">
           <IconButton size="small" onClick={() => navigate('/workflows/compose')}>

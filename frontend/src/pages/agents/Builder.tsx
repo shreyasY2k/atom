@@ -127,30 +127,30 @@ function AIMode() {
 
   return (
     <Box sx={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0, gap: 2 }}>
-      {/* Input row — fixed height */}
-      <Box sx={{ flexShrink: 0 }}>
+      {/* Input row — flexible height, shrinks only when editors appear */}
+      <Box sx={{ flexShrink: 0, display: 'flex', flexDirection: 'column', gap: 1.5 }}>
         <TextField
           multiline
-          rows={3}
+          minRows={5}
+          maxRows={specYaml ? 6 : 12}
           label="Describe the agent you want to build"
-          placeholder="e.g. An agent that refreshes KYC for a bank customer before a securities transfer — it pulls their profile, checks document staleness, runs adverse media screening, and returns a confidence score."
+          placeholder="e.g. An agent that analyzes payment risk for a merchant payout — checks fraud score, KYC status, and OFAC sanctions, then returns risk_score, risk_category, risk_flags, recommendation, and confidence."
           value={prose}
           onChange={(e) => setProse(e.target.value)}
           fullWidth
           variant="outlined"
-          sx={{ '& textarea': { fontFamily: 'monospace', fontSize: '0.8rem' } }}
+          sx={{ '& textarea': { fontFamily: 'monospace', fontSize: '0.82rem', lineHeight: 1.6 } }}
         />
-      </Box>
-
-      <Box sx={{ flexShrink: 0 }}>
-        <Button
-          variant="contained"
-          startIcon={generate.isPending ? <CircularProgress size={14} color="inherit" /> : <AutoFixHighIcon />}
-          onClick={() => generate.mutate()}
-          disabled={!prose.trim() || generate.isPending}
-        >
-          Generate Spec
-        </Button>
+        <Box>
+          <Button
+            variant="contained"
+            startIcon={generate.isPending ? <CircularProgress size={14} color="inherit" /> : <AutoFixHighIcon />}
+            onClick={() => generate.mutate()}
+            disabled={!prose.trim() || generate.isPending}
+          >
+            Generate Spec
+          </Button>
+        </Box>
       </Box>
 
       {specYaml && (
