@@ -48,7 +48,7 @@ func newMock() *mockAuditor { return &mockAuditor{} }
 // buildBuilderGate wires the builder gate against a fake backend server and a mock auditor.
 func buildBuilderGate(backend *httptest.Server, ma *mockAuditor) http.Handler {
 	cfg := Config{BuilderBackendURL: backend.URL}
-	proxy := newReverseProxy(cfg.BuilderBackendURL)
+	proxy := newReverseProxy(cfg.BuilderBackendURL, 10*time.Minute)
 	mux := http.NewServeMux()
 
 	// Re-use real AuditWrap but swap auditor — we need a thin shim because
@@ -87,7 +87,7 @@ func buildBuilderGate(backend *httptest.Server, ma *mockAuditor) http.Handler {
 // buildWorkflowGate wires the workflow gate against a fake backend and mock auditor.
 func buildWorkflowGate(backend *httptest.Server, ma *mockAuditor) http.Handler {
 	cfg := Config{WorkflowBackendURL: backend.URL}
-	proxy := newReverseProxy(cfg.WorkflowBackendURL)
+	proxy := newReverseProxy(cfg.WorkflowBackendURL, 3*time.Minute)
 	mux := http.NewServeMux()
 
 	wrap := func(targetType, backend string) http.Handler {

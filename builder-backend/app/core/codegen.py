@@ -574,7 +574,7 @@ def compile_agent(name: str, spec: AgentSpec, spec_dict: dict) -> str:
         raw = chat_completion(
             messages=messages,
             model="gemini-3.1-pro",
-            reasoning_effort="medium" if attempt == 0 else "high",
+            reasoning_effort="low" if attempt == 0 else "medium",  # escalate only on retry
         )
         code = _extract_code_block(raw)
         code = _fix_inline_skill(code, spec)
@@ -837,8 +837,8 @@ def generate_skill(prose: str, spec_dict: dict) -> str:
             {"role": "system", "content": _SKILL_GEN_SYSTEM},
             {"role": "user", "content": context},
         ],
-        model="gemini-3.1-pro",
-        reasoning_effort="medium",
+        model="gemini-3-flash",   # skill/role file is simple prose — flash is fast enough
+        reasoning_effort="low",
     )
 
     # Extract the markdown block
@@ -859,7 +859,7 @@ def generate_spec(prose: str) -> dict:
             {"role": "system", "content": _SPEC_GEN_SYSTEM},
             {"role": "user", "content": prose},
         ],
-        model="gemini-3.1-pro",
+        model="gemini-3-flash",   # spec is a structured YAML — flash handles this well
         reasoning_effort="low",
     )
     m = re.search(r"```yaml\s*(.*?)```", raw, re.DOTALL)

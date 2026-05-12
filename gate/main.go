@@ -5,13 +5,17 @@ import (
 	"log/slog"
 	"net/http"
 	"os"
+	"time"
 )
 
 // newBuilderGate returns an HTTP handler that:
 //   - audits POST /agents/{name}/invoke (the agent hot path)
 //   - transparently proxies everything else to builder-backend
+//
+// Uses a 10-minute response header timeout — codegen (Gemini) + Docker build
+// can legitimately take 3-5 minutes end-to-end.
 func newBuilderGate(cfg Config, auditor *Auditor) http.Handler {
-	proxy := newReverseProxy(cfg.BuilderBackendURL)
+	proxy := newReverseProxy(cfg.BuilderBackendURL, 10*time.Minute)
 	mux := http.NewServeMux()
 
 	mux.Handle("POST /agents/{name}/invoke",
@@ -24,13 +28,15 @@ func newBuilderGate(cfg Config, auditor *Auditor) http.Handler {
 }
 
 // newWorkflowGate returns an HTTP handler that:
+// Uses a 3-minute timeout — workflow runs start async (fast), SSE streams
+// are long-lived but Temporal activities keep the connection alive.
 //   - audits POST /workflows/{name}/runs            (start run)
 //   - audits GET  /workflows/{name}/runs/{run_id}   (poll status)
 //   - audits GET  /workflows/{name}/runs/{run_id}/events (SSE stream)
 //   - audits GET  /workflows/{name}/runs/{run_id}/nodes  (node events)
 //   - transparently proxies everything else to workflow-backend
 func newWorkflowGate(cfg Config, auditor *Auditor) http.Handler {
-	proxy := newReverseProxy(cfg.WorkflowBackendURL)
+	proxy := newReverseProxy(cfg.WorkflowBackendURL, 3*time.Minute)
 	mux := http.NewServeMux()
 
 	mux.Handle("POST /workflows/{name}/runs",

@@ -618,7 +618,10 @@ export default function Chat() {
     if (!selectedAgent) { setMessages([]); setSelectedRunId(null); return }
     let cancelled = false
     const agentName = selectedAgent.name
-    const key = `atom_chat_v2_${agentName}`
+    // Key includes service_account_id so a fresh deploy auto-starts a clean chat.
+    // Old keys for previous deployments are silently orphaned (cleared on demand).
+    const svcId = selectedAgent.service_account_id ?? 'undeployed'
+    const key = `atom_chat_v3_${agentName}_${svcId}`
 
     // Tier 1: localStorage (instant, no network)
     try {
@@ -651,7 +654,7 @@ export default function Chat() {
         if (reconstructed.length === 0) return
         setMessages(reconstructed)
         // Seed localStorage so next switch/refresh is instant
-        try { localStorage.setItem(key, JSON.stringify(reconstructed)) } catch { /* quota */ }
+        try { localStorage.setItem(key, JSON.stringify(reconstructed)) } catch { /* storage quota */ }
       })
       .catch(() => { /* no history available — stay empty */ })
 
@@ -669,7 +672,8 @@ export default function Chat() {
     if (!selectedAgent || messages.length === 0) return
     const toStore = messages.filter(m => !m.loading)
     if (toStore.length === 0) return
-    try { localStorage.setItem(`atom_chat_v2_${selectedAgent.name}`, JSON.stringify(toStore)) } catch { /* quota */ }
+    const svcId = selectedAgent.service_account_id ?? 'undeployed'
+    try { localStorage.setItem(`atom_chat_v3_${selectedAgent.name}_${svcId}`, JSON.stringify(toStore)) } catch { /* quota */ }
   }, [messages]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // Auto-scroll on new message
@@ -765,7 +769,8 @@ export default function Chat() {
                 setMessages([])
                 setSelectedRunId(null)
                 if (selectedAgent) {
-                  try { localStorage.removeItem(`atom_chat_v2_${selectedAgent.name}`) } catch { /* ignore */ }
+                  const svcId = selectedAgent.service_account_id ?? 'undeployed'
+                  try { localStorage.removeItem(`atom_chat_v3_${selectedAgent.name}_${svcId}`) } catch { /* ignore */ }
                 }
               }} sx={{ color:'text.secondary' }}>
                 <CasinoIcon sx={{ fontSize:14 }} />
