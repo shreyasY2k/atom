@@ -300,30 +300,24 @@ services:
     networks: [agentnet]
 
   # ============================================================
-  # MOCK SERVICES — Sample mock services
+  # MOCK SERVICES — Payment demo (active)
   # ============================================================
-  treasury-dw:    { build: { context: ./mocks/treasury_dw }, container_name: treasury-dw, ports: ["8090:8090"], networks: [agentnet], restart: unless-stopped }
-  market-data:    { build: { context: ./mocks/market_data }, container_name: market-data, ports: ["8091:8091"], networks: [agentnet], restart: unless-stopped }
-  lcr-engine:     { build: { context: ./mocks/lcr_engine }, container_name: lcr-engine, ports: ["8092:8092"], networks: [agentnet], restart: unless-stopped }
-  fnol-svc:       { build: { context: ./mocks/fnol_svc }, container_name: fnol-svc, ports: ["8093:8093"], networks: [agentnet], restart: unless-stopped }
-  ocr-svc:
-    build: { context: ./mocks/ocr_svc }
-    container_name: ocr-svc
-    ports: ["8094:8094"]
-    volumes: ["./samples/claim-documents:/app/samples:ro"]
-    networks: [agentnet]
-    restart: unless-stopped
+  kyc-svc:       { build: { context: ./mocks/kyc_svc },       container_name: kyc-svc,       ports: ["8095:8095"], networks: [agentnet], restart: unless-stopped }
+  ofac-svc:      { build: { context: ./mocks/ofac_svc },      container_name: ofac-svc,      ports: ["8096:8096"], networks: [agentnet], restart: unless-stopped }
+  swift-gw:      { build: { context: ./mocks/swift_gw },      container_name: swift-gw,      ports: ["8097:8097"], networks: [agentnet], restart: unless-stopped }
+  task-queue:    { build: { context: ./mocks/task_queue },     container_name: task-queue,    ports: ["8098:8098"], networks: [agentnet], restart: unless-stopped }
+  fraud-svc:     { build: { context: ./mocks/fraud_svc },      container_name: fraud-svc,     ports: ["8102:8102"], networks: [agentnet], restart: unless-stopped }
+  incoming-queue: { build: { context: ./mocks/incoming_queue }, container_name: incoming-queue, ports: ["8101:8099"], networks: [agentnet], restart: unless-stopped }
 
   # ============================================================
-  # MOCK SERVICES — Sample workflow mock services
+  # MOCK SERVICES — Archived (not needed for payment demo)
   # ============================================================
-  kyc-svc:        { build: { context: ./mocks/kyc_svc }, container_name: kyc-svc, ports: ["8095:8095"], networks: [agentnet], restart: unless-stopped }
-  ofac-svc:       { build: { context: ./mocks/ofac_svc }, container_name: ofac-svc, ports: ["8096:8096"], networks: [agentnet], restart: unless-stopped }
-  swift-gw:       { build: { context: ./mocks/swift_gw }, container_name: swift-gw, ports: ["8097:8097"], networks: [agentnet], restart: unless-stopped }
-  task-queue:        { build: { context: ./mocks/task_queue },    container_name: task-queue,    ports: ["8098:8098"], networks: [agentnet], restart: unless-stopped }
-  securities-ops:    { build: { context: ./mocks/securities_ops }, container_name: securities-ops, ports: ["8099:8099"], networks: [agentnet], restart: unless-stopped }
-  fraud-svc:         { build: { context: ./mocks/fraud_svc }, container_name: fraud-svc, ports: ["8102:8102"], networks: [agentnet], restart: unless-stopped }
-  incoming-queue:    { build: { context: ./mocks/incoming_queue }, container_name: incoming-queue, ports: ["8101:8099"], networks: [agentnet], restart: unless-stopped }
+  # treasury-dw:  { build: { context: ./mocks/treasury_dw },   container_name: treasury-dw,   ports: ["8090:8090"], networks: [agentnet], restart: unless-stopped }
+  # market-data:  { build: { context: ./mocks/market_data },   container_name: market-data,   ports: ["8091:8091"], networks: [agentnet], restart: unless-stopped }
+  # lcr-engine:   { build: { context: ./mocks/lcr_engine },    container_name: lcr-engine,    ports: ["8092:8092"], networks: [agentnet], restart: unless-stopped }
+  # fnol-svc:     { build: { context: ./mocks/fnol_svc },      container_name: fnol-svc,      ports: ["8093:8093"], networks: [agentnet], restart: unless-stopped }
+  # ocr-svc:      { build: { context: ./mocks/ocr_svc },       container_name: ocr-svc,       ports: ["8094:8094"], networks: [agentnet], restart: unless-stopped }
+  # securities-ops: { build: { context: ./mocks/securities_ops }, container_name: securities-ops, ports: ["8099:8099"], networks: [agentnet], restart: unless-stopped }
 
   # ============================================================
   # PLATFORM DATABASE

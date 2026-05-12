@@ -117,6 +117,39 @@ def load_skill(path: str) -> str:
 # Load the role file (new canonical) or legacy skill file
 <<agent_name>>_role = load_skill("<<agent.agent_role_file or agent.skill>>")
 
+# ── TOOL-FREE PATH: if agent.tools is [] ───────────────────────────────────────
+# << If agent.tools == []: >>
+#   Do NOT import resolve_tools. Do NOT define _as_tool_response. Do NOT invent tool names.
+#   Skip the entire toolkit block. The agent reasons from its role prompt alone.
+
+# Input schema for free-text extraction
+AGENT_INPUT_SCHEMA = <<agent.input_schema or {}>>
+
+<<agent_name>> = ReActAgent(
+    name="<<agent.name>>",
+    sys_prompt=<<agent_name>>_sys_prompt,
+    model=make_model("<<agent.model>>", reasoning_effort="<<agent.reasoning_effort>>"),
+    formatter=OpenAIChatFormatter(),
+    memory=InMemoryMemory(),
+    max_iters=<<agent.max_iterations>>,
+)
+
+# ── TOOL-USING PATH: if agent.tools is non-empty ───────────────────────────────
+# << Else: >>
+
+from tools.registry import resolve_tools
+
+import json as _json
+from agentscope.tool._toolkit import ToolResponse
+
+def _as_tool_response(fn):
+    from functools import wraps
+    @wraps(fn)
+    def wrapper(*args, **kwargs):
+        result = fn(*args, **kwargs)
+        return ToolResponse(content=[{"type": "text", "text": _json.dumps(result, default=str)}])
+    return wrapper
+
 # Domain tools
 <<agent_name>>_domain_tools = resolve_tools(
     domain="<<spec.metadata.domain>>",
@@ -133,10 +166,8 @@ def load_skill(path: str) -> str:
 <<agent_name>>_sys_prompt = <<agent_name>>_role
 # << Elif agent.reasoning_mode == "guided": >>
 # <<agent_name>>_TOOL_CATALOG = """
-# You have these tools available. Choose which to call based on what you
-# need to learn from the input. You don't have to call all of them.
-#
-# <<list each tool name from agent.tools and agent.agentscope_skills with its docstring first line>>
+# Tools available — choose based on what you need to learn from the input.
+# <<list each tool name from agent.tools with its docstring first line>>
 # """
 # <<agent_name>>_sys_prompt = <<agent_name>>_role + "\n\n" + <<agent_name>>_TOOL_CATALOG
 # << end if >>

@@ -1,0 +1,58 @@
+apiVersion: atom.platform/v1
+kind: AgentDeployment
+metadata:
+  name: transaction-risk-analyzer
+  domain: payments
+  version: 1.0.0
+  description: Analyzes transaction risk based on history, KYC, and OFAC sanctions
+    screening.
+  owner: user:default@atom.io
+spec:
+  agents:
+  - name: transaction-risk-analyzer
+    role: standalone
+    agent_role_file: agent-roles/payments/transaction-risk-analyzer.role.md
+    reasoning_mode: prescribed
+    model: gemini-3.1-pro
+    temperature: 1.0
+    reasoning_effort: medium
+    max_iterations: 6
+    tools:
+    - fraud_service/get_transaction_history
+    - kyc_service/check_profile_status
+    - compliance/screen_ofac_sanctions
+    input_schema:
+      type: object
+      properties:
+        customer_id:
+          type: string
+          description: Customer identifier
+        transfer_id:
+          type: string
+          description: Transfer request ID
+        amount_usd:
+          type: number
+          description: Transfer amount in USD
+        payment_type:
+          type: string
+          description: Type of payment
+      required:
+      - customer_id
+      - transfer_id
+      - amount_usd
+      - payment_type
+    memory:
+      type: short_term
+      cross_conversation:
+        enabled: true
+        kind: personal
+        identity_field: input.customer_id
+  flow:
+    type: standalone
+  audit:
+    log_to: minio://audit-logs/agent/transaction-risk-analyzer
+    retention_days: 90
+  deployment:
+    runtime: agentscope
+    sandbox: base
+    replicas: 1

@@ -278,6 +278,26 @@ _FASTAPI_OVERRIDE = textwrap.dedent("""
 
     For "prescribed" mode: sys_prompt = ROLE (no catalog block).
 
+    ## TOOL-FREE AGENTS (tools: [] in spec)
+
+    If the spec has an empty tools list, the agent does pure LLM reasoning with no
+    external calls. DO NOT invent tool names. DO NOT import resolve_tools. DO NOT
+    define _as_tool_response. Use a bare ReActAgent with no toolkit:
+
+    ```python
+    # No tools — pure reasoning agent
+    <<agent_name>> = ReActAgent(
+        name="<<agent.name>>",
+        sys_prompt=<<agent_name>>_sys_prompt,
+        model=make_model("<<agent.model>>", reasoning_effort="<<agent.reasoning_effort>>"),
+        formatter=OpenAIChatFormatter(),
+        memory=InMemoryMemory(),
+        max_iters=<<agent.max_iterations>>,
+    )
+    ```
+
+    The /invoke handler and standalone_run are identical — just no toolkit setup block.
+
     Output ONE fenced ```python``` block. Nothing before. Nothing after.
 """)
 
@@ -466,11 +486,20 @@ def _fix_generated_patterns(code: str) -> str:
     return code
 
 
-def _lint(code: str) -> list[str]:
+def _lint(code: str, spec: AgentSpec | None = None) -> list[str]:
     errors = []
+    has_tools = bool(spec and any(ag.tools for ag in spec.spec.agents)) if spec else True
+
     for pattern, msg in _REQUIRED_PATTERNS:
+        # Skip tool-related checks for tool-free agents — no hallucination forced.
+        if not has_tools and pattern in (
+            r"from tools\.registry import resolve_tools",
+            r'_as_tool_response|ToolResponse',
+        ):
+            continue
         if not re.search(pattern, code):
             errors.append(f"MISSING: {msg}")
+
     for pattern, msg in _FORBIDDEN_PATTERNS:
         if re.search(pattern, code):
             errors.append(f"FORBIDDEN: {msg}")
@@ -508,7 +537,7 @@ def compile_agent(name: str, spec: AgentSpec, spec_dict: dict) -> str:
     for attempt in range(2):
         if attempt == 1 and broken_code:
             # Second pass: targeted fix — pass broken code back with error description
-            lint_errors = _lint(broken_code)
+            lint_errors = _lint(broken_code, spec)
             feedback = "Your previous output had issues. Fix ONLY the problems below, keep everything else identical:\n"
             try:
                 ast.parse(broken_code)
@@ -548,8 +577,8 @@ def compile_agent(name: str, spec: AgentSpec, spec_dict: dict) -> str:
                 continue
             raise ValueError(f"Generated code has syntax error: {e}") from e
 
-        # Lint check
-        errors = _lint(code)
+        # Lint check — pass spec so tool-related rules skip for tool-free agents
+        errors = _lint(code, spec)
         if errors:
             broken_code = code
             if attempt == 0:
@@ -641,7 +670,13 @@ _SPEC_GEN_SYSTEM = textwrap.dedent("""
           input_schema: {}
     ```
 
-    Tools are domain-specific — specify tools relevant to your domain.
+    Tools are domain-specific — only add tools when the agent MUST call external services.
+    If the user says "no tools", "pure reasoning", "no external calls", or similar →
+    set tools to an empty list []. DO NOT invent tool names to fill the field.
+
+    ```yaml
+          tools: []   # tool-free agent — valid, no hallucination
+    ```
 
     Input schema inference rules (apply in order):
     1. If the description mentions documents, files, PDF, images, OCR, or scans → use the file_base64 schema.
@@ -653,7 +688,8 @@ _SPEC_GEN_SYSTEM = textwrap.dedent("""
 
     Rules:
     - temperature MUST be 1.0
-    - Only use tools valid for the chosen domain
+    - Only use tools that exist for the chosen domain — never guess tool names
+    - If no tools are needed, tools: [] is correct and complete
     - Output ONE ```yaml``` block. Nothing else.
 """)
 
