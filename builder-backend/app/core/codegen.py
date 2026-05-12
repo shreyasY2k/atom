@@ -690,6 +690,25 @@ _SPEC_GEN_SYSTEM = textwrap.dedent("""
           tools: []   # tool-free agent — valid, no hallucination
     ```
 
+    CANONICAL tool names by domain — use EXACTLY these spellings, never invent variants:
+
+    payments:
+      get_fraud_signals          # transaction history + baseline + peer segment in one call
+      get_kyc_profile            # KYC profile status (NOT get_kyc_status, NOT check_kyc)
+      screen_ofac_sanctions      # OFAC sanctions check (NOT check_ofac, NOT ofac_screen)
+      get_transaction_history    # raw transaction list from fraud service
+      get_customer_baseline      # spending baseline (NOT get_risk_baseline, NOT get_risk_profile)
+      get_customer_profile       # full KYC profile from KYC service
+
+    banking-kyc:
+      get_customer_profile  get_kyc_documents  get_external_screening
+
+    banking-fraud:
+      get_transaction_history  get_customer_baseline  get_peer_segment_stats
+
+    banking-securities-ops:
+      get_customer_positions  get_security_master  check_position_lots
+
     Input schema inference rules (apply in order):
     1. If the description mentions documents, files, PDF, images, OCR, or scans → use the file_base64 schema.
     2. If the domain processes structured entities → add required fields that identify those entities.

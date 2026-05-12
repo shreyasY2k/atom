@@ -304,6 +304,40 @@ def get_fraud_signals(customer_id: str) -> dict:
 
 
 # ---------------------------------------------------------------------------
+# Tool name aliases (must be defined BEFORE DOMAIN_TOOLS)
+# ---------------------------------------------------------------------------
+
+def _alias(fn, name: str):
+    """Create a function alias with a different __name__ so resolve_tools finds it."""
+    import functools
+    @functools.wraps(fn)
+    def wrapper(*args, **kwargs):
+        return fn(*args, **kwargs)
+    wrapper.__name__ = name
+    wrapper.__qualname__ = name
+    return wrapper
+
+
+# Common Gemini-generated name variants for payments domain tools.
+_PAYMENTS_ALIASES = [
+    _alias(get_customer_baseline,   "get_risk_baseline"),
+    _alias(get_customer_baseline,   "get_customer_risk_baseline"),
+    _alias(get_customer_baseline,   "get_risk_profile"),
+    _alias(get_kyc_profile,         "get_kyc_status"),
+    _alias(get_kyc_profile,         "check_kyc_profile"),
+    _alias(get_kyc_profile,         "get_kyc_data"),
+    _alias(screen_ofac_sanctions,   "check_ofac_sanctions"),
+    _alias(screen_ofac_sanctions,   "screen_ofac"),
+    _alias(screen_ofac_sanctions,   "ofac_screen"),
+    _alias(screen_ofac_sanctions,   "get_ofac_screening"),
+    _alias(get_transaction_history, "get_fraud_history"),
+    _alias(get_transaction_history, "get_transaction_data"),
+    _alias(get_fraud_signals,       "get_risk_signals"),
+    _alias(get_fraud_signals,       "get_fraud_data"),
+]
+
+
+# ---------------------------------------------------------------------------
 # Domain registry
 # ---------------------------------------------------------------------------
 
@@ -340,20 +374,33 @@ DOMAIN_TOOLS: dict[str, list] = {
         get_peer_segment_stats,
     ],
     "payments": [
+        # Canonical names
         get_fraud_signals,
         get_kyc_profile,
         screen_ofac_sanctions,
-        # also expose individual fraud tools for agents that declare them separately
         get_transaction_history,
         get_customer_baseline,
         get_peer_segment_stats,
         get_customer_profile,
         get_external_screening,
+        # Aliases — Gemini frequently generates these name variants
+        *_PAYMENTS_ALIASES,
     ],
 }
 
 
 def resolve_tools(domain: str, names: list[str]) -> list:
-    """Return the callable tool functions for the given domain and name list."""
+    """Return the callable tool functions for the given domain and name list.
+    Unrecognised names are printed as a warning — silent drops caused hard-to-debug
+    FunctionNotFoundError at runtime when Gemini generated a variant tool name.
+    """
+    import sys
     available = {fn.__name__: fn for fn in DOMAIN_TOOLS.get(domain, [])}
-    return [available[n] for n in names if n in available]
+    result = []
+    for n in names:
+        if n in available:
+            result.append(available[n])
+        else:
+            print(f"[tools.registry] WARNING: tool '{n}' not found in domain '{domain}'. "
+                  f"Available: {sorted(available)}", file=sys.stderr)
+    return result
