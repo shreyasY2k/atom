@@ -11,11 +11,12 @@ app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], all
 
 _TRANSACTIONS: dict[str, list[dict]] = {
     "CUST-100442": [
-        {"id": "TXN-CUST100442-001", "merchant": "Zephyr Digital LLC", "amount": 4800.00, "channel": "online", "date": "2026-05-07", "flagged": True},
-        {"id": "TXN-CUST100442-002", "merchant": "Shell Gas Station", "amount": 52.10, "channel": "in-store", "date": "2026-05-06", "flagged": False},
-        {"id": "TXN-CUST100442-003", "merchant": "Whole Foods Market", "amount": 138.40, "channel": "in-store", "date": "2026-05-05", "flagged": False},
-        {"id": "TXN-CUST100442-004", "merchant": "Amazon.com", "amount": 299.00, "channel": "online", "date": "2026-05-03", "flagged": False},
-        {"id": "TXN-CUST100442-005", "merchant": "ATM Withdrawal", "amount": 500.00, "channel": "ATM", "date": "2026-05-01", "flagged": False},
+        # Prior wire transfers show this is a routine business payment pattern
+        {"id": "TXN-CUST100442-001", "merchant": "Wire: Apex Supplies Ltd",   "amount": 5200.00, "channel": "wire",     "date": "2026-05-01", "flagged": False},
+        {"id": "TXN-CUST100442-002", "merchant": "Wire: Global Parts Inc",    "amount": 3750.00, "channel": "wire",     "date": "2026-04-15", "flagged": False},
+        {"id": "TXN-CUST100442-003", "merchant": "AWS Cloud Services",        "amount": 1840.00, "channel": "online",   "date": "2026-04-01", "flagged": False},
+        {"id": "TXN-CUST100442-004", "merchant": "Office Depot",              "amount":  318.50, "channel": "in-store", "date": "2026-03-28", "flagged": False},
+        {"id": "TXN-CUST100442-005", "merchant": "Wire: Metro Freight LLC",   "amount": 4800.00, "channel": "wire",     "date": "2026-03-12", "flagged": False},
     ],
     "CUST-200119": [
         {"id": "TXN-CUST200119-001", "merchant": "FX Wire Transfer", "amount": 12000.00, "channel": "online", "date": "2026-05-07", "flagged": True},
@@ -32,18 +33,22 @@ _TRANSACTIONS: dict[str, list[dict]] = {
 _BASELINES: dict[str, dict] = {
     "CUST-100442": {
         "customer_id": "CUST-100442",
-        "avg_monthly_spend": 2400.00,
-        "avg_transaction_amount": 180.00,
-        "typical_channels": ["in-store", "online"],
-        "typical_merchant_categories": ["grocery", "gas", "e-commerce"],
+        # Established SMB owner — routinely makes wire transfers in the $2k–$7k range.
+        "avg_monthly_spend": 18000.00,
+        "avg_transaction_amount": 2800.00,
+        "avg_wire_transfer_amount": 4200.00,
+        "typical_channels": ["online", "wire", "in-store"],
+        "typical_merchant_categories": ["e-commerce", "wire-transfer", "grocery", "gas"],
         "risk_tier": "LOW",
         "account_age_months": 84,
         "prior_fraud_flags": 0,
     },
     "CUST-200119": {
         "customer_id": "CUST-200119",
+        # High-net-worth individual — FX wire is unusual; prior fraud flag present.
         "avg_monthly_spend": 8500.00,
         "avg_transaction_amount": 650.00,
+        "avg_wire_transfer_amount": 2100.00,
         "typical_channels": ["in-store", "online"],
         "typical_merchant_categories": ["luxury-retail", "fitness", "travel"],
         "risk_tier": "MEDIUM",
@@ -64,13 +69,14 @@ _BASELINES: dict[str, dict] = {
 
 _PEER_SEGMENTS: dict[str, dict] = {
     "CUST-100442": {
-        "segment": "mass_affluent",
-        "avg_balance": 85000,
-        "avg_monthly_spend": 2200.00,
-        "p95_single_transaction": 3500.00,
-        "online_txn_pct": 0.35,
-        "crypto_exchange_exposure_pct": 0.02,
-        "segment_fraud_rate_pct": 0.8,
+        "segment": "small_business_owner",
+        "avg_balance": 120000,
+        "avg_monthly_spend": 17500.00,
+        "p95_single_transaction": 9000.00,   # $4,800 wire is well within normal range
+        "typical_wire_amount": 4500.00,
+        "online_txn_pct": 0.55,
+        "crypto_exchange_exposure_pct": 0.01,
+        "segment_fraud_rate_pct": 0.4,
     },
     "CUST-200119": {
         "segment": "high_net_worth",
