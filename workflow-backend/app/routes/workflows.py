@@ -87,6 +87,31 @@ def list_workflows():
     return {"workflows": registry_db.list_all()}
 
 
+@router.get("/specs")
+def list_workflow_specs():
+    """List workflow YAML files present on disk (registered or not).
+    Used by the UI to show available specs before registration."""
+    specs_dir = SPECS_PATH / "workflows"
+    registered = {r["name"] for r in registry_db.list_all()}
+    results = []
+    if specs_dir.exists():
+        for p in sorted(specs_dir.glob("*.yaml")):
+            name = p.stem
+            try:
+                raw = yaml.safe_load(p.read_text())
+                meta = raw.get("metadata", {}) if isinstance(raw, dict) else {}
+            except Exception:
+                meta = {}
+            results.append({
+                "name": name,
+                "version": meta.get("version", "unknown"),
+                "domain": meta.get("domain", ""),
+                "description": meta.get("description", ""),
+                "registered": name in registered,
+            })
+    return {"specs": results}
+
+
 @router.get("/{name}/spec")
 def get_workflow_spec(name: str):
     """Return the raw YAML spec for a workflow (used by Composer canvas)."""

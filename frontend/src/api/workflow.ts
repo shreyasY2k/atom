@@ -15,6 +15,9 @@ export const workflowApi = {
   listWorkflows: (): Promise<{ workflows: WorkflowRecord[] }> =>
     fetch(`${BASE}/workflows`, { headers: actor() }).then(json),
 
+  listWorkflowSpecs: (): Promise<{ specs: { name: string; version: string; domain: string; description: string; registered: boolean }[] }> =>
+    fetch(`${BASE}/workflows/specs`, { headers: actor() }).then(json),
+
   getWorkflow: (name: string): Promise<WorkflowRecord> =>
     fetch(`${BASE}/workflows/${name}`, { headers: actor() }).then(json),
 

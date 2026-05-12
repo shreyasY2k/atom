@@ -38,8 +38,12 @@ export const builderApi = {
   getAgent: (name: string): Promise<AgentRecord> =>
     fetch(`${BASE}/agents/${name}`, { headers: actor() }).then(json),
 
-  deployAgent: (name: string): Promise<AgentRecord> =>
-    fetch(`${BASE}/agents/${name}/deploy`, { method: 'POST', headers: actor() }).then(json),
+  deployAgent: (name: string, specYaml?: string, skillContent?: string): Promise<AgentRecord> =>
+    fetch(`${BASE}/agents/${name}/deploy`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...actor() },
+      body: JSON.stringify({ spec_yaml: specYaml ?? null, skill_content: skillContent ?? null }),
+    }).then(json),
 
   deleteAgent: (name: string): Promise<unknown> =>
     fetch(`${BASE}/agents/${name}`, { method: 'DELETE', headers: actor() }).then(json),
@@ -76,18 +80,27 @@ export const builderApi = {
     fetch(`${BASE}/agents/${name}/compile`, { method: 'POST', headers: actor() }).then(json),
 
   // Deployment requests
-  submitDeployRequest: (name: string, notes = ''): Promise<DeploymentRecord> =>
+  saveAgentSpec: (name: string, specYaml: string, skillContent?: string): Promise<{ saved: boolean }> =>
+    fetch(`${BASE}/agents/${name}/deploy`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...actor() },
+      // Deploy with spec content but no further action — backend saves and returns early if we
+      // just need persistence before a deploy-request. We use deploy endpoint as the save gate.
+      body: JSON.stringify({ spec_yaml: specYaml, skill_content: skillContent ?? null }),
+    }).then(json),
+
+  submitDeployRequest: (name: string, notes = '', specYaml?: string, skillContent?: string): Promise<DeploymentRecord> =>
     fetch(`${BASE}/agents/${name}/deploy-request`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', ...actor() },
-      body: JSON.stringify({ notes }),
+      body: JSON.stringify({ notes, spec_yaml: specYaml ?? null, skill_content: skillContent ?? null }),
     }).then(json),
 
-  deployDirect: (name: string, notes = ''): Promise<DeploymentRecord> =>
+  deployDirect: (name: string, notes = '', specYaml?: string, skillContent?: string): Promise<DeploymentRecord> =>
     fetch(`${BASE}/agents/${name}/deploy-direct`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', ...actor() },
-      body: JSON.stringify({ notes }),
+      body: JSON.stringify({ notes, spec_yaml: specYaml ?? null, skill_content: skillContent ?? null }),
     }).then(json),
 
   listAgentDeployments: (name: string): Promise<{ deployments: DeploymentRecord[] }> =>

@@ -23,6 +23,37 @@ class DeployRequestBody(BaseModel):
     notes: str = ""
     previous_request_id: str | None = None
 
+
+class SaveAndDeployBody(BaseModel):
+    """Carries the spec + skill content from the UI editor so files are
+    written to disk on explicit deploy/save — never auto-saved earlier."""
+    spec_yaml: str | None = None      # current YAML from editor
+    skill_content: str | None = None  # current role/skill markdown from editor
+
+
+def _save_spec_files(name: str, spec_yaml: str, skill_content: str | None) -> None:
+    """Write spec YAML and role file to disk. Called only on explicit save/deploy."""
+    spec_dict = yaml.safe_load(spec_yaml)
+    spec = AgentSpec.model_validate(spec_dict)
+
+    # Write role/skill file if content provided
+    if skill_content:
+        for ag in spec.spec.agents:
+            role_rel = ag.agent_role_file or f"agent-roles/{spec.metadata.domain}/{name}.role.md"
+            # Keep spec_dict in sync
+            for node in spec_dict.get("spec", {}).get("agents", []):
+                if node.get("name") == ag.name:
+                    node["agent_role_file"] = role_rel
+                    node.pop("skill", None)
+            role_path = Path("/app") / role_rel
+            role_path.parent.mkdir(parents=True, exist_ok=True)
+            role_path.write_text(skill_content)
+
+    # Write spec YAML (with role path annotations)
+    spec_file = SPECS_PATH / "agents" / f"{name}.yaml"
+    spec_file.parent.mkdir(parents=True, exist_ok=True)
+    spec_file.write_text(yaml.dump(spec_dict, sort_keys=False, allow_unicode=True))
+
 SPECS_PATH  = Path(os.environ.get("SPECS_PATH", "/app/specs"))
 LITELLM_BASE_URL = os.environ.get("LITELLM_BASE_URL", "http://litellm:4000")
 REME_URL         = os.environ.get("REME_URL", "http://reme:8002")
@@ -190,9 +221,11 @@ def _do_deploy_agent(name: str, actor: str) -> dict:
 # ---------------------------------------------------------------------------
 
 @router.post("/{name}/deploy")
-def deploy_agent(name: str, request: Request):
-    """Compile (if needed), issue identity, build+run container, register."""
-    actor = request.headers.get("X-Atom-Actor", "user:default@atom.io")
+def deploy_agent(name: str, body: SaveAndDeployBody = SaveAndDeployBody(), request: Request = None):
+    """Save spec+skill to disk (if provided by UI editor), then compile and deploy."""
+    actor = (request.headers.get("X-Atom-Actor", "user:default@atom.io") if request else "user:default@atom.io")
+    if body.spec_yaml:
+        _save_spec_files(name, body.spec_yaml, body.skill_content)
     return _do_deploy_agent(name, actor)
 
 

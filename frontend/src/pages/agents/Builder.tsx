@@ -110,9 +110,10 @@ function AIMode() {
 
   const deploy = useMutation({
     mutationFn: (): Promise<AgentRecord | DeploymentRecord> => {
-      if (role === 'builder') return builderApi.submitDeployRequest(agentName)
-      if (role === 'platform_admin') return builderApi.deployDirect(agentName)
-      return builderApi.deployAgent(agentName)
+      // Pass current editor content so files are saved to disk on this explicit action only.
+      if (role === 'builder') return builderApi.submitDeployRequest(agentName, '', specYaml, skillContent)
+      if (role === 'platform_admin') return builderApi.deployDirect(agentName, '', specYaml, skillContent)
+      return builderApi.deployAgent(agentName, specYaml, skillContent)
     },
     onSuccess: (d) => { setDeployResult(d); qc.invalidateQueries({ queryKey: ['agents'] }); setError('') },
     onError: (e: unknown) => setError(extractErrorMessage(e)),
@@ -273,7 +274,7 @@ function CLIMode() {
   const { data } = useQuery({ queryKey: ['agents'], queryFn: builderApi.listAgents })
   const qc = useQueryClient()
   const deploy = useMutation({
-    mutationFn: builderApi.deployAgent,
+    mutationFn: (name: string) => builderApi.deployAgent(name),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['agents'] }),
   })
 
@@ -354,7 +355,8 @@ function YAMLMode() {
 
   const agentName = yamlVal.match(/\s+name:\s+(\S+)/)?.[1] ?? ''
   const deploy = useMutation({
-    mutationFn: () => builderApi.deployAgent(agentName),
+    // Pass current YAML so files are written only on this explicit deploy action.
+    mutationFn: () => builderApi.deployAgent(agentName, yamlVal),
     onSuccess: (d) => { setDeployResult(d); qc.invalidateQueries({ queryKey: ['agents'] }) },
     onError: (e: unknown) => setError(extractErrorMessage(e)),
   })

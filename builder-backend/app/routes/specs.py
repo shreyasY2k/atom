@@ -89,44 +89,34 @@ def generate(req: GenerateRequest):
 
     spec_yaml = yaml.dump(spec_dict, sort_keys=False, allow_unicode=True)
 
-    # Generate a proper skill file via Gemini (runs in parallel with spec save)
+    # Generate role/skill file content via Gemini.
+    # Files are NOT written to disk here — that happens on explicit save/deploy.
     skill_content = ""
     skill_path_str = ""
     try:
         skill_content = generate_skill(req.prose, spec_dict)
     except Exception:
-        # Non-fatal — fall back to a minimal stub if Gemini fails
         skill_content = (
             f"# {spec.metadata.name}\n\n"
             f"{spec.metadata.description}\n\n"
             "## Instructions\n\nAnalyse the input and return a valid JSON response.\n"
         )
 
-    # 1. Save role content to agent-roles/<domain>/<spec-name>.role.md
-    skill_path_str = ""
+    # Annotate spec_dict with role paths so the editor shows them, but don't write.
     for ag in spec.spec.agents:
         role_rel = ag.agent_role_file or f"agent-roles/{spec.metadata.domain}/{spec.metadata.name}.role.md"
         for node in spec_dict.get("spec", {}).get("agents", []):
             if node.get("name") == ag.name:
                 node["agent_role_file"] = role_rel
-                node.pop("skill", None)  # drop legacy field
-        # Write role file
-        role_path = Path("/app") / role_rel
-        role_path.parent.mkdir(parents=True, exist_ok=True)
-        role_path.write_text(skill_content)
-        skill_path_str = str(role_path)
-
-    # 2. Save spec to disk (skill paths now guaranteed to be present)
-    spec_file = SPECS_PATH / "agents" / f"{spec.metadata.name}.yaml"
-    spec_file.parent.mkdir(parents=True, exist_ok=True)
-    spec_file.write_text(yaml.dump(spec_dict, sort_keys=False, allow_unicode=True))
+                node.pop("skill", None)
+        skill_path_str = role_rel
 
     return {
         "spec": spec_dict,
-        "spec_yaml": spec_yaml,
+        "spec_yaml": yaml.dump(spec_dict, sort_keys=False, allow_unicode=True),
         "skill_content": skill_content,
         "skill_path": skill_path_str,
         "name": spec.metadata.name,
         "domain": spec.metadata.domain,
-        "spec_saved": str(spec_file),
+        "spec_saved": "",   # not saved yet — saved on deploy
     }
