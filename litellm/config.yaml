@@ -40,6 +40,12 @@ litellm_settings:
   callbacks: ["otel"]
   drop_params: True
 
+  # Disable the budget-reset background cron job.
+  # The cron calls Prisma with `where.budget_limits.not=None` which is invalid in
+  # the Prisma version bundled with this LiteLLM release — spams ERROR logs every 12s.
+  # Budget limits aren't used in this stack so disabling this is safe.
+  disable_reset_budget: true
+
 # Tool-permission guardrails: enforced at the gateway, regardless of agent code.
 # This is the second line of defense behind the per-agent allowlist in the spec.
 guardrails:
