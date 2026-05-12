@@ -57,7 +57,7 @@ def chat_completion(
         _url("/v1/chat/completions"),
         json=payload,
         headers=_HEADERS,
-        timeout=120,
+        timeout=300,
     )
     r.raise_for_status()
     return r.json()["choices"][0]["message"]["content"]

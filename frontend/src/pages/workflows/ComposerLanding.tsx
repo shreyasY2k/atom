@@ -169,7 +169,7 @@ export default function ComposerLanding() {
   })
 
   return (
-    <Box sx={{ p: 4, maxWidth: 860, mx: 'auto' }}>
+    <Box sx={{ p: { xs: 2, sm: 3, md: 4 }, width: '100%', boxSizing: 'border-box' }}>
       <Box sx={{ mb: 4 }}>
         <Typography variant="h5" fontWeight={700} gutterBottom>Workflow Composer</Typography>
         <Typography variant="body2" color="text.secondary">
@@ -184,8 +184,8 @@ export default function ComposerLanding() {
       </Typography>
       <Box sx={{
         display: 'grid',
-        gridTemplateColumns: { xs: '1fr 1fr', md: '1fr 1fr 1fr 1fr' },
-        gridAutoRows: '1fr',   // force all rows to equal height
+        gridTemplateColumns: { xs: '1fr', sm: '1fr 1fr', md: 'repeat(4, 1fr)' },
+        gridAutoRows: '1fr',
         gap: 2,
         mt: 1,
         mb: 5,
