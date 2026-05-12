@@ -331,11 +331,11 @@ def _bg_deploy_agent(deployment_id: str, name: str, actor: str) -> None:
 # ---------------------------------------------------------------------------
 
 @router.post("/{name}/invoke")
-def invoke_agent(name: str, payload: dict):
+def invoke_agent(name: str, payload: dict, background_tasks: BackgroundTasks):
     """Proxy a call to the deployed agent's /invoke endpoint.
 
-    Returns the agent result plus a run_id for trace correlation.
-    The run_id can be used with GET /agents/{name}/runs/{run_id}/events.
+    Returns immediately after the agent responds.
+    Studio registration and run-record updates run in the background.
     """
     rec = registry_db.get(name)
     if not rec:
@@ -345,19 +345,7 @@ def invoke_agent(name: str, payload: dict):
 
     run_id = f"run-{uuid.uuid4().hex[:10]}"
     started_at = datetime.now(timezone.utc).isoformat()
-
-    # Persist the run immediately so it survives restarts
-    registry_db.upsert_run({
-        "run_id": run_id,
-        "agent_name": name,
-        "status": "running",
-        "started_at": started_at,
-        "completed_at": None,
-        "service_account_id": rec.get("service_account_id", ""),
-    })
-
     endpoint = rec["endpoint"]
-    # Pass run_id into the agent so it can tag LiteLLM calls for trace correlation
     enriched = {**payload, "_run_id": run_id}
 
     try:
@@ -365,44 +353,36 @@ def invoke_agent(name: str, payload: dict):
         r.raise_for_status()
         result = r.json()
     except httpx.HTTPStatusError as e:
-        completed_at = datetime.now(timezone.utc).isoformat()
-        registry_db.upsert_run({
-            "run_id": run_id, "agent_name": name, "status": "error",
-            "started_at": started_at, "completed_at": completed_at,
-            "service_account_id": rec.get("service_account_id", ""),
-        })
         raise HTTPException(e.response.status_code, f"Agent returned error: {e.response.text}")
     except Exception as e:
         raise HTTPException(502, f"Could not reach agent at {endpoint}: {e}")
 
     completed_at = datetime.now(timezone.utc).isoformat()
-    # Store the actual user message and agent response text for conversation history
+
+    # ── Background: DB persistence + Studio registration ──────────────────────
+    # These never block the response — they run after the result is sent.
     import json as _json
     user_text = payload.get("text") or _json.dumps(
         {k: v for k, v in payload.items() if k != "_run_id"}, default=str
     )
     agent_text = _json.dumps(result, default=str) if isinstance(result, dict) else str(result)
-    registry_db.upsert_run({
-        "run_id": run_id,
-        "agent_name": name,
-        "status": "completed",
-        "started_at": started_at,
-        "completed_at": completed_at,
-        "service_account_id": rec.get("service_account_id", ""),
-        "user_message": user_text[:2000],
-        "agent_response": agent_text[:4000],
-    })
+    svc_id = rec.get("service_account_id", "")
 
-    # Register run + messages in Studio so all invocations appear in Studio's UI
-    _register_with_studio(
-        run_id=run_id,
-        agent_name=name,
-        svc_id=rec.get("service_account_id", ""),
-        user_input=payload,
-        agent_output=result,
-        started_at=started_at,
-        completed_at=completed_at,
-    )
+    def _persist_and_register():
+        registry_db.upsert_run({
+            "run_id": run_id, "agent_name": name, "status": "completed",
+            "started_at": started_at, "completed_at": completed_at,
+            "service_account_id": svc_id,
+            "user_message": user_text[:2000],
+            "agent_response": agent_text[:4000],
+        })
+        _register_with_studio(
+            run_id=run_id, agent_name=name, svc_id=svc_id,
+            user_input=payload, agent_output=result,
+            started_at=started_at, completed_at=completed_at,
+        )
+
+    background_tasks.add_task(_persist_and_register)
 
     return {"result": result, "run_id": run_id}
 
@@ -527,13 +507,13 @@ STUDIO_URL = os.environ.get("STUDIO_URL", "http://studio:3000")
 
 
 def _studio_trpc(procedure: str, data: dict) -> None:
-    """Call a Studio tRPC mutation. Fails silently — never blocks the critical path."""
+    """Call a Studio tRPC mutation. Runs in background — never blocks the critical path."""
     try:
         httpx.post(
             f"{STUDIO_URL}/api/trpc/{procedure}",
             json={"json": data},
             headers={"Content-Type": "application/json"},
-            timeout=3,
+            timeout=1.5,   # short — already in background, don't hang
         )
     except Exception:
         pass
