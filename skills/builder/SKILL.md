@@ -251,7 +251,11 @@ async def persist_memory(input_data: dict, output_text: str) -> None:
 
 async def standalone_run(payload: dict) -> dict:
     await <<agent_name>>.memory.clear()
-    user_input = payload.get("text") or payload.get("input") or json.dumps(payload, default=str)
+    # ── LOCKED LINE — copy exactly, never vary ──────────────────────────────
+    user_input = payload.get("text") or payload.get("input") or _json.dumps(payload, default=str)
+    # user_input MUST be str. _json.dumps returns str — never chain .get() on it.
+    # WRONG: _json.dumps(payload, default=str).get("input")  ← str has no .get()
+    # WRONG: payload.get("text", payload)                    ← dict fallback crashes Msg()
 
     # Hydrate cross-conversation memory — no-op if AGENT_MEMORY_KIND is unset
     memory_ctx = await hydrate_memory(payload)

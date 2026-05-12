@@ -203,8 +203,12 @@ _FASTAPI_OVERRIDE = textwrap.dedent("""
     ```python
     async def standalone_run(payload: dict) -> dict:
         await <agent_name>.memory.clear()   # InMemoryMemory.clear() is async — must await
-        # Build user_input: prefer "text" (free-text path), then "input", else dump the whole dict.
+
+        ## ── LOCKED: copy this line EXACTLY — do not vary, chain, or rewrite it ──
         user_input = payload.get("text") or payload.get("input") or _json.dumps(payload, default=str)
+        ## user_input MUST be a str. _json.dumps always returns str. Never chain .get() on it.
+        ## DO NOT write: _json.dumps(...).get(...) — str has no .get() method.
+        ## DO NOT write: payload.get("text", payload) — payload is a dict, not a str.
         ...
         # After getting output_text from the agent response:
         try:
@@ -376,13 +380,21 @@ def _fix_generated_patterns(code: str) -> str:
     code = re.sub(r'(\w+\.memory\.clear\(\))', r'await \1', code)
     code = re.sub(r'\bawait\s+await\b', 'await', code)
 
-    # 2. user_input inside standalone_run: handle text / structured / binary.
-    #    Gemini generates payload.get("input", payload) which passes a dict literal
-    #    when neither "input" nor "text" is present, causing the agent to process
-    #    the stringified dict instead of real content.
+    # 2. user_input inside standalone_run: must always be a str, never a dict.
+    #    Replace the ENTIRE user_input = ... line whenever it starts from a
+    #    payload.get(...) call — covers every Gemini variant in one shot.
+    #    Single-line flag ensures each match is exactly one line.
     code = re.sub(
-        r'user_input\s*=\s*payload\.get\(["\']input["\'],\s*payload\)',
-        'user_input = payload.get("text") or payload.get("input") or _json.dumps(payload, default=str)',
+        r'(?m)^(\s*)user_input\s*=\s*payload\.get\(.+$',
+        r'\1user_input = payload.get("text") or payload.get("input") or _json.dumps(payload, default=str)',
+        code,
+    )
+
+    # 2b. Type-safety guard on Msg content — AgentScope requires str or list[ContentBlock],
+    #     never a raw dict. Wrap any Msg(content=user_input, ...) to force str conversion.
+    code = re.sub(
+        r'Msg\(name=(["\']workflow["\']|["\']user["\']|["\']agent["\']|["\']assistant["\']|["\']human["\'])\s*,\s*content=user_input\s*,',
+        r'Msg(name=\1, content=user_input if isinstance(user_input, str) else _json.dumps(user_input, default=str),',
         code,
     )
 

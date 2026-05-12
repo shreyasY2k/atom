@@ -43,26 +43,36 @@ def _walk_path(path: list[str], ctx: dict) -> Any:
 
 def _resolve(template: Any, ctx: dict) -> Any:
     """
-    Resolve a template against ctx.  Two syntaxes:
-      {{ ctx.foo.bar }}  — Jinja-style
-      ctx.foo.bar        — bare expression
+    Resolve a template against ctx.  Three syntaxes supported:
+      ctx.foo.bar          — bare path with explicit ctx prefix
+      input.customer_id    — bare path without ctx prefix (shorthand for ctx.input.customer_id)
+      {{ ctx.foo.bar }}    — Jinja-style inline interpolation
+      {{ input.foo }}      — Jinja-style without ctx prefix (shorthand)
     """
     if not isinstance(template, str):
         return template
 
     stripped = template.strip()
 
+    # Bare path: ctx.foo.bar
     if re.match(r"^ctx(\.[a-zA-Z_][a-zA-Z0-9_]*)+$", stripped):
-        parts = stripped.split(".")
-        result = _walk_path(parts, ctx)
+        result = _walk_path(stripped.split("."), ctx)
+        return result if result is not None else template
+
+    # Bare path without ctx prefix: input.customer_id → ctx.input.customer_id
+    # Matches any dot-separated identifier chain that doesn't start with ctx
+    if re.match(r"^(?!ctx\.)[a-zA-Z_][a-zA-Z0-9_]*(\.[a-zA-Z_][a-zA-Z0-9_]*)+$", stripped):
+        result = _walk_path(["ctx"] + stripped.split("."), ctx)
         return result if result is not None else template
 
     def repl(m):
-        path = m.group(1).strip().split(".")
-        if path[0] != "ctx":
-            return m.group(0)
-        v = _walk_path(path, ctx)
-        return str(v) if v is not None else ""
+        raw = m.group(1).strip()
+        parts = raw.split(".")
+        # Support {{ input.foo }} as shorthand for {{ ctx.input.foo }}
+        if parts[0] != "ctx":
+            parts = ["ctx"] + parts
+        v = _walk_path(parts, ctx)
+        return str(v) if v is not None else m.group(0)
 
     return re.sub(r"\{\{\s*([^}]+)\s*\}\}", repl, template)
 

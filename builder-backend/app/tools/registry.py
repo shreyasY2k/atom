@@ -266,6 +266,44 @@ def get_peer_segment_stats(customer_id: str) -> dict:
 
 
 # ---------------------------------------------------------------------------
+# Payments — payout risk and compliance
+# ---------------------------------------------------------------------------
+
+def screen_ofac_sanctions(customer_id: str, amount_usd: float = 0) -> dict:
+    """Screen a customer against the OFAC sanctions list.
+
+    Args:
+        customer_id: Customer or merchant identifier.
+        amount_usd: Transaction amount in USD (used for threshold checks).
+    """
+    url = f"{os.environ.get('OFAC_SVC_URL', 'http://ofac-svc:8096')}/screen"
+    return httpx.post(url, json={"customer_id": customer_id, "amount_usd": amount_usd}, timeout=10).json()
+
+
+def get_kyc_profile(customer_id: str) -> dict:
+    """Get the KYC profile status for a customer or merchant.
+
+    Args:
+        customer_id: Customer or merchant identifier, e.g. CUST-100442.
+    """
+    url = f"{os.environ.get('KYC_SVC_URL', 'http://kyc-svc:8095')}/profile/{customer_id}"
+    return httpx.get(url, timeout=10).json()
+
+
+def get_fraud_signals(customer_id: str) -> dict:
+    """Get fraud transaction history, spending baseline, and peer segment for a customer.
+
+    Args:
+        customer_id: Customer or merchant identifier.
+    """
+    fraud_url = os.environ.get("FRAUD_SVC_URL", "http://fraud-svc:8102")
+    history  = httpx.get(f"{fraud_url}/transactions",    params={"customer_id": customer_id, "limit": 10}, timeout=10).json()
+    baseline = httpx.get(f"{fraud_url}/customer-baseline", params={"customer_id": customer_id}, timeout=10).json()
+    segment  = httpx.get(f"{fraud_url}/peer-segment",    params={"customer_id": customer_id}, timeout=10).json()
+    return {"transaction_history": history, "baseline": baseline, "peer_segment": segment}
+
+
+# ---------------------------------------------------------------------------
 # Domain registry
 # ---------------------------------------------------------------------------
 
@@ -300,6 +338,17 @@ DOMAIN_TOOLS: dict[str, list] = {
         get_transaction_history,
         get_customer_baseline,
         get_peer_segment_stats,
+    ],
+    "payments": [
+        get_fraud_signals,
+        get_kyc_profile,
+        screen_ofac_sanctions,
+        # also expose individual fraud tools for agents that declare them separately
+        get_transaction_history,
+        get_customer_baseline,
+        get_peer_segment_stats,
+        get_customer_profile,
+        get_external_screening,
     ],
 }
 
