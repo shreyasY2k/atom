@@ -58,63 +58,34 @@ two registries serve different purposes and are not the same.
 
 ## Two surfaces, one pipeline
 
-```
-┌─────────────────────────────────────────────────────────────────────┐
-│                       Atom Agent Platform UI                        │
-│  ┌─────────────────────────┐         ┌────────────────────────────┐ │
-│  │     AGENT BUILDER       │         │     WORKFLOW COMPOSER      │ │
-│  │                         │         │                            │ │
-│  │  prose ──▶ agent-spec   │         │  prose ──▶ workflow-spec   │ │
-│  │  spec ──▶ Python code   │         │  canvas: drag node types   │ │
-│  │  code ──▶ deploy        │         │  agents from registry      │ │
-│  │  agent gets             │         │  workflow ──▶ Temporal     │ │
-│  │  service-account ID     │         │  executes                  │ │
-│  └─────────────────────────┘         └────────────────────────────┘ │
-└────────────────────────────────┬────────────────────────────────────┘
-                                 │ all external traffic
-                                 ▼
-                    ┌────────────────────────┐
-                    │   GATE  (Go, :8080/81) │  ◀── audit chokepoint
-                    │                        │
-                    │  :8080  builder surface│
-                    │  :8081 workflow surface│
-                    │                        │
-                    │  every runtime call:   │
-                    │  • stamp gate_run_id   │
-                    │  • pre-audit → MinIO   │
-                    │  • proxy to backend    │
-                    │  • post-audit → MinIO  │
-                    │  • log → stdout/Loki   │
-                    └────────┬───────────────┘
-                             │
-              ┌──────────────┴───────────────┐
-              ▼                              ▼
-    ┌───────────────────┐         ┌──────────────────────┐
-    │  Builder Backend  │         │  Workflow Backend     │
-    │  (FastAPI, :8080) │         │  (FastAPI + Temporal  │
-    │  internal only    │         │   SDK, :8081)         │
-    │                   │         │  internal only        │
-    │  - validate spec  │         │  - validate spec      │
-    │  - compile code   │         │  - register workflow  │
-    │  - issue service- │         │  - run worker         │
-    │    account in     │         │  - expose human task  │
-    │    LiteLLM        │         │    queue              │
-    │  - deploy agent   │         │  - emit audit events  │
-    └─────────┬─────────┘         └──────────┬────────────┘
-              │                              │
-              ▼                              ▼
-    ┌───────────────────────────────────────────────────────────┐
-    │                LiteLLM Gateway (4000)                      │
-    │  - Gemini-only model_list                                  │
-    │  - virtual keys per service account (= NHI for agents)    │
-    │  - MCP gateway for tool calls                              │
-    │  - guardrails: per-agent tool allowlists                   │
-    │  - S3 callback ──▶ MinIO audit-logs                       │
-    └────────┬───────────────────────────────────────────────────┘
-             │
-             ├──▶ Gemini API (the only LLM provider)
-             ├──▶ Mock services (KYC, OFAC, SWIFT, treasury, FNOL, OCR)
-             └──▶ MinIO (audit logs, immutable)
+```mermaid
+flowchart TB
+    subgraph UI["Atom Agent Platform UI"]
+        direction LR
+        Builder["<b>AGENT BUILDER</b><br/>prose → agent-spec<br/>spec → Python code<br/>code → deploy<br/>agent gets service-account ID"]
+        Composer["<b>WORKFLOW COMPOSER</b><br/>prose → workflow-spec<br/>canvas: drag node types<br/>agents from registry<br/>workflow → Temporal executes"]
+    end
+
+    Gate["<b>GATE</b> (Go, :8080/81) — audit chokepoint<br/>:8080 builder surface · :8081 workflow surface<br/>every runtime call:<br/>• stamp gate_run_id<br/>• pre-audit → MinIO<br/>• proxy to backend<br/>• post-audit → MinIO<br/>• log → stdout/Loki"]
+
+    BB["<b>Builder Backend</b> (FastAPI, :8080)<br/><i>internal only</i><br/>• validate spec<br/>• compile code<br/>• issue service-account in LiteLLM<br/>• deploy agent"]
+
+    WB["<b>Workflow Backend</b> (FastAPI + Temporal SDK, :8081)<br/><i>internal only</i><br/>• validate spec<br/>• register workflow<br/>• run worker<br/>• expose human task queue<br/>• emit audit events"]
+
+    LiteLLM["<b>LiteLLM Gateway</b> (:4000)<br/>• Gemini-only model_list<br/>• virtual keys per service account (= NHI for agents)<br/>• MCP gateway for tool calls<br/>• guardrails: per-agent tool allowlists<br/>• S3 callback → MinIO audit-logs"]
+
+    Gemini[("Gemini API<br/>(the only LLM provider)")]
+    Mocks[("Mock services<br/>KYC · OFAC · SWIFT<br/>treasury · FNOL · OCR")]
+    MinIO[("MinIO<br/>audit logs, immutable")]
+
+    UI ==>|all external traffic| Gate
+    Gate --> BB
+    Gate --> WB
+    BB --> LiteLLM
+    WB --> LiteLLM
+    LiteLLM --> Gemini
+    LiteLLM --> Mocks
+    LiteLLM --> MinIO
 ```
 
 ## Component map
@@ -212,109 +183,88 @@ Three demo paths through this workflow:
 
 ## Build pipeline (agent)
 
-```
-                           skills/builder/SKILL.md
-                           skills/<domain>/*.skill.md
-                                       │
-                                       ▼
-prose or YAML ─▶ agent-spec.yaml ─▶ Gemini 3.1 Pro (via LiteLLM, structured output)
-                       │                     │
-                       │                     ▼
-                       │          generated AgentScope code
-                       │                     │
-                       ▼                     ▼
-              minio://specs/        minio://agent-artifacts/
-                                              │
-                                              ▼
-                                      AgentScope Runtime
-                                      DeployManager
-                                              │
-                                              ▼
-                                      service account issued in LiteLLM
-                                              │
-                                              ▼
-                                      container at agent-{name}:8100+
-                                              │
-                                              ▼
-                                      registered in agent registry
+```mermaid
+flowchart TB
+    Skills["skills/builder/SKILL.md<br/>skills/&lt;domain&gt;/*.skill.md"]
+    Prose["prose or YAML"]
+    Spec["agent-spec.yaml"]
+    Gen["Gemini 3.1 Pro<br/>(via LiteLLM, structured output)"]
+    Code["generated AgentScope code"]
+    SpecStore[("minio://specs/")]
+    Artifacts[("minio://agent-artifacts/")]
+    Runtime["AgentScope Runtime<br/>DeployManager"]
+    Identity["service account issued in LiteLLM"]
+    Container["container at agent-{name}:8100+"]
+    Registry["registered in agent registry"]
+
+    Prose --> Spec
+    Skills --> Gen
+    Spec --> Gen
+    Spec --> SpecStore
+    Gen --> Code
+    Code --> Artifacts
+    Artifacts --> Runtime
+    Runtime --> Identity
+    Identity --> Container
+    Container --> Registry
 ```
 
 ## Build pipeline (workflow)
 
-```
-                           skills/composer/SKILL.md
-                                       │
-                                       ▼
-prose or canvas ─▶ workflow-spec.yaml ─▶ validation + agent-existence check
-                          │                            │
-                          │                            ▼
-                          │                  generated Temporal workflow code
-                          │                  + activity definitions
-                          │                            │
-                          ▼                            ▼
-                 minio://specs/             minio://workflow-artifacts/
-                                                       │
-                                                       ▼
-                                             registered with Temporal worker
-                                                       │
-                                                       ▼
-                                             ready to execute
+```mermaid
+flowchart TB
+    Skills["skills/composer/SKILL.md"]
+    Prose["prose or canvas"]
+    Spec["workflow-spec.yaml"]
+    Validate["validation +<br/>agent-existence check"]
+    Code["generated Temporal workflow code<br/>+ activity definitions"]
+    SpecStore[("minio://specs/")]
+    Artifacts[("minio://workflow-artifacts/")]
+    Worker["registered with Temporal worker"]
+    Ready["ready to execute"]
+
+    Prose --> Spec
+    Skills --> Validate
+    Spec --> Validate
+    Spec --> SpecStore
+    Validate --> Code
+    Code --> Artifacts
+    Artifacts --> Worker
+    Worker --> Ready
 ```
 
 ## Runtime call flow (ATS routine path)
 
-```
-demo runner clicks "Run" with sample transfer payload
-   │
-   ▼
-POST workflow-backend /workflows/ats-asset-transfer/runs
-   │
-   ▼
-Temporal starts workflow execution
-   │
-   ▼
-[1] http: receive_transfer_request → mock service ──▶ MinIO audit (system actor)
-   │
-   ▼
-[2] agent node: invoke kyc-refresh agent
-   │
-   ├─ workflow-backend POSTs to agent-kyc-refresh:8100/invoke
-   ├─ agent runs ReAct loop
-   │   ├─ LLM call → litellm:4000 (virtual key svc-acct-kyc-001) ──▶ MinIO audit
-   │   ├─ tool calls → litellm MCP gw → kyc-svc ──▶ MinIO audit
-   │   └─ produces output dict {confidence: 0.94, profile: {...}}
-   ├─ confidence ≥ threshold → continue to next node
-   └─ workflow logs node completion
-   │
-   ▼
-[3] http: ofac_screen → ofac-svc ──▶ MinIO audit (system actor)
-   │
-   ▼
-[4] decision: amount > 250000 → false → next node = [5a]
-   │
-   ▼
-[5a] agent node: invoke asset-recon agent (similar to [2])
-   │
-   ▼
-[6] http: swift_initiate → swift-gw ──▶ MinIO audit
-   │
-   ▼
-[7] human_task: post to task-queue, wait
-   │
-   ├─ workflow execution pauses (Temporal handles durability)
-   ├─ task appears in UI's "My Tasks" pane
-   ├─ demo runner clicks "Accept"
-   └─ human action recorded in audit (human actor)
-   │
-   ▼
-[8] http: audit + notify ──▶ MinIO audit
-   │
-   ▼
-workflow complete
-   │
-   ▼
-final state returned to UI; Studio shows full agent traces;
-   audit pane shows ~30 events with three distinct actor types
+```mermaid
+flowchart TB
+    Start(["demo runner clicks 'Run' with sample transfer payload"])
+    Post["POST workflow-backend<br/>/workflows/ats-asset-transfer/runs"]
+    TempStart["Temporal starts workflow execution"]
+
+    N1["<b>[1] http</b>: receive_transfer_request<br/>→ mock service → MinIO audit (system actor)"]
+
+    N2["<b>[2] agent node</b>: invoke kyc-refresh agent"]
+    N2a["workflow-backend POSTs to<br/>agent-kyc-refresh:8100/invoke"]
+    N2b["agent runs ReAct loop:<br/>• LLM call → litellm:4000 (virtual key svc-acct-kyc-001) → MinIO audit<br/>• tool calls → litellm MCP gw → kyc-svc → MinIO audit<br/>• produces output {confidence: 0.94, profile: {...}}"]
+    N2c["confidence ≥ threshold → continue<br/>workflow logs node completion"]
+
+    N3["<b>[3] http</b>: ofac_screen → ofac-svc → MinIO audit (system actor)"]
+    N4{"<b>[4] decision</b><br/>amount > 250000?"}
+    N5a["<b>[5a] agent node</b>: invoke asset-recon agent<br/>(similar to [2])"]
+    N6["<b>[6] http</b>: swift_initiate → swift-gw → MinIO audit"]
+
+    N7["<b>[7] human_task</b>: post to task-queue, wait"]
+    N7a["• workflow execution pauses (Temporal handles durability)<br/>• task appears in UI's 'My Tasks' pane<br/>• demo runner clicks 'Accept'<br/>• human action recorded in audit (human actor)"]
+
+    N8["<b>[8] http</b>: audit + notify → MinIO audit"]
+    Done(["workflow complete<br/>final state returned to UI<br/>Studio shows full agent traces<br/>audit pane shows ~30 events across three actor types"])
+
+    Start --> Post --> TempStart --> N1 --> N2
+    N2 --> N2a --> N2b --> N2c --> N3
+    N3 --> N4
+    N4 -->|false| N5a
+    N5a --> N6 --> N7
+    N7 --> N7a --> N8 --> Done
 ```
 
 ## Auditing — what's logged where
