@@ -4,7 +4,7 @@ metadata:
   name: transaction-risk-analyzer
   domain: payments
   version: 1.0.0
-  description: Analyzes transaction risk based on history, KYC, and OFAC sanctions
+  description: Analyzes transaction risk by evaluating history, KYC status, and sanctions
     screening.
   owner: user:default@atom.io
 spec:
@@ -17,10 +17,6 @@ spec:
     temperature: 1.0
     reasoning_effort: medium
     max_iterations: 6
-    tools:
-    - fraud_service/get_transaction_history
-    - kyc_service/check_profile_status
-    - compliance/screen_ofac_sanctions
     input_schema:
       type: object
       properties:
@@ -32,15 +28,18 @@ spec:
           description: Transfer request ID
         amount_usd:
           type: number
-          description: Transfer amount in USD
+          description: Amount of the transaction in USD
         payment_type:
           type: string
-          description: Type of payment
+          description: Type of payment method used
       required:
       - customer_id
       - transfer_id
-      - amount_usd
-      - payment_type
+    tools:
+    - get_transaction_history
+    - get_customer_baseline
+    - get_kyc_profile
+    - screen_ofac_sanctions
     memory:
       type: short_term
       cross_conversation:
