@@ -44,7 +44,7 @@ REPO_ROOT    = Path(__file__).resolve().parent.parent
 SESSION_FILE = Path.home() / ".atom" / "session.json"
 
 BUILDER_URL  = os.environ.get("ATOM_BUILDER_URL",  "http://localhost:8080")
-WORKFLOW_URL = os.environ.get("ATOM_WORKFLOW_URL", "http://localhost:8081")
+WORKFLOW_URL = os.environ.get("ATOM_WORKFLOW_URL", "http://localhost:8082")
 
 # ── Session helpers ──────────────────────────────────────────────────────────
 

@@ -1,7 +1,7 @@
 import type { AuditEvent, RunRecord, Task, WorkflowRecord, WorkflowSpec } from '../types'
 import { getActorHeader } from '../context/AuthContext'
 
-const BASE = 'http://localhost:8081'
+const BASE = 'http://localhost:8082'
 
 const json = (r: Response) => {
   if (!r.ok) return r.json().then(e => Promise.reject(e))

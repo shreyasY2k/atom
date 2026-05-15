@@ -9,5 +9,5 @@ FROM alpine:3.19
 RUN apk --no-cache add ca-certificates
 WORKDIR /app
 COPY --from=builder /build/gate .
-EXPOSE 8080 8081
+EXPOSE 8080 8082
 ENTRYPOINT ["/app/gate"]

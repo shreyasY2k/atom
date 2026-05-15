@@ -219,7 +219,7 @@ Task 04: Frontend (Builder + Composer + Audit + Tasks)
 
 ### Notes for Task 05 (rehearsal)
 - Frontend is `vite preview` serving a static build. Rebuild required after any code change: `docker compose build frontend && docker compose up -d frontend`
-- API calls go to localhost:8080 / 8081 (hardcoded — Vite env vars are build-time and weren't injected)
+- API calls go to localhost:8080 / 8082 (hardcoded — Vite env vars are build-time and weren't injected)
 - The Composer canvas auto-fits on load; use Controls (bottom-left) to zoom
 - "Replace with agent" is a local state change; actual workflow registration still uses the spec file from disk
 
@@ -651,7 +651,7 @@ Task 06: CLI polish (`atom agent scaffold`, `atom workflow init`)
 **Storage layer:**
 - `builder-backend/app/core/deployments_store.py` (new): MinIO `atom-deployments` bucket CRUD (`create_record`, `get_record`, `update_record`, `list_records`) + `emit_deployment_audit` → `audit-logs/deployment/` (object-locked bucket).
 - `workflow-backend/app/core/deployments_store.py` (new): identical copy (separate service, no cross-import).
-- `docker-compose.yml`: `atom-deployments` bucket added to minio-init; `WORKFLOW_BACKEND_URL=http://workflow-backend:8081` added to builder-backend env.
+- `docker-compose.yml`: `atom-deployments` bucket added to minio-init; `WORKFLOW_BACKEND_URL=http://workflow-backend:8082` added to builder-backend env.
 
 **builder-backend:**
 - `app/routes/agents.py`: Factored deploy logic into `_do_deploy_agent(name, actor)`. Added `POST /agents/{name}/deploy-request`, `POST /agents/{name}/deploy-direct`, `GET /agents/{name}/deployments`, `_bg_deploy_agent` background task.
@@ -665,7 +665,7 @@ Task 06: CLI polish (`atom agent scaffold`, `atom workflow init`)
 
 ### Key design decisions
 - **Approval is async** (FastAPI BackgroundTasks) — approve endpoint returns immediately; container build happens in background. Deployment record transitions: pending → deploying → deployed/failed.
-- **builder-backend is source of truth** for all deployment records. Workflow approval calls `_bg_deploy_workflow` which POSTs to `http://workflow-backend:8081/workflows/{name}/register`.
+- **builder-backend is source of truth** for all deployment records. Workflow approval calls `_bg_deploy_workflow` which POSTs to `http://workflow-backend:8082/workflows/{name}/register`.
 - **Bypass deploys** (deploy-direct) create a record with `approval_status: "bypassed"`, emit `deployment_bypassed` audit event, then deploy immediately (agent: background, workflow: synchronous).
 - **`atom-deployments` bucket**: no object lock (records mutate on state transitions). Audit events in `audit-logs/deployment/` ARE object-locked.
 

@@ -50,7 +50,7 @@ func newWorkflowGate(cfg Config, auditor *Auditor) http.Handler {
 	mux.Handle("POST /runs/{run_id}/cancel",
 		AuditWrap(proxy, auditor, "workflow-backend", "workflow"))
 
-	mux.HandleFunc("GET /gate/health", gateHealth("8081"))
+	mux.HandleFunc("GET /gate/health", gateHealth("8082"))
 
 	mux.Handle("/", proxy) // passthrough: spec CRUD, task queue, audit query, …
 	return mux
@@ -88,8 +88,8 @@ func main() {
 	}()
 
 	go func() {
-		logger.Info("gate/workflow listening", "addr", ":8081", "backend", cfg.WorkflowBackendURL)
-		errCh <- http.ListenAndServe(":8081", workflowGate)
+		logger.Info("gate/workflow listening", "addr", ":8082", "backend", cfg.WorkflowBackendURL)
+		errCh <- http.ListenAndServe(":8082", workflowGate)
 	}()
 
 	logger.Error("gate exited", "err", <-errCh)

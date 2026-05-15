@@ -212,7 +212,7 @@ list open HITL tasks, resolve them, and replay past runs.
     ```
     ✓ litellm           4000   ok    (Gemini reachable, virtual key issuance ok)
     ✓ builder-backend   8080   ok    (4 agents registered)
-    ✓ workflow-backend  8081   ok    (3 workflows registered, 1 worker)
+    ✓ workflow-backend  8082   ok    (3 workflows registered, 1 worker)
     ✓ temporal          7233   ok    (default namespace, 1 worker connected)
     ✓ minio             9000   ok    (5 buckets, audit-logs locked 90d)
     ✓ studio            3000   ok

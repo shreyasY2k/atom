@@ -11,7 +11,7 @@ scrape_configs:
 
   - job_name: workflow-backend
     static_configs:
-      - targets: ["workflow-backend:8081"]
+      - targets: ["workflow-backend:8082"]
 
   - job_name: litellm
     static_configs:

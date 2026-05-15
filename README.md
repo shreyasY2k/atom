@@ -100,7 +100,7 @@ atom agent list
 curl -sf -X POST http://localhost:8080/agents/<agent-name>/deploy \
   -H "X-Atom-Actor: user:admin@atom.io"
 
-curl -sf -X POST http://localhost:8081/workflows/<workflow-name>/register \
+curl -sf -X POST http://localhost:8082/workflows/<workflow-name>/register \
   -H "Content-Type: application/json" -d '{}'
 ```
 
@@ -225,7 +225,7 @@ atom deployments request-changes <dep-id> --comments "..."
 pip install -r tests/requirements.txt
 
 # With services running:
-BUILDER_URL=http://localhost:8080 WORKFLOW_URL=http://localhost:8081 \
+BUILDER_URL=http://localhost:8080 WORKFLOW_URL=http://localhost:8082 \
   pytest tests/e2e/ -v
 ```
 
@@ -237,7 +237,7 @@ BUILDER_URL=http://localhost:8080 WORKFLOW_URL=http://localhost:8081 \
 |---|---|---|
 | Atom Platform UI | 5173 | Main UI surface |
 | builder-backend API | 8080 | Agent build, deploy, identity |
-| workflow-backend API | 8081 | Workflow register, runs, audit |
+| workflow-backend API | 8082 | Workflow register, runs, audit |
 | LiteLLM gateway | 4000 | All LLM + tool calls |
 | MinIO API | 9000 | Audit log storage |
 | MinIO console | 9001 | Browse audit logs |

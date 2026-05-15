@@ -17,7 +17,7 @@ from app.routes.agents import _bg_deploy_agent
 
 router = APIRouter(prefix="/deployments", tags=["deployments"])
 
-WORKFLOW_BACKEND_URL = os.environ.get("WORKFLOW_BACKEND_URL", "http://workflow-backend:8081")
+WORKFLOW_BACKEND_URL = os.environ.get("WORKFLOW_BACKEND_URL", "http://workflow-backend:8082")
 
 
 class ApproveBody(BaseModel):

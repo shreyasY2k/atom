@@ -85,7 +85,7 @@ function OverviewTab({ workflow, name }: { workflow: WorkflowRecord; name: strin
   const submitMut = useMutation({
     mutationFn: (): Promise<unknown> => {
       if (role === 'builder') {
-        return fetch(`http://localhost:8081/workflows/${name}/deploy-request`, {
+        return fetch(`http://localhost:8082/workflows/${name}/deploy-request`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json', 'X-Atom-Actor': getActorHeader() },
           body: JSON.stringify({ notes: '' }),

@@ -66,11 +66,11 @@ flowchart TB
         Composer["<b>WORKFLOW COMPOSER</b><br/>prose → workflow-spec<br/>canvas: drag node types<br/>agents from registry<br/>workflow → Temporal executes"]
     end
 
-    Gate["<b>GATE</b> (Go, :8080/81) — audit chokepoint<br/>:8080 builder surface · :8081 workflow surface<br/>every runtime call:<br/>• stamp gate_run_id<br/>• pre-audit → MinIO<br/>• proxy to backend<br/>• post-audit → MinIO<br/>• log → stdout/Loki"]
+    Gate["<b>GATE</b> (Go, :8080/81) — audit chokepoint<br/>:8080 builder surface · :8082 workflow surface<br/>every runtime call:<br/>• stamp gate_run_id<br/>• pre-audit → MinIO<br/>• proxy to backend<br/>• post-audit → MinIO<br/>• log → stdout/Loki"]
 
     BB["<b>Builder Backend</b> (FastAPI, :8080)<br/><i>internal only</i><br/>• validate spec<br/>• compile code<br/>• issue service-account in LiteLLM<br/>• deploy agent"]
 
-    WB["<b>Workflow Backend</b> (FastAPI + Temporal SDK, :8081)<br/><i>internal only</i><br/>• validate spec<br/>• register workflow<br/>• run worker<br/>• expose human task queue<br/>• emit audit events"]
+    WB["<b>Workflow Backend</b> (FastAPI + Temporal SDK, :8082)<br/><i>internal only</i><br/>• validate spec<br/>• register workflow<br/>• run worker<br/>• expose human task queue<br/>• emit audit events"]
 
     LiteLLM["<b>LiteLLM Gateway</b> (:4000)<br/>• Gemini-only model_list<br/>• virtual keys per service account (= NHI for agents)<br/>• MCP gateway for tool calls<br/>• guardrails: per-agent tool allowlists<br/>• S3 callback → MinIO audit-logs"]
 
@@ -93,9 +93,9 @@ flowchart TB
 | Service | Port | Purpose | Source |
 |---|---|---|---|
 | `frontend` | 5173 | React UI: Builder + Composer + Audit + Tasks | local |
-| `gate` | **8080, 8081** | Go reverse-proxy: intercepts all runtime calls, stamps gate_run_id, writes pre/post audit to MinIO, logs every request. External-only — backends are internal. | local |
+| `gate` | **8080, 8082** | Go reverse-proxy: intercepts all runtime calls, stamps gate_run_id, writes pre/post audit to MinIO, logs every request. External-only — backends are internal. | local |
 | `builder-backend` | 8080 (internal) | FastAPI: agent spec → code → deploy + identity issuance | local |
-| `workflow-backend` | 8081 (internal) | FastAPI: workflow spec → Temporal registration; human task queue | local |
+| `workflow-backend` | 8082 (internal) | FastAPI: workflow spec → Temporal registration; human task queue | local |
 | `temporal` | 7233 (gRPC) / 8233 (web) | Workflow engine | image |
 | `temporal-db` | 5432 (internal) | Postgres for Temporal | image |
 | `litellm` | 4000 | Gemini gateway, MCP, virtual keys, audit | image |

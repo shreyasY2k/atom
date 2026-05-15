@@ -6,7 +6,7 @@
 set -euo pipefail
 
 PATH_NAME="${1:-routine}"
-WF="http://localhost:8081"
+WF="http://localhost:8082"
 TQ="http://localhost:8098"
 TIMEOUT=300  # seconds before giving up
 

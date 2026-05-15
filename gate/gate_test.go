@@ -121,7 +121,7 @@ func buildWorkflowGate(backend *httptest.Server, ma *mockAuditor) http.Handler {
 	mux.Handle("GET /workflows/{name}/runs/{run_id}/events", wrap("workflow", "workflow-backend"))
 	mux.Handle("GET /workflows/{name}/runs/{run_id}/nodes", wrap("workflow", "workflow-backend"))
 	mux.Handle("POST /runs/{run_id}/cancel", wrap("workflow", "workflow-backend"))
-	mux.HandleFunc("GET /gate/health", gateHealth("8081"))
+	mux.HandleFunc("GET /gate/health", gateHealth("8082"))
 	mux.Handle("/", proxy)
 	return mux
 }

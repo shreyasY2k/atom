@@ -5,7 +5,7 @@
 set -euo pipefail
 
 API="http://localhost:8080"
-WF="http://localhost:8081"
+WF="http://localhost:8082"
 
 echo "=== ATOM Platform pre-warm ==="
 

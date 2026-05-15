@@ -2,7 +2,7 @@
 
 ## Goal
 
-`workflow-backend` (FastAPI on port 8081) accepts workflow specs, validates them, registers them with Temporal, exposes execution endpoints, and runs the worker that interprets `workflow-spec.yaml` as a Temporal workflow at runtime.
+`workflow-backend` (FastAPI on port 8082) accepts workflow specs, validates them, registers them with Temporal, exposes execution endpoints, and runs the worker that interprets `workflow-spec.yaml` as a Temporal workflow at runtime.
 
 ## Endpoints to implement
 

@@ -482,7 +482,7 @@ function RunDetailPanel({
   const { data, isLoading } = useQuery({
     queryKey: ['run-nodes', wfName, runId],
     queryFn: () =>
-      fetch(`http://localhost:8081/workflows/${wfName}/runs/${runId}/nodes`)
+      fetch(`http://localhost:8082/workflows/${wfName}/runs/${runId}/nodes`)
         .then(r => r.json()) as Promise<RunDetail>,
     refetchInterval: runStatus === 'running' ? 5000 : false,
     staleTime: runStatus === 'running' ? 0 : Infinity,

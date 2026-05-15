@@ -342,15 +342,15 @@ services:
   # ============================================================
 
   # GATE — Go reverse-proxy that owns all external runtime traffic.
-  # Takes over ports 8080 and 8081. Backends are internal-only.
+  # Takes over ports 8080 and 8082. Backends are internal-only.
   gate:
     build: { context: ./gate }
     container_name: gate
     restart: unless-stopped
-    ports: ["8080:8080", "8081:8081"]
+    ports: ["8080:8080", "8082:8082"]
     environment:
       - BUILDER_BACKEND_URL=http://builder-backend:8080
-      - WORKFLOW_BACKEND_URL=http://workflow-backend:8081
+      - WORKFLOW_BACKEND_URL=http://workflow-backend:8082
       - MINIO_ENDPOINT=minio:9000
       - MINIO_ACCESS_KEY=${MINIO_ACCESS_KEY:-minioadmin}
       - MINIO_SECRET_KEY=${MINIO_SECRET_KEY:-minioadmin}
@@ -391,7 +391,7 @@ services:
       - SECURITIES_OPS_URL=http://securities-ops:8099
       - FRAUD_SVC_URL=http://fraud-svc:8102
       - STUDIO_URL=http://studio:3000
-      - WORKFLOW_BACKEND_URL=http://workflow-backend:8081
+      - WORKFLOW_BACKEND_URL=http://workflow-backend:8082
       - OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4318
       - DATABASE_URL=postgresql://atom:atom@platform-db:5432/atom
     volumes:
@@ -444,7 +444,7 @@ services:
     ports: ["5173:5173"]
     environment:
       - VITE_BUILDER_API_URL=http://localhost:8080
-      - VITE_WORKFLOW_API_URL=http://localhost:8081
+      - VITE_WORKFLOW_API_URL=http://localhost:8082
       - VITE_STUDIO_URL=http://localhost:3000
       - VITE_TEMPORAL_UI_URL=http://localhost:8233
     depends_on:
