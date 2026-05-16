@@ -1,18 +1,18 @@
 /**
  * ATOM Agent Platform — Chat (session-aware)
  *
- * Three-panel layout:
+ * Four-panel layout:
  *
- *  ┌──────────────────────────────────────────────────────────────┐
- *  │ Agent panel (260px) │ Session panel (200px) │ Chat (flex-1) │
- *  │ Deployed agents     │ Sessions for agent    │ Messages       │
- *  │ Name, status, SA id │ + New Session button  │ + Input bar    │
- *  └──────────────────────────────────────────────────────────────┘
+ *  ┌──────────────────────────────────────────────────────────────────────┐
+ *  │ Agent (260px) │ Sessions (200px) │ Chat (flex-1) │ Traces (300px)   │
+ *  │ Deployed list │ Per-agent list   │ Messages      │ LLM+tool events  │
+ *  │ Filter + SA   │ New/End session  │ + Input bar   │ Click run_id     │
+ *  └──────────────────────────────────────────────────────────────────────┘
  *
- * On xs screens the agent panel collapses to icons.
- * On < md the session panel is hidden behind a toggle drawer.
+ * Trace panel opens when user clicks the run_id badge on any assistant message.
+ * On xs the agent panel collapses to icon strip; sessions go in a drawer.
  */
-import React, { useEffect, useRef, useState } from 'react'
+import React, { useEffect, useRef, useState, useCallback } from 'react'
 import {
   Alert,
   Avatar,
@@ -41,9 +41,11 @@ import SearchIcon from '@mui/icons-material/Search'
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore'
 import ExpandLessIcon from '@mui/icons-material/ExpandLess'
 import ForumOutlinedIcon from '@mui/icons-material/ForumOutlined'
+import TimelineIcon from '@mui/icons-material/Timeline'
+import CloseIcon from '@mui/icons-material/Close'
 import { builderApi } from '../../api/builder'
 import type { SessionRecord, MessageRecord } from '../../api/builder'
-import type { AgentRecord } from '../../types'
+import type { AgentRecord, TraceEvent } from '../../types'
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -113,9 +115,11 @@ interface BubbleProps {
   msg: MessageRecord
   agentName: string
   isLoading?: boolean
+  onTraceClick?: (runId: string) => void
+  activeTraceRunId?: string | null
 }
 
-function MessageBubble({ msg, agentName, isLoading }: BubbleProps) {
+function MessageBubble({ msg, agentName, isLoading, onTraceClick, activeTraceRunId }: BubbleProps) {
   const isUser = msg.role === 'user'
 
   if (isUser) {
@@ -173,9 +177,21 @@ function MessageBubble({ msg, agentName, isLoading }: BubbleProps) {
               {msg.content}
             </Typography>
             {msg.run_id && (
-              <Typography variant="caption" color="text.disabled" display="block" sx={{ mt: 0.5, fontSize: '0.6rem' }}>
-                run: {msg.run_id.slice(0, 16)}…
-              </Typography>
+              <Box
+                component="button"
+                onClick={() => onTraceClick?.(msg.run_id!)}
+                sx={{
+                  mt: 0.5, background: 'none', border: 'none', cursor: 'pointer', p: 0,
+                  display: 'flex', alignItems: 'center', gap: 0.5,
+                  color: activeTraceRunId === msg.run_id ? 'primary.main' : 'text.disabled',
+                  '&:hover': { color: 'primary.main' },
+                }}
+              >
+                <TimelineIcon sx={{ fontSize: 11 }} />
+                <Typography variant="caption" sx={{ fontSize: '0.6rem', fontFamily: 'monospace' }}>
+                  {msg.run_id.slice(0, 16)}… trace
+                </Typography>
+              </Box>
             )}
           </Paper>
         )}
@@ -457,6 +473,193 @@ interface OptimisticMessage extends MessageRecord {
   _error?: boolean
 }
 
+// ── Trace panel ───────────────────────────────────────────────────────────────
+
+interface TracePanelProps {
+  agentName: string
+  runId: string
+  onClose: () => void
+}
+
+function TracePanel({ agentName, runId, onClose }: TracePanelProps) {
+  const [events, setEvents] = useState<TraceEvent[]>([])
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
+  const [expanded, setExpanded] = useState<number | null>(null)
+
+  useEffect(() => {
+    setLoading(true)
+    setError(null)
+    builderApi.getRunEvents(agentName, runId)
+      .then(d => setEvents(d.events ?? []))
+      .catch(e => setError(e instanceof Error ? e.message : String(e)))
+      .finally(() => setLoading(false))
+  }, [agentName, runId])
+
+  const totalTokens = events.reduce((s, e) => s + (e.input_tokens ?? 0) + (e.output_tokens ?? 0), 0)
+  const totalMs = events.reduce((s, e) => s + (e.duration_ms ?? 0), 0)
+  const llmCalls = events.filter(e => e.event_type === 'llm_call').length
+  const toolCalls = events.filter(e => e.event_type === 'tool_call').length
+
+  return (
+    <Box
+      sx={{
+        width: 300,
+        flexShrink: 0,
+        borderLeft: '1px solid',
+        borderColor: 'divider',
+        bgcolor: 'background.paper',
+        display: 'flex',
+        flexDirection: 'column',
+        height: '100%',
+        overflow: 'hidden',
+      }}
+    >
+      {/* Header */}
+      <Box sx={{ px: 2, py: 1.5, borderBottom: '1px solid', borderColor: 'divider', display: 'flex', alignItems: 'center', gap: 1 }}>
+        <TimelineIcon sx={{ fontSize: 16, color: 'primary.main' }} />
+        <Box sx={{ flex: 1, minWidth: 0 }}>
+          <Typography variant="caption" fontWeight={700} display="block">Trace</Typography>
+          <Typography variant="caption" fontFamily="monospace" color="text.secondary" noWrap sx={{ fontSize: '0.6rem' }}>
+            {runId}
+          </Typography>
+        </Box>
+        <IconButton size="small" onClick={onClose} sx={{ flexShrink: 0 }}>
+          <CloseIcon sx={{ fontSize: 14 }} />
+        </IconButton>
+      </Box>
+
+      {/* Stats bar */}
+      {!loading && !error && events.length > 0 && (
+        <Box sx={{ px: 2, py: 1, borderBottom: '1px solid', borderColor: 'divider', display: 'flex', gap: 1.5, flexWrap: 'wrap' }}>
+          {[
+            ['LLM calls', llmCalls],
+            ['Tool calls', toolCalls],
+            ['Tokens', totalTokens],
+            ['Time', `${totalMs}ms`],
+          ].map(([label, val]) => (
+            <Box key={String(label)}>
+              <Typography variant="caption" color="text.disabled" display="block" sx={{ fontSize: '0.6rem' }}>{label}</Typography>
+              <Typography variant="caption" fontWeight={700} fontFamily="monospace" sx={{ fontSize: '0.7rem' }}>{val}</Typography>
+            </Box>
+          ))}
+        </Box>
+      )}
+
+      {/* Event list */}
+      <Box sx={{ flex: 1, overflowY: 'auto', py: 1 }}>
+        {loading && (
+          <Box sx={{ display: 'flex', justifyContent: 'center', pt: 4 }}>
+            <CircularProgress size={20} />
+          </Box>
+        )}
+
+        {error && (
+          <Alert severity="warning" sx={{ m: 1.5, fontSize: '0.75rem' }}>
+            {error}
+          </Alert>
+        )}
+
+        {!loading && !error && events.length === 0 && (
+          <Box sx={{ textAlign: 'center', pt: 4 }}>
+            <Typography variant="caption" color="text.secondary">
+              No trace events found for this run.
+            </Typography>
+            <Typography variant="caption" color="text.disabled" display="block" sx={{ mt: 0.5, fontSize: '0.65rem' }}>
+              Events appear after LiteLLM writes the S3 callback.
+            </Typography>
+          </Box>
+        )}
+
+        {events.map((ev, i) => {
+          const isLlm = ev.event_type === 'llm_call'
+          const isOpen = expanded === i
+          return (
+            <Box key={i}>
+              <Box
+                component="button"
+                onClick={() => setExpanded(isOpen ? null : i)}
+                sx={{
+                  width: '100%', textAlign: 'left', background: 'none', border: 'none',
+                  cursor: 'pointer', px: 2, py: 1,
+                  display: 'flex', alignItems: 'flex-start', gap: 1,
+                  '&:hover': { bgcolor: 'action.hover' },
+                }}
+              >
+                {/* Type badge */}
+                <Chip
+                  label={isLlm ? 'LLM' : 'TOOL'}
+                  size="small"
+                  sx={{
+                    height: 16, fontSize: '0.55rem', fontFamily: 'monospace', fontWeight: 700, flexShrink: 0,
+                    bgcolor: isLlm ? 'primary.main' : 'secondary.main',
+                    color: isLlm ? 'primary.contrastText' : 'secondary.contrastText',
+                  }}
+                />
+                <Box sx={{ flex: 1, minWidth: 0 }}>
+                  <Typography variant="caption" fontFamily="monospace" noWrap display="block" sx={{ fontSize: '0.7rem' }}>
+                    {isLlm ? (ev.model ?? 'unknown') : (ev.tool_name ?? 'tool')}
+                  </Typography>
+                  <Box sx={{ display: 'flex', gap: 1, mt: 0.25 }}>
+                    {ev.input_tokens != null && (
+                      <Typography variant="caption" color="text.secondary" sx={{ fontSize: '0.62rem' }}>
+                        {ev.input_tokens}↑ {ev.output_tokens}↓
+                      </Typography>
+                    )}
+                    {ev.duration_ms != null && (
+                      <Typography variant="caption" color="text.secondary" sx={{ fontSize: '0.62rem' }}>
+                        {ev.duration_ms}ms
+                      </Typography>
+                    )}
+                  </Box>
+                </Box>
+                <Box sx={{ color: 'text.secondary', flexShrink: 0 }}>
+                  {isOpen ? <ExpandLessIcon sx={{ fontSize: 13 }} /> : <ExpandMoreIcon sx={{ fontSize: 13 }} />}
+                </Box>
+              </Box>
+
+              <Collapse in={isOpen}>
+                <Box sx={{ px: 2, pb: 1.5 }}>
+                  {/* Response preview */}
+                  {ev.response_content && (
+                    <Box
+                      component="pre"
+                      sx={{
+                        fontSize: '0.6rem', fontFamily: 'monospace', color: 'text.secondary',
+                        bgcolor: 'background.default', border: '1px solid', borderColor: 'divider',
+                        borderRadius: 1, p: 1, overflow: 'auto', maxHeight: 120, m: 0, mb: 0.5,
+                        whiteSpace: 'pre-wrap', wordBreak: 'break-word',
+                      }}
+                    >
+                      {ev.response_content.slice(0, 800)}{ev.response_content.length > 800 ? '…' : ''}
+                    </Box>
+                  )}
+                  {/* Tool calls */}
+                  {ev.tool_calls && ev.tool_calls.length > 0 && (
+                    <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.5, mb: 0.5 }}>
+                      {ev.tool_calls.map((tc, j) => (
+                        <Chip key={j} label={tc.name} size="small"
+                          sx={{ height: 16, fontSize: '0.55rem', fontFamily: 'monospace', bgcolor: 'action.selected' }} />
+                      ))}
+                    </Box>
+                  )}
+                  {/* Timestamp */}
+                  {ev.timestamp && (
+                    <Typography variant="caption" color="text.disabled" sx={{ fontSize: '0.6rem' }}>
+                      {new Date(ev.timestamp * 1000).toLocaleTimeString()}
+                    </Typography>
+                  )}
+                </Box>
+              </Collapse>
+              <Divider />
+            </Box>
+          )
+        })}
+      </Box>
+    </Box>
+  )
+}
+
 // ── Main component ────────────────────────────────────────────────────────────
 
 export default function Chat() {
@@ -482,6 +685,7 @@ export default function Chat() {
   const [sending, setSending] = useState(false)
   const [creatingSession, setCreatingSession] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [traceRunId, setTraceRunId] = useState<string | null>(null)
 
   // Mobile: session drawer open
   const [sessionDrawerOpen, setSessionDrawerOpen] = useState(false)
@@ -852,6 +1056,8 @@ export default function Chat() {
               msg={msg}
               agentName={selectedAgent?.name ?? 'agent'}
               isLoading={msg._loading}
+              onTraceClick={(rid) => setTraceRunId(prev => prev === rid ? null : rid)}
+              activeTraceRunId={traceRunId}
             />
           ))}
 
@@ -965,6 +1171,15 @@ export default function Chat() {
           </Typography>
         </Box>
       </Box>
+
+      {/* Trace panel — slides in when a run_id is clicked */}
+      {traceRunId && selectedAgent && (
+        <TracePanel
+          agentName={selectedAgent.name}
+          runId={traceRunId}
+          onClose={() => setTraceRunId(null)}
+        />
+      )}
     </Box>
   )
 }
