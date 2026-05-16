@@ -9,6 +9,25 @@ name: atom
 services:
 
   # ============================================================
+  # GUARDRAIL LAYER — AgentArmor (built from source)
+  # ============================================================
+  agentarmor:
+    build:
+      context: ./dockerfiles/agentarmor
+    container_name: agentarmor
+    restart: unless-stopped
+    ports: ["8400:8400"]
+    volumes:
+      - ./agentarmor/config.yaml:/app/config.yaml:ro
+    networks: [agentnet]
+    healthcheck:
+      test: ["CMD-SHELL", "python3 -c \"import socket; s=socket.socket(); s.settimeout(2); s.connect(('localhost',8400)); s.close()\""]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 25s
+
+  # ============================================================
   # GATEWAY LAYER
   # ============================================================
   litellm:
@@ -27,12 +46,16 @@ services:
       - AWS_REGION_NAME=us-east-1
       - LITELLM_LOG=INFO
       - OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4318
+      - AGENTARMOR_URL=http://agentarmor:8400
+      - AGENTARMOR_TIMEOUT_SECS=5
     volumes:
       - ./litellm/config.yaml:/app/config.yaml:ro
+      - ./litellm/guardrails:/app/guardrails:ro
     command: ["--config", "/app/config.yaml", "--port", "4000", "--num_workers", "2"]
     depends_on:
       litellm-db: { condition: service_healthy }
       minio-init: { condition: service_completed_successfully }
+      agentarmor: { condition: service_healthy }
     networks: [agentnet]
 
   litellm-db:

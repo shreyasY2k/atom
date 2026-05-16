@@ -132,11 +132,16 @@ class DeploymentConfig(BaseModel):
     replicas: int = 1
 
 
+class GuardrailsConfig(BaseModel):
+    agentarmor: bool = True
+
+
 class AgentSpecInner(BaseModel):
     agents: list[AgentConfig]
     flow: FlowConfig
     audit: AuditConfig
     deployment: DeploymentConfig
+    guardrails: GuardrailsConfig = GuardrailsConfig()
 
 
 class AgentSpecMetadata(BaseModel):

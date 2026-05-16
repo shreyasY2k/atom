@@ -1,0 +1,44 @@
+# AgentArmor runtime config — mounted into the container.
+# Edit this to tune guardrail behaviour without rebuilding the image.
+
+layers:
+  ingestion:
+    enabled: true
+    scan_prompt_injection: true
+    verify_sources: false
+
+  storage:
+    enabled: false
+
+  context:
+    enabled: true
+    goallock: true
+    canary_tokens: false
+
+  planning:
+    enabled: true
+    risk_score_threshold: 7
+
+  execution:
+    enabled: true
+    rate_limit_per_minute: 300
+    circuit_breaker: false
+
+  output:
+    enabled: true
+    scan_credentials: true
+    scan_pii: true
+    scan_harmful: true
+    scan_exfiltration: true
+    schema_validation: false
+
+  inter_agent:
+    enabled: false
+
+  identity:
+    enabled: false
+
+server:
+  host: "0.0.0.0"
+  port: 8400
+  log_level: "INFO"

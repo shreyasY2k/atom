@@ -202,6 +202,34 @@ export interface Task {
   resolution?: string
 }
 
+// ---- Guardrail types ----
+
+export interface GuardrailLayerResult {
+  layer: string
+  verdict: string
+  threat_level?: string
+  message?: string
+  processing_time_ms?: number
+}
+
+export interface GuardrailViolationError {
+  error: 'guardrail_violation'
+  guardrail: string
+  phase: 'pre_call' | 'post_call'
+  verdict: string
+  threat_level: string
+  blocked_by: string
+  layers: GuardrailLayerResult[]
+  message: string
+}
+
+export function isGuardrailViolation(err: unknown): err is GuardrailViolationError {
+  return (
+    typeof err === 'object' && err !== null &&
+    (err as Record<string, unknown>).error === 'guardrail_violation'
+  )
+}
+
 // ---- Audit types ----
 
 export interface AuditEvent {

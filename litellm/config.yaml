@@ -48,7 +48,27 @@ litellm_settings:
 
 # Tool-permission guardrails: enforced at the gateway, regardless of agent code.
 # This is the second line of defense behind the per-agent allowlist in the spec.
+#
+# AgentArmor guardrails run first (pre + post) for every call.
+# Per-agent opt-out: set metadata.guardrails.agentarmor=false on the virtual key.
 guardrails:
+  # ── AgentArmor: pre-call input scan ──────────────────────────────────────
+  - guardrail_name: "agentarmor-pre"
+    litellm_params:
+      guardrail: custom
+      guardrail_path: /app/guardrails/agentarmor_guardrail.py
+      guardrail_class: AgentArmorGuardrail
+      mode: pre_call
+      default_on: true
+
+  # ── AgentArmor: post-call output scan ────────────────────────────────────
+  - guardrail_name: "agentarmor-post"
+    litellm_params:
+      guardrail: custom
+      guardrail_path: /app/guardrails/agentarmor_guardrail.py
+      guardrail_class: AgentArmorGuardrail
+      mode: post_call
+      default_on: true
   - guardrail_name: "treasury-tool-policy"
     litellm_params:
       guardrail: tool_permission

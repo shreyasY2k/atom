@@ -57,6 +57,8 @@ def issue_identity(
     svc_id = compute_service_account_id(name, spec_dict)
     tool_allowlist = [t for ag in spec.spec.agents for t in ag.tools]
 
+    guardrails_cfg = spec.spec.guardrails.model_dump() if spec.spec.guardrails else {}
+
     result = generate_virtual_key(
         alias=svc_id,
         metadata={
@@ -65,6 +67,7 @@ def issue_identity(
             "version": spec.metadata.version,
             "owner": owner,
             "tool_allowlist": tool_allowlist,
+            "guardrails": guardrails_cfg,
         },
         models=["gemini-3.1-pro", "gemini-3-flash", "gemini-embedding"],
         max_budget=10.0,

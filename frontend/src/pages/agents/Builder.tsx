@@ -4,7 +4,7 @@ import {
   Box, Typography, TextField, Button, Paper, Chip, IconButton,
   CircularProgress, Alert, Divider, Stack, Tooltip, Dialog,
   DialogTitle, DialogContent, DialogActions, Tabs, Tab,
-  LinearProgress,
+  LinearProgress, Switch, FormControlLabel,
 } from '@mui/material'
 import CheckCircleIcon from '@mui/icons-material/CheckCircle'
 import ErrorIcon from '@mui/icons-material/Error'
@@ -16,6 +16,7 @@ import CodeIcon from '@mui/icons-material/Code'
 import RocketLaunchIcon from '@mui/icons-material/RocketLaunch'
 import CheckCircleOutlineIcon from '@mui/icons-material/CheckCircleOutline'
 import LinkIcon from '@mui/icons-material/Link'
+import SecurityIcon from '@mui/icons-material/Security'
 import { builderApi, ToolRecord, SkillRecord } from '../../api/builder'
 import { useAuth } from '../../context/AuthContext'
 import ToolFormDialog from '../../components/ToolFormDialog'
@@ -692,10 +693,19 @@ function StepGenerate({
 
 // ── Step 4: Deploy ────────────────────────────────────────────────────────────
 
+function injectGuardrails(specYaml: string, enabled: boolean): string {
+  if (enabled) return specYaml
+  const trimmed = specYaml.trimEnd()
+  if (trimmed.includes('guardrails:')) return trimmed
+  return trimmed + '\n  guardrails:\n    agentarmor: false\n'
+}
+
 interface StepDeployProps {
   agentName: string
   generatedSpec: string
   generatedRole: string
+  guardrailEnabled: boolean
+  setGuardrailEnabled: (v: boolean) => void
   deploying: boolean
   deployError: string
   deployed: boolean
@@ -707,6 +717,8 @@ function StepDeploy({
   agentName,
   generatedSpec,
   generatedRole,
+  guardrailEnabled,
+  setGuardrailEnabled,
   deploying,
   deployError,
   deployed,
@@ -781,32 +793,68 @@ function StepDeploy({
           Agent deployed successfully. Redirecting to agent page…
         </Alert>
       ) : (
-        <Paper variant="outlined" sx={{ p: 2.5 }}>
-          <Typography variant="subtitle2" fontWeight={600} gutterBottom>Deploy options</Typography>
-          <Stack direction="row" spacing={2} sx={{ mt: 1 }}>
-            <Button
-              variant="contained"
-              color="success"
-              size="large"
-              onClick={onDeployDirect}
-              disabled={deploying}
-              startIcon={deploying ? <CircularProgress size={16} color="inherit" /> : <RocketLaunchIcon />}
-            >
-              Deploy directly
-            </Button>
-            <Button
-              variant="outlined"
-              size="large"
-              onClick={onSubmitApproval}
-              disabled={deploying}
-            >
-              Submit for approval
-            </Button>
-          </Stack>
-          <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 1.5 }}>
-            "Deploy directly" bypasses the approval queue. Use "Submit for approval" to follow the governance workflow.
-          </Typography>
-        </Paper>
+        <Stack spacing={2}>
+          {/* Guardrail toggle */}
+          <Paper variant="outlined" sx={{ p: 2 }}>
+            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 0.5 }}>
+              <SecurityIcon fontSize="small" color={guardrailEnabled ? 'primary' : 'disabled'} />
+              <Typography variant="subtitle2" fontWeight={600}>AgentArmor Guardrails</Typography>
+              <Chip
+                size="small"
+                label={guardrailEnabled ? 'ON' : 'OFF'}
+                color={guardrailEnabled ? 'success' : 'default'}
+                sx={{ height: 18, fontSize: '0.65rem', ml: 0.5 }}
+              />
+            </Box>
+            <Typography variant="caption" color="text.secondary" display="block" sx={{ mb: 1.25, ml: 3.5 }}>
+              Scans every LLM request (pre-call) and response (post-call) for prompt injection, PII, and policy violations. On by default.
+            </Typography>
+            <FormControlLabel
+              sx={{ ml: 2.5 }}
+              control={
+                <Switch
+                  checked={guardrailEnabled}
+                  onChange={e => setGuardrailEnabled(e.target.checked)}
+                  size="small"
+                  color="primary"
+                />
+              }
+              label={
+                <Typography variant="caption" color="text.secondary">
+                  {guardrailEnabled ? 'Guardrails active for this agent' : 'Guardrails disabled — use only in trusted environments'}
+                </Typography>
+              }
+            />
+          </Paper>
+
+          {/* Deploy options */}
+          <Paper variant="outlined" sx={{ p: 2.5 }}>
+            <Typography variant="subtitle2" fontWeight={600} gutterBottom>Deploy options</Typography>
+            <Stack direction="row" spacing={2} sx={{ mt: 1 }}>
+              <Button
+                variant="contained"
+                color="success"
+                size="large"
+                onClick={onDeployDirect}
+                disabled={deploying}
+                startIcon={deploying ? <CircularProgress size={16} color="inherit" /> : <RocketLaunchIcon />}
+              >
+                Deploy directly
+              </Button>
+              <Button
+                variant="outlined"
+                size="large"
+                onClick={onSubmitApproval}
+                disabled={deploying}
+              >
+                Submit for approval
+              </Button>
+            </Stack>
+            <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 1.5 }}>
+              "Deploy directly" bypasses the approval queue. Use "Submit for approval" to follow the governance workflow.
+            </Typography>
+          </Paper>
+        </Stack>
       )}
     </Box>
   )
@@ -852,6 +900,7 @@ export default function Builder() {
   const [deploying, setDeploying] = useState(false)
   const [deployError, setDeployError] = useState('')
   const [deployed, setDeployed] = useState(false)
+  const [guardrailEnabled, setGuardrailEnabled] = useState(true)
 
   // ── Navigation helpers ──
 
@@ -954,7 +1003,8 @@ export default function Builder() {
     setDeploying(true)
     setDeployError('')
     try {
-      await builderApi.deployDirect(agentName, '', generatedSpec, generatedRole)
+      const spec = injectGuardrails(generatedSpec, guardrailEnabled)
+      await builderApi.deployDirect(agentName, '', spec, generatedRole)
       setDeployed(true)
       setStepStatus(s => ({ ...s, deploy: 'complete' }))
       setTimeout(() => navigate(`/agents/${agentName}`), 2000)
@@ -971,7 +1021,8 @@ export default function Builder() {
     setDeploying(true)
     setDeployError('')
     try {
-      await builderApi.submitDeployRequest(agentName, '', generatedSpec, generatedRole)
+      const spec = injectGuardrails(generatedSpec, guardrailEnabled)
+      await builderApi.submitDeployRequest(agentName, '', spec, generatedRole)
       setDeployed(true)
       setStepStatus(s => ({ ...s, deploy: 'complete' }))
       setTimeout(() => navigate(`/agents/${agentName}`), 2000)
@@ -1059,6 +1110,8 @@ export default function Builder() {
               agentName={agentName}
               generatedSpec={generatedSpec}
               generatedRole={generatedRole}
+              guardrailEnabled={guardrailEnabled}
+              setGuardrailEnabled={setGuardrailEnabled}
               deploying={deploying}
               deployError={deployError}
               deployed={deployed}

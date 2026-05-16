@@ -15,10 +15,13 @@ import CheckCircleOutlineIcon from '@mui/icons-material/CheckCircleOutline'
 import SendIcon from '@mui/icons-material/Send'
 import AddIcon from '@mui/icons-material/Add'
 import DownloadIcon from '@mui/icons-material/Download'
+import SecurityIcon from '@mui/icons-material/Security'
+import GppBadIcon from '@mui/icons-material/GppBad'
 import { builderApi, type DeploymentRecord, type SessionRecord, type MessageRecord } from '../../api/builder'
 import { useAuth } from '../../context/AuthContext'
 import DeploymentThread from '../../components/DeploymentThread'
-import type { AgentRecord } from '../../types'
+import type { AgentRecord, GuardrailViolationError, GuardrailLayerResult } from '../../types'
+import { isGuardrailViolation } from '../../types'
 
 const STATUS_COLOR: Record<string, 'warning' | 'success' | 'error' | 'default' | 'info'> = {
   pending: 'warning', approved: 'success', rejected: 'error',
@@ -134,6 +137,18 @@ function OverviewTab({ agent }: { agent: AgentRecord }) {
               sx={{ fontFamily: 'monospace', bgcolor: 'action.selected', color: 'secondary.main', fontSize: '0.65rem' }} />
           </Box>
         )}
+        <Box sx={{ mt: 1.5, display: 'flex', alignItems: 'center', gap: 1 }}>
+          <SecurityIcon sx={{ fontSize: 14, color: 'primary.main' }} />
+          <Typography variant="caption" color="text.secondary" fontWeight={600}>Guardrails</Typography>
+          <Chip
+            icon={<SecurityIcon sx={{ fontSize: '0.7rem !important' }} />}
+            label="AgentArmor: Active"
+            size="small"
+            color="primary"
+            variant="outlined"
+            sx={{ height: 18, fontSize: '0.65rem' }}
+          />
+        </Box>
       </Paper>
 
       {deployMut.isSuccess && 'deployment_id' in (deployMut.data as object) && (
@@ -228,6 +243,66 @@ function NewSessionDialog({ open, onClose, onCreate, loading }: NewSessionDialog
   )
 }
 
+function GuardrailViolationBubble({ violation }: { violation: GuardrailViolationError }) {
+  const [open, setOpen] = useState(false)
+  const phaseLabel = violation.phase === 'pre_call' ? 'input' : 'output'
+
+  return (
+    <Box sx={{ display: 'flex', justifyContent: 'flex-start' }}>
+      <Box
+        sx={{
+          maxWidth: '80%',
+          px: 1.5,
+          py: 1,
+          borderRadius: 2,
+          bgcolor: 'error.50',
+          border: 1,
+          borderColor: 'error.light',
+        }}
+      >
+        <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.75, mb: 0.5 }}>
+          <GppBadIcon sx={{ fontSize: 16, color: 'error.main' }} />
+          <Typography variant="caption" fontWeight={700} color="error.main">
+            Blocked by AgentArmor
+          </Typography>
+        </Box>
+        <Typography variant="caption" color="text.secondary" display="block">
+          Phase: <strong>{phaseLabel}</strong> · Threat: <strong>{violation.threat_level}</strong> · Layer: <strong>{violation.blocked_by}</strong>
+        </Typography>
+        {violation.layers.length > 0 && (
+          <Box sx={{ mt: 0.75 }}>
+            <Typography
+              variant="caption"
+              color="primary"
+              sx={{ cursor: 'pointer', textDecoration: 'underline', textDecorationStyle: 'dotted' }}
+              onClick={() => setOpen(v => !v)}
+            >
+              {open ? 'Hide' : 'Show'} layer detail ({violation.layers.length} layers)
+            </Typography>
+            {open && (
+              <Box sx={{ mt: 0.5, display: 'flex', flexDirection: 'column', gap: 0.25 }}>
+                {violation.layers.map((l: GuardrailLayerResult, i: number) => (
+                  <Box key={i} sx={{ display: 'flex', alignItems: 'baseline', gap: 0.5 }}>
+                    <Chip
+                      label={l.verdict}
+                      size="small"
+                      color={l.verdict === 'deny' ? 'error' : l.verdict === 'allow' ? 'success' : 'warning'}
+                      sx={{ height: 14, fontSize: '0.58rem' }}
+                    />
+                    <Typography variant="caption" fontFamily="monospace" color="text.secondary" sx={{ fontSize: '0.68rem' }}>
+                      {l.layer}{l.message ? ` — ${l.message}` : ''}
+                    </Typography>
+                  </Box>
+                ))}
+              </Box>
+            )}
+          </Box>
+        )}
+      </Box>
+    </Box>
+  )
+}
+
 interface ChatPanelProps {
   agentName: string
   session: SessionRecord & { messages: MessageRecord[] }
@@ -235,16 +310,24 @@ interface ChatPanelProps {
   onMessageSent: () => void
 }
 
+type ChatItem =
+  | { kind: 'message'; msg: MessageRecord }
+  | { kind: 'guardrail'; violation: GuardrailViolationError; id: string }
+
 function ChatPanel({ agentName, session, onEnd, onMessageSent }: ChatPanelProps) {
   const [text, setText] = useState('')
   const [sending, setSending] = useState(false)
   const [sendError, setSendError] = useState<string | null>(null)
   const [messages, setMessages] = useState<MessageRecord[]>(session.messages)
+  const [chatItems, setChatItems] = useState<ChatItem[]>(
+    session.messages.map(msg => ({ kind: 'message' as const, msg }))
+  )
   const bottomRef = useRef<HTMLDivElement>(null)
 
   // Keep messages in sync when session prop changes (e.g., after reload)
   useEffect(() => {
     setMessages(session.messages)
+    setChatItems(session.messages.map(msg => ({ kind: 'message' as const, msg })))
   }, [session.session_id, session.messages])
 
   // Auto-scroll to bottom on new messages
@@ -259,14 +342,16 @@ function ChatPanel({ agentName, session, onEnd, onMessageSent }: ChatPanelProps)
     setSendError(null)
     setText('')
 
+    const optimisticId = `opt-${Date.now()}`
     const optimisticUser: MessageRecord = {
-      message_id: `opt-${Date.now()}`,
+      message_id: optimisticId,
       session_id: session.session_id,
       role: 'user',
       content: trimmed,
       created_at: new Date().toISOString(),
     }
     setMessages(prev => [...prev, optimisticUser])
+    setChatItems(prev => [...prev, { kind: 'message', msg: optimisticUser }])
 
     try {
       const resp = await builderApi.sendMessage(agentName, session.session_id, trimmed)
@@ -280,12 +365,22 @@ function ChatPanel({ agentName, session, onEnd, onMessageSent }: ChatPanelProps)
         run_id: resp.run_id,
       }
       setMessages(prev => [...prev, assistantMsg])
+      setChatItems(prev => [...prev, { kind: 'message', msg: assistantMsg }])
       onMessageSent()
     } catch (err) {
-      const msg = err instanceof Error ? err.message : JSON.stringify(err)
-      setSendError(msg)
-      // Remove optimistic message on failure
-      setMessages(prev => prev.filter(m => m.message_id !== optimisticUser.message_id))
+      if (isGuardrailViolation(err)) {
+        // Keep the user message visible; add a guardrail violation bubble
+        setChatItems(prev => [
+          ...prev,
+          { kind: 'guardrail', violation: err, id: `gv-${Date.now()}` },
+        ])
+      } else {
+        const msg = err instanceof Error ? err.message : JSON.stringify(err)
+        setSendError(msg)
+        // Remove optimistic message on generic failure
+        setMessages(prev => prev.filter(m => m.message_id !== optimisticId))
+        setChatItems(prev => prev.filter(i => !(i.kind === 'message' && i.msg.message_id === optimisticId)))
+      }
     } finally {
       setSending(false)
     }
@@ -340,45 +435,51 @@ function ChatPanel({ agentName, session, onEnd, onMessageSent }: ChatPanelProps)
             ReMe context loaded for workspace: {session.reme_context}
           </Typography>
         )}
-        {messages.length === 0 && (
+        {chatItems.length === 0 && (
           <Typography variant="body2" color="text.secondary" sx={{ textAlign: 'center', mt: 4 }}>
             No messages yet. Send a message to start the conversation.
           </Typography>
         )}
-        {messages.map(msg => (
-          <Box
-            key={msg.message_id}
-            sx={{
-              display: 'flex',
-              justifyContent: msg.role === 'user' ? 'flex-end' : 'flex-start',
-            }}
-          >
+        {chatItems.map(item => {
+          if (item.kind === 'guardrail') {
+            return <GuardrailViolationBubble key={item.id} violation={item.violation} />
+          }
+          const msg = item.msg
+          return (
             <Box
+              key={msg.message_id}
               sx={{
-                maxWidth: '75%',
-                px: 1.5,
-                py: 1,
-                borderRadius: 2,
-                bgcolor: msg.role === 'user' ? 'primary.main' : 'action.hover',
-                color: msg.role === 'user' ? 'primary.contrastText' : 'text.primary',
+                display: 'flex',
+                justifyContent: msg.role === 'user' ? 'flex-end' : 'flex-start',
               }}
             >
-              {msg.role !== 'user' && (
-                <Typography variant="caption" color="text.secondary" display="block" sx={{ mb: 0.25, fontWeight: 600 }}>
-                  {agentName}
+              <Box
+                sx={{
+                  maxWidth: '75%',
+                  px: 1.5,
+                  py: 1,
+                  borderRadius: 2,
+                  bgcolor: msg.role === 'user' ? 'primary.main' : 'action.hover',
+                  color: msg.role === 'user' ? 'primary.contrastText' : 'text.primary',
+                }}
+              >
+                {msg.role !== 'user' && (
+                  <Typography variant="caption" color="text.secondary" display="block" sx={{ mb: 0.25, fontWeight: 600 }}>
+                    {agentName}
+                  </Typography>
+                )}
+                <Typography variant="body2" sx={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
+                  {msg.content}
                 </Typography>
-              )}
-              <Typography variant="body2" sx={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
-                {msg.content}
-              </Typography>
-              {msg.run_id && (
-                <Typography variant="caption" color="text.disabled" display="block" sx={{ mt: 0.25, fontSize: '0.62rem' }}>
-                  run: {msg.run_id.slice(0, 16)}…
-                </Typography>
-              )}
+                {msg.run_id && (
+                  <Typography variant="caption" color="text.disabled" display="block" sx={{ mt: 0.25, fontSize: '0.62rem' }}>
+                    run: {msg.run_id.slice(0, 16)}…
+                  </Typography>
+                )}
+              </Box>
             </Box>
-          </Box>
-        ))}
+          )
+        })}
         {sending && (
           <Box sx={{ display: 'flex', justifyContent: 'flex-start' }}>
             <Box sx={{ px: 1.5, py: 1, borderRadius: 2, bgcolor: 'action.hover' }}>
