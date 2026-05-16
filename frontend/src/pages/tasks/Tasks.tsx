@@ -178,7 +178,7 @@ export default function Tasks() {
   const tasks: Task[] = data?.tasks ?? []
 
   return (
-    <Box sx={{ p: 4 }}>
+    <Box sx={{ p: { xs: 2, sm: 3, md: 4 }, width: '100%', maxWidth: { sm: '100%', md: '100%', lg: 1200 }, mx: 'auto' }}>
       <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mb: 3 }}>
         <Typography variant="h6" fontWeight={600}>Human Tasks</Typography>
         <Tooltip title="Refresh">
@@ -207,7 +207,7 @@ export default function Tasks() {
         </Box>
       )}
 
-      <Stack spacing={1.5} sx={{ maxWidth: 640 }}>
+      <Stack spacing={1.5}>
         {tasks.map((t) =>
           tab === 'OPEN'
             ? <TaskCard key={t.task_id} task={t} onResolve={(id, res, edits) => resolve.mutate({ id, resolution: res, edits })} />

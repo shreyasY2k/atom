@@ -1001,7 +1001,7 @@ export default function Builder() {
         <Paper
           elevation={0}
           sx={{
-            maxWidth: 760,
+            maxWidth: '100%',
             mx: 'auto',
             p: 4,
             border: 1,

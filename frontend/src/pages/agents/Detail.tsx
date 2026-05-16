@@ -131,7 +131,7 @@ function OverviewTab({ agent }: { agent: AgentRecord }) {
           <Box sx={{ mt: 1.5, display: 'flex', alignItems: 'center', gap: 1 }}>
             <Typography variant="caption" color="text.secondary" fontWeight={600}>NHI</Typography>
             <Chip label={agent.service_account_id} size="small"
-              sx={{ fontFamily: 'monospace', bgcolor: '#4a148c', color: '#ce93d8', fontSize: '0.65rem' }} />
+              sx={{ fontFamily: 'monospace', bgcolor: 'action.selected', color: 'secondary.main', fontSize: '0.65rem' }} />
           </Box>
         )}
       </Paper>
@@ -867,7 +867,7 @@ function ApiDocsTab({ name, deployed }: { name: string; deployed: boolean }) {
             <Chip label={`v${parsed.info.version}`} size="small" sx={{ mt: 0.5, fontSize: '0.65rem', height: 18 }} />
           )}
           {parsed.info.description && (
-            <Typography variant="body2" color="text.secondary" sx={{ mt: 1, fontSize: '0.82rem', maxWidth: 600 }}>
+            <Typography variant="body2" color="text.secondary" sx={{ mt: 1, fontSize: '0.82rem' }}>
               {parsed.info.description}
             </Typography>
           )}
@@ -926,7 +926,7 @@ export default function AgentDetail() {
   })
 
   return (
-    <Box sx={{ p: 4, maxWidth: 960 }}>
+    <Box sx={{ p: { xs: 2, sm: 3, md: 4 }, width: '100%', maxWidth: { sm: '100%', md: '100%', lg: 1200 }, mx: 'auto' }}>
       <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 3 }}>
         <Tooltip title="Back to registry">
           <IconButton size="small" onClick={() => navigate('/agents')}>

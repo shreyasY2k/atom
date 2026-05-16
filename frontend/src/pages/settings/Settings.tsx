@@ -27,7 +27,7 @@ function Section({ title, children }: { title: string; children: React.ReactNode
 
 export default function Settings() {
   return (
-    <Box sx={{ p: 4, maxWidth: 700 }}>
+    <Box sx={{ p: { xs: 2, sm: 3, md: 4 }, width: '100%', maxWidth: { sm: '100%', md: '100%', lg: 1200 }, mx: 'auto' }}>
       <Typography variant="h6" fontWeight={600} gutterBottom>Settings</Typography>
       <Typography variant="body2" color="text.secondary" sx={{ mb: 3 }}>
         Platform Admin view. Most settings are read-only in V1.

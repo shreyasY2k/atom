@@ -226,7 +226,7 @@ export default function Approvals() {
   )
 
   return (
-    <Box sx={{ p: 4, maxWidth: 860 }}>
+    <Box sx={{ p: { xs: 2, sm: 3, md: 4 }, width: '100%', maxWidth: { sm: '100%', md: '100%', lg: 1200 }, mx: 'auto' }}>
       <Typography variant="h6" fontWeight={600} gutterBottom>Approvals</Typography>
       <Typography variant="body2" color="text.secondary" sx={{ mb: 3 }}>
         Review deployment requests. Every approve/reject is recorded in the audit trail.

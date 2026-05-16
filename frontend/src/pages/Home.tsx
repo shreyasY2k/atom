@@ -116,7 +116,7 @@ export default function Home() {
   const { role } = useAuth()
 
   return (
-    <Box sx={{ p: 4, maxWidth: 800 }}>
+    <Box sx={{ p: { xs: 2, sm: 3, md: 4 }, width: '100%', maxWidth: { sm: '100%', md: '100%', lg: 1200 }, mx: 'auto' }}>
       <Box sx={{ mb: 4 }}>
         <Typography variant="h5" fontWeight={600} gutterBottom>
           Atom Agent Platform

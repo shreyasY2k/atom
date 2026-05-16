@@ -177,14 +177,14 @@ export default function WorkflowDetail() {
   })
 
   return (
-    <Box sx={{ p: 4, maxWidth: 860 }}>
+    <Box sx={{ p: { xs: 2, sm: 3, md: 4 }, width: '100%', maxWidth: { sm: '100%', md: '100%', lg: 1200 }, mx: 'auto' }}>
       <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 3 }}>
         <Tooltip title="Back to registry">
           <IconButton size="small" onClick={() => navigate('/workflows')}>
             <ArrowBackIcon fontSize="small" />
           </IconButton>
         </Tooltip>
-        <AccountTreeIcon sx={{ color: '#60a5fa', fontSize: 20 }} />
+        <AccountTreeIcon sx={{ color: 'primary.main', fontSize: 20 }} />
         <Typography variant="h6" fontWeight={600}>{name}</Typography>
       </Box>
 
