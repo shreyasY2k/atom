@@ -8,7 +8,8 @@ import httpx
 from fastapi import APIRouter, BackgroundTasks, HTTPException, Request
 from pydantic import BaseModel
 
-from app.core import audit, registry_db, reme_client
+from app.core import audit, registry_db, reme_client, file_processor
+import boto3, os as _os
 
 router = APIRouter(prefix="/agents", tags=["sessions"])
 
@@ -24,15 +25,57 @@ class CreateSessionBody(BaseModel):
     metadata: dict = {}
 
 
+class AttachmentItem(BaseModel):
+    type: str = "file"              # "file" | "url"
+    file_id: str | None = None      # for type=file
+    name: str | None = None
+    content_type: str | None = None
+    url: str | None = None          # for type=url
+
+
 class SendMessageBody(BaseModel):
     text: str
     workspace_id: str | None = None
     metadata: dict = {}
+    attachments: list[AttachmentItem] = []
 
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
+def _enrich_attachments(attachments: list) -> list:
+    """Extract content from file and URL attachments before sending to the agent."""
+    enriched = []
+    s3 = boto3.client(
+        "s3",
+        endpoint_url=f"http://{_os.environ.get('MINIO_ENDPOINT', 'minio:9000')}",
+        aws_access_key_id=_os.environ.get("MINIO_ACCESS_KEY", "minioadmin"),
+        aws_secret_access_key=_os.environ.get("MINIO_SECRET_KEY", "minioadmin"),
+        region_name="us-east-1",
+    )
+    for att in attachments:
+        item = att.model_dump() if hasattr(att, "model_dump") else dict(att)
+        try:
+            if item.get("type") == "file" and item.get("file_id"):
+                fid = item["file_id"]
+                meta_obj = s3.get_object(Bucket="uploaded-documents", Key=f"{fid}/_meta.json")
+                meta = json.loads(meta_obj["Body"].read())
+                file_obj = s3.get_object(Bucket="uploaded-documents", Key=meta["minio_key"])
+                data = file_obj["Body"].read()
+                extracted = file_processor.extract(data, meta["content_type"], meta["original_name"])
+                item["extracted_text"] = extracted.get("text", "")
+                item["extract_format"] = extracted.get("format", "unknown")
+                item["name"] = item.get("name") or meta["original_name"]
+            elif item.get("type") == "url" and item.get("url"):
+                extracted = file_processor.extract_url(item["url"])
+                item["extracted_text"] = extracted.get("text", "")
+                item["extract_format"] = extracted.get("format", "url")
+        except Exception:
+            item["extracted_text"] = "[Content extraction failed]"
+        enriched.append(item)
+    return enriched
+
 
 def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
@@ -187,21 +230,42 @@ def send_message(
 
     # Build history for context
     history = registry_db.get_session_messages(session_id)
-    messages = _history_to_messages(history[:-1])  # exclude the just-added user msg
+    prior = history[:-1]  # exclude the just-added user msg
+    messages = _history_to_messages(prior)
 
-    # Build invoke payload — agents receive both legacy `text` and enriched `messages`
     reme_context = session.get("reme_context") or ""
     workspace_id = body.workspace_id or (
         (session.get("metadata") or {}).get("workspace_id")
     )
 
+    # Build a history-enriched text so legacy agents (which only read `text`)
+    # still see the full conversation context. New agents can use `messages[]`.
+    if prior:
+        history_lines = []
+        for m in prior[-12:]:  # last 12 turns to keep context bounded
+            role_label = "User" if m["role"] == "user" else "Assistant"
+            content_preview = m["content"][:600]
+            if len(m["content"]) > 600:
+                content_preview += "…"
+            history_lines.append(f"{role_label}: {content_preview}")
+        history_block = "\n".join(history_lines)
+        if reme_context:
+            enriched_text = f"{reme_context}\n\n[Conversation so far]\n{history_block}\n\n[Current message]\n{body.text}"
+        else:
+            enriched_text = f"[Conversation so far]\n{history_block}\n\n[Current message]\n{body.text}"
+    elif reme_context:
+        enriched_text = f"{reme_context}\n\n[Current message]\n{body.text}"
+    else:
+        enriched_text = body.text
+
     invoke_payload = {
-        "text": body.text,
+        "text": enriched_text,                   # history-enriched — works for all agents
         "session_id": session_id,
         "run_id": run_id,
-        "messages": messages,                    # conversation history
-        "reme_context": reme_context,            # long-term memory block
+        "messages": messages,                    # structured history for session-aware agents
+        "reme_context": reme_context,
         "workspace_id": workspace_id,
+        "attachments": _enrich_attachments(body.attachments or []),
     }
 
     # Call agent container

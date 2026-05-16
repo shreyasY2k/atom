@@ -60,6 +60,17 @@ export interface ToolRecord {
   updated_at?: string
 }
 
+export interface AttachmentItem {
+  type: 'file' | 'url'
+  file_id?: string
+  name?: string
+  content_type?: string
+  url?: string
+  /** client-only: upload progress 0-100 */
+  uploading?: boolean
+  error?: string
+}
+
 export interface SkillRecord {
   name: string
   content: string
@@ -315,11 +326,30 @@ export const builderApi = {
   getSession: (agentName: string, sessionId: string): Promise<SessionRecord & { messages: MessageRecord[] }> =>
     fetch(`${BASE}/agents/${agentName}/sessions/${sessionId}`, { headers: actor() }).then(json),
 
-  sendMessage: (agentName: string, sessionId: string, text: string, workspaceId?: string): Promise<{ session_id: string; run_id: string; role: string; content: string; result: unknown }> =>
+  sendMessage: (
+    agentName: string,
+    sessionId: string,
+    text: string,
+    workspaceId?: string,
+    attachments?: AttachmentItem[],
+  ): Promise<{ session_id: string; run_id: string; role: string; content: string; result: unknown }> =>
     fetch(`${BASE}/agents/${agentName}/sessions/${sessionId}/messages`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', ...actor() },
-      body: JSON.stringify({ text, workspace_id: workspaceId ?? null }),
+      body: JSON.stringify({ text, workspace_id: workspaceId ?? null, attachments: attachments ?? [] }),
+    }).then(json),
+
+  uploadFile: (file: File): Promise<{ file_id: string; original_name: string; content_type: string; size: number; minio_key: string }> => {
+    const fd = new FormData()
+    fd.append('file', file)
+    return fetch(`${BASE}/files/upload`, { method: 'POST', headers: actor(), body: fd }).then(json)
+  },
+
+  extractUrl: (url: string): Promise<{ url: string; format: string; text: string }> =>
+    fetch(`${BASE}/files/extract-url`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...actor() },
+      body: JSON.stringify({ url }),
     }).then(json),
 
   endSession: (agentName: string, sessionId: string): Promise<{ status: string }> =>

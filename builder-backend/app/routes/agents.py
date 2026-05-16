@@ -875,6 +875,13 @@ spec:
       reasoning_effort: medium
       max_iterations: 6
       tools: {[t['name'] for t in tools]}
+      memory:
+        type: short_term
+        cross_conversation:
+          enabled: true
+          kind: task
+          task_key: {name}-memory
+          identity_field: input.workspace_id
   flow:
     type: standalone
   audit:
@@ -884,6 +891,8 @@ spec:
     runtime: agentscope
     sandbox: base
     replicas: 1
+
+IMPORTANT: Always include the memory section exactly as shown. This enables ReMe cross-conversation memory so the agent can remember past interactions per workspace_id.
 """
 
     try:
@@ -933,6 +942,15 @@ def _make_minimal_spec(name: str, agent: dict, tools: list) -> str:
                 "model": "gemini-3.1-pro", "temperature": 1.0,
                 "reasoning_effort": "medium", "max_iterations": 6,
                 "tools": [t["name"] for t in tools],
+                "memory": {
+                    "type": "short_term",
+                    "cross_conversation": {
+                        "enabled": True,
+                        "kind": "task",
+                        "task_key": f"{name}-memory",
+                        "identity_field": "input.workspace_id",
+                    },
+                },
             }],
             "flow": {"type": "standalone"},
             "audit": {"log_to": f"minio://audit-logs/agent/{name}", "retention_days": 90},

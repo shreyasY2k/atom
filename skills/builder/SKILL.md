@@ -257,6 +257,19 @@ async def standalone_run(payload: dict) -> dict:
     # WRONG: _json.dumps(payload, default=str).get("input")  ← str has no .get()
     # WRONG: payload.get("text", payload)                    ← dict fallback crashes Msg()
 
+    # ── Attachment context ─────────────────────────────────────────────────
+    # The platform injects pre-extracted content for file/URL attachments.
+    # attachments is a list of dicts: {type, name, extracted_text, ...}
+    attachments = payload.get("attachments") or []
+    attachment_ctx = ""
+    for att in attachments:
+        extracted = att.get("extracted_text") or att.get("text") or ""
+        name = att.get("name") or att.get("url") or "attachment"
+        if extracted:
+            attachment_ctx += f"\n\n[Attached: {name}]\n{extracted[:3000]}"
+    if attachment_ctx:
+        user_input = user_input + attachment_ctx
+
     # Hydrate cross-conversation memory — no-op if AGENT_MEMORY_KIND is unset
     memory_ctx = await hydrate_memory(payload)
     if memory_ctx:

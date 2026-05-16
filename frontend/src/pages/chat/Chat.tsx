@@ -43,8 +43,13 @@ import ExpandLessIcon from '@mui/icons-material/ExpandLess'
 import ForumOutlinedIcon from '@mui/icons-material/ForumOutlined'
 import TimelineIcon from '@mui/icons-material/Timeline'
 import CloseIcon from '@mui/icons-material/Close'
+import AttachFileIcon from '@mui/icons-material/AttachFile'
+import LinkIcon from '@mui/icons-material/Link'
+import InsertDriveFileIcon from '@mui/icons-material/InsertDriveFile'
+
+const URL_REGEX = /^https?:\/\/[^\s]+$/
 import { builderApi } from '../../api/builder'
-import type { SessionRecord, MessageRecord } from '../../api/builder'
+import type { SessionRecord, MessageRecord, AttachmentItem } from '../../api/builder'
 import type { AgentRecord, TraceEvent } from '../../types'
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -686,6 +691,49 @@ export default function Chat() {
   const [creatingSession, setCreatingSession] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [traceRunId, setTraceRunId] = useState<string | null>(null)
+  const [attachments, setAttachments] = useState<AttachmentItem[]>([])
+  const fileInputRef = useRef<HTMLInputElement>(null)
+
+  // ── Attachment handlers ─────────────────────────────────────────────────
+
+  const handleFileSelect = useCallback(async (files: FileList | null) => {
+    if (!files) return
+    for (const file of Array.from(files)) {
+      const tempId = `uploading-${Date.now()}-${file.name}`
+      setAttachments(prev => [...prev, { type: 'file', file_id: tempId, name: file.name, content_type: file.type, uploading: true }])
+      try {
+        const result = await builderApi.uploadFile(file)
+        setAttachments(prev => prev.map(a =>
+          a.file_id === tempId
+            ? { type: 'file', file_id: result.file_id, name: result.original_name, content_type: result.content_type }
+            : a
+        ))
+      } catch (e) {
+        setAttachments(prev => prev.map(a =>
+          a.file_id === tempId ? { ...a, uploading: false, error: 'Upload failed' } : a
+        ))
+      }
+    }
+  }, [])
+
+  const handlePaste = useCallback((e: React.ClipboardEvent) => {
+    // Detect pasted files
+    if (e.clipboardData.files.length > 0) {
+      e.preventDefault()
+      handleFileSelect(e.clipboardData.files)
+    }
+  }, [handleFileSelect])
+
+  const addUrlAttachment = useCallback((url: string) => {
+    if (!url.trim() || !URL_REGEX.test(url.trim())) return
+    const u = url.trim()
+    if (attachments.some(a => a.url === u)) return
+    setAttachments(prev => [...prev, { type: 'url', url: u, name: u }])
+  }, [attachments])
+
+  const removeAttachment = useCallback((idx: number) => {
+    setAttachments(prev => prev.filter((_, i) => i !== idx))
+  }, [])
 
   // Mobile: session drawer open
   const [sessionDrawerOpen, setSessionDrawerOpen] = useState(false)
@@ -789,8 +837,10 @@ export default function Chat() {
   // ── Send message ───────────────────────────────────────────────────────────
   async function handleSend() {
     const text = input.trim()
-    if (!text || !selectedAgent || sending) return
+    const pendingAttachments = attachments.filter(a => !a.uploading && !a.error)
+    if ((!text && pendingAttachments.length === 0) || !selectedAgent || sending) return
     setInput('')
+    setAttachments([])
     setSending(true)
     setError(null)
 
@@ -824,12 +874,17 @@ export default function Chat() {
       }
     }
 
-    // Optimistic user message
+    // Optimistic user message — show text + attachment summary
+    const attachmentSummary = pendingAttachments.length > 0
+      ? '\n\n' + pendingAttachments.map(a =>
+          a.type === 'file' ? `📎 ${a.name}` : `🔗 ${a.url}`
+        ).join('\n')
+      : ''
     const optimisticUser: OptimisticMessage = {
       message_id: `opt-u-${Date.now()}`,
       session_id: sessionId,
       role: 'user',
-      content: text,
+      content: (text + attachmentSummary).trim(),
       created_at: new Date().toISOString(),
     }
     // Loading placeholder for assistant
@@ -847,8 +902,9 @@ export default function Chat() {
       const resp = await builderApi.sendMessage(
         selectedAgent.name,
         sessionId,
-        text,
+        text || (pendingAttachments.length > 0 ? 'Please process the attached content.' : ''),
         workspaceId || undefined,
+        pendingAttachments,
       )
       const assistantMsg: OptimisticMessage = {
         message_id: `resp-${Date.now()}`,
@@ -1098,6 +1154,34 @@ export default function Chat() {
 
         {/* Input bar */}
         <Box sx={{ px: { xs: 1.5, sm: 2 }, py: 1.5, bgcolor: 'background.paper' }}>
+          {/* Attachment chips */}
+          {attachments.length > 0 && (
+            <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.75, mb: 1 }}>
+              {attachments.map((att, idx) => (
+                <Chip
+                  key={idx}
+                  size="small"
+                  icon={att.type === 'url' ? <LinkIcon sx={{ fontSize: 14 }} /> : <InsertDriveFileIcon sx={{ fontSize: 14 }} />}
+                  label={att.uploading ? `Uploading ${att.name}…` : att.error ? `${att.name} — failed` : att.type === 'url' ? (att.url ?? '').slice(0, 40) : att.name}
+                  onDelete={() => removeAttachment(idx)}
+                  color={att.error ? 'error' : 'default'}
+                  variant="outlined"
+                  sx={{ maxWidth: 200, fontFamily: 'monospace', fontSize: '0.68rem' }}
+                />
+              ))}
+            </Box>
+          )}
+
+          {/* Hidden file input */}
+          <input
+            ref={fileInputRef}
+            type="file"
+            multiple
+            accept=".pdf,.xlsx,.xls,.csv,.docx,.doc,.txt,.md,.json,.png,.jpg,.jpeg,.gif,.webp"
+            style={{ display: 'none' }}
+            onChange={e => handleFileSelect(e.target.files)}
+          />
+
           <Paper
             variant="outlined"
             sx={{ display: 'flex', flexDirection: 'column', borderRadius: 2, overflow: 'hidden' }}
@@ -1105,6 +1189,7 @@ export default function Chat() {
             <Box
               component="textarea"
               ref={textareaRef}
+              onPaste={handlePaste}
               value={input}
               onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) => setInput(e.target.value)}
               onKeyDown={handleKeyDown}
@@ -1137,15 +1222,39 @@ export default function Chat() {
               }}
             />
             <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5, px: 1, pb: 1, pt: 0.25 }}>
+              {/* Attach file */}
+              <Tooltip title="Attach file (PDF, Excel, CSV, Word, image…)">
+                <span>
+                  <IconButton size="small" disabled={inputDisabled}
+                    onClick={() => fileInputRef.current?.click()}
+                    sx={{ color: 'text.secondary', '&:hover': { color: 'primary.main' } }}>
+                    <AttachFileIcon sx={{ fontSize: 18 }} />
+                  </IconButton>
+                </span>
+              </Tooltip>
+              {/* Add URL */}
+              <Tooltip title="Add URL — paste a link to include its content">
+                <span>
+                  <IconButton size="small" disabled={inputDisabled}
+                    onClick={() => {
+                      const url = window.prompt('Enter a URL to attach:')
+                      if (url) addUrlAttachment(url)
+                    }}
+                    sx={{ color: 'text.secondary', '&:hover': { color: 'primary.main' } }}>
+                    <LinkIcon sx={{ fontSize: 18 }} />
+                  </IconButton>
+                </span>
+              </Tooltip>
               <Box sx={{ flex: 1 }} />
               <Typography variant="caption" color="text.disabled" sx={{ fontSize: '0.68rem', mr: 0.5 }}>
                 {input.length > 0 ? `${input.length} chars` : ''}
+                {attachments.length > 0 ? ` · ${attachments.length} attachment${attachments.length > 1 ? 's' : ''}` : ''}
               </Typography>
               <Tooltip title={sending ? 'Sending…' : isSessionEnded ? 'Session ended' : 'Send (Enter)'}>
                 <span>
                   <IconButton
                     onClick={handleSend}
-                    disabled={!input.trim() || inputDisabled}
+                    disabled={(!input.trim() && attachments.filter(a => !a.uploading && !a.error).length === 0) || inputDisabled}
                     sx={{
                       bgcolor: 'primary.main',
                       color: 'primary.contrastText',
@@ -1167,7 +1276,7 @@ export default function Chat() {
             </Box>
           </Paper>
           <Typography variant="caption" color="text.disabled" sx={{ display: 'block', mt: 0.5, textAlign: 'center', fontSize: '0.65rem' }}>
-            ↵ to send · Shift+↵ for new line
+            ↵ to send · Shift+↵ for new line · 📎 attach files · 🔗 add URLs
           </Typography>
         </Box>
       </Box>
