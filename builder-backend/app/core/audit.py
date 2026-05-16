@@ -1,10 +1,21 @@
 """Write and read structured events across MinIO audit-logs, agent-artifacts, and specs buckets."""
 
+import hashlib
+import hmac as _hmac
 import json
 import os
 from datetime import datetime, timezone
 
 import boto3
+
+_HMAC_KEY = os.environ.get("AUDIT_HMAC_KEY", "atom-audit-hmac-key-change-in-prod")
+
+
+def _sign(event: dict) -> dict:
+    """Return a copy of event with an _hmac field appended."""
+    payload = json.dumps(event, sort_keys=True, separators=(',', ':'))
+    sig = _hmac.new(_HMAC_KEY.encode(), payload.encode(), hashlib.sha256).hexdigest()
+    return {**event, "_hmac": f"hmac-sha256:{sig}"}
 
 
 def _s3():
@@ -25,7 +36,8 @@ def emit(prefix: str, event: dict) -> None:
     try:
         now = datetime.now(timezone.utc)
         key = f"{prefix}/{now.strftime('%Y-%m-%d')}/{now.isoformat()}.json"
-        body = json.dumps({**event, "timestamp": now.isoformat()}).encode()
+        signed = _sign({**event, "timestamp": now.isoformat()})
+        body = json.dumps(signed).encode()
         _s3().put_object(Bucket="audit-logs", Key=key, Body=body, ContentType="application/json")
     except Exception:
         pass

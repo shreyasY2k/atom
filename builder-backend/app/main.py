@@ -2,7 +2,7 @@
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from app.routes import specs, agents, registry, studio, auth, deployments
+from app.routes import specs, agents, registry, studio, auth, deployments, tools, sessions
 from app.core.observability import setup
 
 app = FastAPI(
@@ -17,6 +17,8 @@ app.include_router(agents.router)
 app.include_router(registry.router)
 app.include_router(studio.router)
 app.include_router(deployments.router)
+app.include_router(tools.router)
+app.include_router(sessions.router)
 
 
 @app.get("/health")

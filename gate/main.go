@@ -9,16 +9,29 @@ import (
 )
 
 // newBuilderGate returns an HTTP handler that:
-//   - audits POST /agents/{name}/invoke (the agent hot path)
+//   - directly invokes the agent container for POST /agents/{name}/invoke
+//     (GATE looks up the endpoint in platform-db and calls it directly,
+//     bypassing builder-backend on the hot invocation path)
 //   - transparently proxies everything else to builder-backend
 //
 // Uses a 10-minute response header timeout — codegen (Gemini) + Docker build
 // can legitimately take 3-5 minutes end-to-end.
-func newBuilderGate(cfg Config, auditor *Auditor) http.Handler {
+func newBuilderGate(cfg Config, auditor *Auditor, db *DB, logger *slog.Logger) http.Handler {
 	proxy := newReverseProxy(cfg.BuilderBackendURL, 10*time.Minute)
 	mux := http.NewServeMux()
 
+	// Direct agent invocation — GATE resolves the container endpoint from
+	// platform-db and calls it directly, including pre/post audit events.
 	mux.Handle("POST /agents/{name}/invoke",
+		DirectInvokeHandler(db, auditor, logger))
+
+	// Swagger/OpenAPI passthrough — fetches the container's /openapi.json directly.
+	// Audit-wrapped so every API doc fetch is recorded.
+	mux.Handle("GET /agents/{name}/openapi.json",
+		AgentPassthroughHandler(db, "/openapi.json", auditor, logger))
+
+	// Session message posting is audit-wrapped (user input → agent output).
+	mux.Handle("POST /agents/{name}/sessions/{session_id}/messages",
 		AuditWrap(proxy, auditor, "builder-backend", "agent"))
 
 	mux.HandleFunc("GET /gate/health", gateHealth("8080"))
@@ -77,7 +90,17 @@ func main() {
 		os.Exit(1)
 	}
 
-	builderGate := LoggingMiddleware(logger, newBuilderGate(cfg, auditor))
+	// Connect to platform-db for agent endpoint lookups.
+	// A failure here is non-fatal: GATE still starts and handles all other
+	// routes; agent direct-invoke returns 503 until platform-db is reachable.
+	db, dbErr := NewDB(cfg.DatabaseURL)
+	if dbErr != nil {
+		logger.Warn("could not connect to platform-db; agent direct invoke will be unavailable",
+			"err", dbErr)
+		db = nil
+	}
+
+	builderGate := LoggingMiddleware(logger, newBuilderGate(cfg, auditor, db, logger))
 	workflowGate := LoggingMiddleware(logger, newWorkflowGate(cfg, auditor))
 
 	errCh := make(chan error, 2)

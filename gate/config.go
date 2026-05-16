@@ -10,6 +10,8 @@ type Config struct {
 	MinioSecretKey     string
 	MinioSecure        bool
 	AuditBucket        string
+	DatabaseURL        string
+	HMACKey            string
 }
 
 func loadConfig() Config {
@@ -21,6 +23,8 @@ func loadConfig() Config {
 		MinioSecretKey:     getenv("MINIO_SECRET_KEY", "minioadmin"),
 		MinioSecure:        false,
 		AuditBucket:        "audit-logs",
+		DatabaseURL:        getenv("DATABASE_URL", "postgres://atom:atom@platform-db:5432/atom"),
+		HMACKey:            getenv("AUDIT_HMAC_KEY", "atom-audit-hmac-key-change-in-prod"),
 	}
 }
 

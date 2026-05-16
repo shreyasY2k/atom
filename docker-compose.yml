@@ -248,6 +248,7 @@ services:
       - FLOW_LLM_BASE_URL=http://litellm:4000/v1
       - FLOW_EMBEDDING_BASE_URL=http://litellm:4000/v1
       - FLOW_LLM_API_KEY=${LITELLM_MASTER_KEY:-sk-master-change-me}
+      - FLOW_EMBEDDING_API_KEY=${LITELLM_MASTER_KEY:-sk-master-change-me}
       - REME_DB_URL=postgresql://reme:reme@reme-db:5432/reme
       - REME_VECTOR_STORE=chroma
       - REME_EMBEDDING_MODEL=gemini-embedding
@@ -354,10 +355,13 @@ services:
       - MINIO_ENDPOINT=minio:9000
       - MINIO_ACCESS_KEY=${MINIO_ACCESS_KEY:-minioadmin}
       - MINIO_SECRET_KEY=${MINIO_SECRET_KEY:-minioadmin}
+      - DATABASE_URL=postgresql://atom:atom@platform-db:5432/atom
+      - AUDIT_HMAC_KEY=${AUDIT_HMAC_KEY:-atom-audit-hmac-key-change-in-prod}
     depends_on:
       builder-backend: { condition: service_started }
       workflow-backend: { condition: service_started }
       minio: { condition: service_started }
+      platform-db: { condition: service_healthy }
     networks: [agentnet]
 
   builder-backend:
@@ -394,6 +398,7 @@ services:
       - WORKFLOW_BACKEND_URL=http://workflow-backend:8082
       - OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4318
       - DATABASE_URL=postgresql://atom:atom@platform-db:5432/atom
+      - AUDIT_HMAC_KEY=${AUDIT_HMAC_KEY:-atom-audit-hmac-key-change-in-prod}
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
       - ./skills:/app/skills
@@ -427,6 +432,7 @@ services:
       - SKILLS_PATH=/app/skills
       - OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4318
       - DATABASE_URL=postgresql://atom:atom@platform-db:5432/atom
+      - AUDIT_HMAC_KEY=${AUDIT_HMAC_KEY:-atom-audit-hmac-key-change-in-prod}
     volumes:
       - ./specs:/app/specs
       - ./skills:/app/skills:ro

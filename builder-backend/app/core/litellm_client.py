@@ -39,6 +39,13 @@ def delete_virtual_key(key: str) -> dict:
     return r.json()
 
 
+def update_virtual_key(key: str, metadata: dict) -> dict:
+    """Update metadata on an existing LiteLLM virtual key."""
+    r = httpx.post(_url("/key/update"), json={"key": key, "metadata": metadata}, headers=_HEADERS, timeout=15)
+    r.raise_for_status()
+    return r.json()
+
+
 def chat_completion(
     messages: list[dict],
     model: str = "gemini-3.1-pro",

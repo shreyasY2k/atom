@@ -1,9 +1,10 @@
-import React, { useState } from 'react'
+import React, { useEffect, useRef, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import {
-  Alert, Box, Button, Chip, CircularProgress, Collapse, Divider, IconButton,
-  Paper, Stack, Tab, Tabs, Tooltip, Typography,
+  Alert, Box, Button, Chip, CircularProgress, Collapse, Dialog, DialogActions,
+  DialogContent, DialogTitle, Divider, IconButton, Paper, Stack, Tab, Tabs,
+  TextField, Tooltip, Typography,
 } from '@mui/material'
 import ArrowBackIcon from '@mui/icons-material/ArrowBack'
 import SmartToyIcon from '@mui/icons-material/SmartToy'
@@ -11,7 +12,10 @@ import HistoryIcon from '@mui/icons-material/History'
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore'
 import ExpandLessIcon from '@mui/icons-material/ExpandLess'
 import CheckCircleOutlineIcon from '@mui/icons-material/CheckCircleOutline'
-import { builderApi, type DeploymentRecord } from '../../api/builder'
+import SendIcon from '@mui/icons-material/Send'
+import AddIcon from '@mui/icons-material/Add'
+import DownloadIcon from '@mui/icons-material/Download'
+import { builderApi, type DeploymentRecord, type SessionRecord, type MessageRecord } from '../../api/builder'
 import { useAuth } from '../../context/AuthContext'
 import DeploymentThread from '../../components/DeploymentThread'
 import type { AgentRecord } from '../../types'
@@ -182,10 +186,739 @@ function DeploymentsTab({ name }: { name: string }) {
   )
 }
 
+// ---- Sessions tab ----
+
+interface NewSessionDialogProps {
+  open: boolean
+  onClose: () => void
+  onCreate: (workspaceId?: string) => void
+  loading: boolean
+}
+
+function NewSessionDialog({ open, onClose, onCreate, loading }: NewSessionDialogProps) {
+  const [workspaceId, setWorkspaceId] = useState('')
+
+  function handleCreate() {
+    onCreate(workspaceId.trim() || undefined)
+  }
+
+  return (
+    <Dialog open={open} onClose={onClose} maxWidth="xs" fullWidth>
+      <DialogTitle sx={{ fontSize: '0.95rem', fontWeight: 600 }}>New Session</DialogTitle>
+      <DialogContent>
+        <TextField
+          label="Workspace ID (optional)"
+          value={workspaceId}
+          onChange={e => setWorkspaceId(e.target.value)}
+          fullWidth
+          size="small"
+          sx={{ mt: 1 }}
+          placeholder="e.g. ws-customer-123"
+          disabled={loading}
+        />
+      </DialogContent>
+      <DialogActions sx={{ px: 3, pb: 2 }}>
+        <Button size="small" onClick={onClose} disabled={loading}>Cancel</Button>
+        <Button size="small" variant="contained" onClick={handleCreate} disabled={loading}
+          startIcon={loading ? <CircularProgress size={12} color="inherit" /> : undefined}>
+          Create
+        </Button>
+      </DialogActions>
+    </Dialog>
+  )
+}
+
+interface ChatPanelProps {
+  agentName: string
+  session: SessionRecord & { messages: MessageRecord[] }
+  onEnd: () => void
+  onMessageSent: () => void
+}
+
+function ChatPanel({ agentName, session, onEnd, onMessageSent }: ChatPanelProps) {
+  const [text, setText] = useState('')
+  const [sending, setSending] = useState(false)
+  const [sendError, setSendError] = useState<string | null>(null)
+  const [messages, setMessages] = useState<MessageRecord[]>(session.messages)
+  const bottomRef = useRef<HTMLDivElement>(null)
+
+  // Keep messages in sync when session prop changes (e.g., after reload)
+  useEffect(() => {
+    setMessages(session.messages)
+  }, [session.session_id, session.messages])
+
+  // Auto-scroll to bottom on new messages
+  useEffect(() => {
+    bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
+  }, [messages])
+
+  async function handleSend() {
+    const trimmed = text.trim()
+    if (!trimmed || sending) return
+    setSending(true)
+    setSendError(null)
+    setText('')
+
+    const optimisticUser: MessageRecord = {
+      message_id: `opt-${Date.now()}`,
+      session_id: session.session_id,
+      role: 'user',
+      content: trimmed,
+      created_at: new Date().toISOString(),
+    }
+    setMessages(prev => [...prev, optimisticUser])
+
+    try {
+      const resp = await builderApi.sendMessage(agentName, session.session_id, trimmed)
+      const respRole = resp.role as MessageRecord['role']
+      const assistantMsg: MessageRecord = {
+        message_id: `resp-${Date.now()}`,
+        session_id: session.session_id,
+        role: respRole === 'user' || respRole === 'system' ? respRole : 'assistant',
+        content: resp.content,
+        created_at: new Date().toISOString(),
+        run_id: resp.run_id,
+      }
+      setMessages(prev => [...prev, assistantMsg])
+      onMessageSent()
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : JSON.stringify(err)
+      setSendError(msg)
+      // Remove optimistic message on failure
+      setMessages(prev => prev.filter(m => m.message_id !== optimisticUser.message_id))
+    } finally {
+      setSending(false)
+    }
+  }
+
+  function handleKeyDown(e: React.KeyboardEvent) {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault()
+      handleSend()
+    }
+  }
+
+  const isEnded = session.status === 'ended'
+
+  return (
+    <Box sx={{ display: 'flex', flexDirection: 'column', height: '100%', minHeight: 0 }}>
+      {/* Session header */}
+      <Box sx={{ px: 2, py: 1.5, borderBottom: 1, borderColor: 'divider', display: 'flex', alignItems: 'center', gap: 1, flexWrap: 'wrap' }}>
+        <Chip
+          label={session.session_id.slice(0, 18) + '…'}
+          size="small"
+          sx={{ fontFamily: 'monospace', fontSize: '0.65rem' }}
+        />
+        <Chip
+          label={session.status}
+          size="small"
+          color={session.status === 'active' ? 'success' : 'default'}
+          sx={{ height: 18, fontSize: '0.65rem' }}
+        />
+        {session.reme_context && (
+          <Typography variant="caption" color="text.secondary" sx={{ fontStyle: 'italic' }}>
+            workspace: {session.reme_context}
+          </Typography>
+        )}
+        <Box sx={{ flex: 1 }} />
+        <Button
+          size="small"
+          variant="outlined"
+          color="error"
+          onClick={onEnd}
+          disabled={isEnded}
+          sx={{ fontSize: '0.72rem', py: 0.25 }}
+        >
+          End Session
+        </Button>
+      </Box>
+
+      {/* Messages */}
+      <Box sx={{ flex: 1, overflowY: 'auto', p: 2, display: 'flex', flexDirection: 'column', gap: 1 }}>
+        {session.reme_context && (
+          <Typography variant="caption" color="text.disabled" sx={{ fontStyle: 'italic', display: 'block', textAlign: 'center', mb: 1 }}>
+            ReMe context loaded for workspace: {session.reme_context}
+          </Typography>
+        )}
+        {messages.length === 0 && (
+          <Typography variant="body2" color="text.secondary" sx={{ textAlign: 'center', mt: 4 }}>
+            No messages yet. Send a message to start the conversation.
+          </Typography>
+        )}
+        {messages.map(msg => (
+          <Box
+            key={msg.message_id}
+            sx={{
+              display: 'flex',
+              justifyContent: msg.role === 'user' ? 'flex-end' : 'flex-start',
+            }}
+          >
+            <Box
+              sx={{
+                maxWidth: '75%',
+                px: 1.5,
+                py: 1,
+                borderRadius: 2,
+                bgcolor: msg.role === 'user' ? 'primary.main' : 'action.hover',
+                color: msg.role === 'user' ? 'primary.contrastText' : 'text.primary',
+              }}
+            >
+              {msg.role !== 'user' && (
+                <Typography variant="caption" color="text.secondary" display="block" sx={{ mb: 0.25, fontWeight: 600 }}>
+                  {agentName}
+                </Typography>
+              )}
+              <Typography variant="body2" sx={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
+                {msg.content}
+              </Typography>
+              {msg.run_id && (
+                <Typography variant="caption" color="text.disabled" display="block" sx={{ mt: 0.25, fontSize: '0.62rem' }}>
+                  run: {msg.run_id.slice(0, 16)}…
+                </Typography>
+              )}
+            </Box>
+          </Box>
+        ))}
+        {sending && (
+          <Box sx={{ display: 'flex', justifyContent: 'flex-start' }}>
+            <Box sx={{ px: 1.5, py: 1, borderRadius: 2, bgcolor: 'action.hover' }}>
+              <CircularProgress size={14} />
+            </Box>
+          </Box>
+        )}
+        <div ref={bottomRef} />
+      </Box>
+
+      {sendError && (
+        <Alert severity="error" onClose={() => setSendError(null)} sx={{ mx: 2, mb: 1, fontSize: '0.8rem' }}>
+          {sendError}
+        </Alert>
+      )}
+
+      {/* Input area */}
+      <Box sx={{ px: 2, py: 1.5, borderTop: 1, borderColor: 'divider', display: 'flex', gap: 1, alignItems: 'flex-end' }}>
+        <TextField
+          value={text}
+          onChange={e => setText(e.target.value)}
+          onKeyDown={handleKeyDown}
+          placeholder={isEnded ? 'Session ended' : 'Type a message… (Enter to send, Shift+Enter for newline)'}
+          multiline
+          maxRows={3}
+          fullWidth
+          size="small"
+          disabled={isEnded || sending}
+          sx={{ '& .MuiInputBase-root': { fontSize: '0.85rem' } }}
+        />
+        <IconButton
+          color="primary"
+          onClick={handleSend}
+          disabled={!text.trim() || isEnded || sending}
+          sx={{ mb: 0.25 }}
+        >
+          <SendIcon fontSize="small" />
+        </IconButton>
+      </Box>
+    </Box>
+  )
+}
+
+function SessionsTab({ name }: { name: string }) {
+  const qc = useQueryClient()
+  const [dialogOpen, setDialogOpen] = useState(false)
+  const [selectedId, setSelectedId] = useState<string | null>(null)
+  const [createError, setCreateError] = useState<string | null>(null)
+  const [endError, setEndError] = useState<string | null>(null)
+
+  const { data: sessionsData, isLoading: sessionsLoading } = useQuery({
+    queryKey: ['agent-sessions', name],
+    queryFn: () => builderApi.listSessions(name),
+    refetchInterval: 10000,
+  })
+
+  const { data: sessionDetail, isLoading: detailLoading } = useQuery({
+    queryKey: ['agent-session-detail', name, selectedId],
+    queryFn: () => builderApi.getSession(name, selectedId!),
+    enabled: !!selectedId,
+  })
+
+  const createMut = useMutation({
+    mutationFn: (workspaceId?: string) => builderApi.createSession(name, workspaceId),
+    onSuccess: (data) => {
+      qc.invalidateQueries({ queryKey: ['agent-sessions', name] })
+      setSelectedId(data.session_id)
+      setDialogOpen(false)
+      setCreateError(null)
+    },
+    onError: (err) => {
+      const msg = err instanceof Error ? err.message : JSON.stringify(err)
+      setCreateError(msg)
+    },
+  })
+
+  const endMut = useMutation({
+    mutationFn: (sessionId: string) => builderApi.endSession(name, sessionId),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['agent-sessions', name] })
+      qc.invalidateQueries({ queryKey: ['agent-session-detail', name, selectedId] })
+      setEndError(null)
+    },
+    onError: (err) => {
+      const msg = err instanceof Error ? err.message : JSON.stringify(err)
+      setEndError(msg)
+    },
+  })
+
+  const sessions = sessionsData?.sessions ?? []
+
+  function handleMessageSent() {
+    qc.invalidateQueries({ queryKey: ['agent-session-detail', name, selectedId] })
+    qc.invalidateQueries({ queryKey: ['agent-sessions', name] })
+  }
+
+  return (
+    <Box sx={{ display: 'flex', gap: 2, height: 520, minHeight: 0 }}>
+      {/* Left panel: session list */}
+      <Box sx={{ width: 280, flexShrink: 0, display: 'flex', flexDirection: 'column', gap: 1 }}>
+        <Button
+          size="small"
+          variant="contained"
+          startIcon={<AddIcon />}
+          onClick={() => setDialogOpen(true)}
+          fullWidth
+        >
+          New Session
+        </Button>
+        {createError && (
+          <Alert severity="error" onClose={() => setCreateError(null)} sx={{ fontSize: '0.78rem' }}>
+            {createError}
+          </Alert>
+        )}
+        {endError && (
+          <Alert severity="error" onClose={() => setEndError(null)} sx={{ fontSize: '0.78rem' }}>
+            {endError}
+          </Alert>
+        )}
+        {sessionsLoading && <CircularProgress size={16} sx={{ mt: 1 }} />}
+        {!sessionsLoading && sessions.length === 0 && (
+          <Typography variant="body2" color="text.secondary" sx={{ mt: 1, fontSize: '0.8rem' }}>
+            No sessions yet.
+          </Typography>
+        )}
+        <Box sx={{ flex: 1, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 0.75 }}>
+          {sessions.map(s => (
+            <Paper
+              key={s.session_id}
+              variant="outlined"
+              onClick={() => setSelectedId(s.session_id)}
+              sx={{
+                p: 1.25,
+                cursor: 'pointer',
+                borderRadius: 1.5,
+                borderColor: selectedId === s.session_id ? 'primary.main' : 'divider',
+                bgcolor: selectedId === s.session_id ? 'action.selected' : 'background.paper',
+                '&:hover': { bgcolor: 'action.hover' },
+              }}
+            >
+              <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.75, mb: 0.5 }}>
+                <Typography variant="caption" fontFamily="monospace" color="text.secondary" noWrap sx={{ flex: 1, fontSize: '0.68rem' }}>
+                  {s.session_id.slice(0, 22)}…
+                </Typography>
+                <Chip
+                  label={s.status}
+                  size="small"
+                  color={s.status === 'active' ? 'success' : 'default'}
+                  sx={{ height: 16, fontSize: '0.6rem' }}
+                />
+              </Box>
+              <Typography variant="caption" color="text.disabled" display="block" sx={{ fontSize: '0.68rem' }}>
+                {fmt(s.created_at)}
+                {s.message_count !== undefined ? ` · ${s.message_count} msg` : ''}
+              </Typography>
+            </Paper>
+          ))}
+        </Box>
+      </Box>
+
+      {/* Divider */}
+      <Divider orientation="vertical" flexItem />
+
+      {/* Right panel: chat */}
+      <Box sx={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', border: 1, borderColor: 'divider', borderRadius: 2, overflow: 'hidden' }}>
+        {!selectedId && (
+          <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%' }}>
+            <Typography variant="body2" color="text.secondary">
+              Select a session or create a new one
+            </Typography>
+          </Box>
+        )}
+        {selectedId && detailLoading && (
+          <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%' }}>
+            <CircularProgress size={24} />
+          </Box>
+        )}
+        {selectedId && !detailLoading && sessionDetail && (
+          <ChatPanel
+            agentName={name}
+            session={sessionDetail}
+            onEnd={() => endMut.mutate(selectedId)}
+            onMessageSent={handleMessageSent}
+          />
+        )}
+      </Box>
+
+      <NewSessionDialog
+        open={dialogOpen}
+        onClose={() => setDialogOpen(false)}
+        onCreate={(wid) => createMut.mutate(wid)}
+        loading={createMut.isPending}
+      />
+    </Box>
+  )
+}
+
+// ---- API Docs tab ----
+
+interface OpenApiInfo {
+  title?: string
+  version?: string
+  description?: string
+}
+
+interface OpenApiParameter {
+  name?: string
+  in?: string
+  required?: boolean
+  description?: string
+  schema?: Record<string, unknown>
+}
+
+interface OpenApiResponse {
+  description?: string
+  content?: Record<string, { schema?: Record<string, unknown> }>
+}
+
+interface OpenApiRequestBody {
+  description?: string
+  required?: boolean
+  content?: Record<string, { schema?: Record<string, unknown> }>
+}
+
+interface OpenApiOperation {
+  summary?: string
+  description?: string
+  tags?: string[]
+  operationId?: string
+  parameters?: OpenApiParameter[]
+  requestBody?: OpenApiRequestBody
+  responses?: Record<string, OpenApiResponse>
+}
+
+type HttpMethod = 'get' | 'post' | 'put' | 'delete' | 'patch' | 'head' | 'options'
+
+type PathItem = Partial<Record<HttpMethod, OpenApiOperation>>
+
+interface ParsedSpec {
+  info: OpenApiInfo
+  tagGroups: Record<string, { path: string; method: string; op: OpenApiOperation }[]>
+}
+
+const METHOD_COLOR: Record<string, string> = {
+  get: '#2e7d32',
+  post: '#1565c0',
+  put: '#e65100',
+  delete: '#c62828',
+  patch: '#6a1b9a',
+  head: '#37474f',
+  options: '#37474f',
+}
+
+const HTTP_METHODS: HttpMethod[] = ['get', 'post', 'put', 'delete', 'patch', 'head', 'options']
+
+function parseSpec(raw: Record<string, unknown>): ParsedSpec {
+  const info = (raw.info ?? {}) as OpenApiInfo
+  const rawPaths = (raw.paths ?? {}) as Record<string, PathItem>
+  const tagGroups: Record<string, { path: string; method: string; op: OpenApiOperation }[]> = {}
+
+  for (const [path, pathItem] of Object.entries(rawPaths)) {
+    for (const method of HTTP_METHODS) {
+      const op = (pathItem as PathItem)[method]
+      if (!op) continue
+      const tags = op.tags?.length ? op.tags : ['default']
+      for (const tag of tags) {
+        if (!tagGroups[tag]) tagGroups[tag] = []
+        tagGroups[tag].push({ path, method, op })
+      }
+    }
+  }
+
+  return { info, tagGroups }
+}
+
+function OperationRow({ path, method, op }: { path: string; method: string; op: OpenApiOperation }) {
+  const [expanded, setExpanded] = useState(false)
+
+  const reqBodySchema = op.requestBody?.content
+    ? Object.values(op.requestBody.content)[0]?.schema
+    : undefined
+
+  return (
+    <Box>
+      <Box
+        onClick={() => setExpanded(v => !v)}
+        sx={{ display: 'flex', alignItems: 'center', gap: 1.5, py: 0.75, px: 1, cursor: 'pointer', borderRadius: 1, '&:hover': { bgcolor: 'action.hover' } }}
+      >
+        <Chip
+          label={method.toUpperCase()}
+          size="small"
+          sx={{
+            bgcolor: METHOD_COLOR[method] ?? '#37474f',
+            color: '#fff',
+            fontFamily: 'monospace',
+            fontWeight: 700,
+            fontSize: '0.65rem',
+            height: 20,
+            minWidth: 54,
+          }}
+        />
+        <Typography variant="body2" fontFamily="monospace" sx={{ flex: 1, fontSize: '0.82rem' }}>
+          {path}
+        </Typography>
+        {op.summary && (
+          <Typography variant="caption" color="text.secondary" noWrap sx={{ maxWidth: 260 }}>
+            {op.summary}
+          </Typography>
+        )}
+        {expanded ? <ExpandLessIcon fontSize="small" /> : <ExpandMoreIcon fontSize="small" />}
+      </Box>
+
+      <Collapse in={expanded}>
+        <Box sx={{ px: 2, pb: 1.5, pt: 0.5 }}>
+          {op.description && (
+            <Typography variant="body2" color="text.secondary" sx={{ mb: 1, fontSize: '0.82rem' }}>
+              {op.description}
+            </Typography>
+          )}
+          {op.parameters && op.parameters.length > 0 && (
+            <Box sx={{ mb: 1 }}>
+              <Typography variant="caption" fontWeight={700} color="text.secondary" display="block" sx={{ mb: 0.5, letterSpacing: '0.05em' }}>
+                PARAMETERS
+              </Typography>
+              {op.parameters.map((p, i) => (
+                <Box key={i} sx={{ display: 'flex', gap: 1, mb: 0.25 }}>
+                  <Typography variant="caption" fontFamily="monospace" fontWeight={600}>{p.name}</Typography>
+                  <Typography variant="caption" color="text.disabled">({p.in}{p.required ? ', required' : ''})</Typography>
+                  {p.description && <Typography variant="caption" color="text.secondary">{p.description}</Typography>}
+                </Box>
+              ))}
+            </Box>
+          )}
+          {reqBodySchema && (
+            <Box sx={{ mb: 1 }}>
+              <Typography variant="caption" fontWeight={700} color="text.secondary" display="block" sx={{ mb: 0.5, letterSpacing: '0.05em' }}>
+                REQUEST BODY
+              </Typography>
+              <Box
+                component="pre"
+                sx={{
+                  m: 0, p: 1, bgcolor: 'action.hover', borderRadius: 1,
+                  fontSize: '0.72rem', fontFamily: 'monospace', overflowX: 'auto',
+                  maxHeight: 200,
+                }}
+              >
+                {JSON.stringify(reqBodySchema, null, 2)}
+              </Box>
+            </Box>
+          )}
+          {op.responses && Object.keys(op.responses).length > 0 && (
+            <Box>
+              <Typography variant="caption" fontWeight={700} color="text.secondary" display="block" sx={{ mb: 0.5, letterSpacing: '0.05em' }}>
+                RESPONSES
+              </Typography>
+              {Object.entries(op.responses).map(([code, resp]) => {
+                const schema = resp.content ? Object.values(resp.content)[0]?.schema : undefined
+                return (
+                  <Box key={code} sx={{ mb: 0.75 }}>
+                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 0.25 }}>
+                      <Chip
+                        label={code}
+                        size="small"
+                        color={code.startsWith('2') ? 'success' : code.startsWith('4') ? 'warning' : 'default'}
+                        sx={{ height: 18, fontSize: '0.62rem' }}
+                      />
+                      {resp.description && (
+                        <Typography variant="caption" color="text.secondary">{resp.description}</Typography>
+                      )}
+                    </Box>
+                    {schema && (
+                      <Box
+                        component="pre"
+                        sx={{
+                          m: 0, p: 1, bgcolor: 'action.hover', borderRadius: 1,
+                          fontSize: '0.72rem', fontFamily: 'monospace', overflowX: 'auto',
+                          maxHeight: 200,
+                        }}
+                      >
+                        {JSON.stringify(schema, null, 2)}
+                      </Box>
+                    )}
+                  </Box>
+                )
+              })}
+            </Box>
+          )}
+        </Box>
+      </Collapse>
+    </Box>
+  )
+}
+
+function ApiDocsTab({ name, deployed }: { name: string; deployed: boolean }) {
+  const [spec, setSpec] = useState<Record<string, unknown> | null>(null)
+  const [loading, setLoading] = useState(false)
+  const [loadError, setLoadError] = useState<string | null>(null)
+  const [active, setActive] = useState(false)
+
+  // Load only when tab becomes active
+  useEffect(() => {
+    if (!active || !deployed) return
+    if (spec) return // already loaded
+
+    setLoading(true)
+    setLoadError(null)
+    builderApi.getAgentSwagger(name)
+      .then(data => setSpec(data))
+      .catch(err => {
+        const msg = err instanceof Error ? err.message : JSON.stringify(err)
+        setLoadError(msg)
+      })
+      .finally(() => setLoading(false))
+  }, [active, deployed, name, spec])
+
+  // Signal activation
+  useEffect(() => {
+    setActive(true)
+    return () => setActive(false)
+  }, [])
+
+  function handleDownload() {
+    if (!spec) return
+    const blob = new Blob([JSON.stringify(spec, null, 2)], { type: 'application/json' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `${name}-openapi.json`
+    a.click()
+    URL.revokeObjectURL(url)
+  }
+
+  if (!deployed) {
+    return (
+      <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: 200 }}>
+        <Typography variant="body2" color="text.secondary">
+          Agent must be deployed to view API docs
+        </Typography>
+      </Box>
+    )
+  }
+
+  if (loading) return <CircularProgress size={20} />
+
+  if (loadError) {
+    const isUnreachable = loadError.toLowerCase().includes('not reachable') ||
+      loadError.toLowerCase().includes('503') ||
+      loadError.toLowerCase().includes('container')
+    return (
+      <Alert
+        severity={isUnreachable ? 'warning' : 'error'}
+        sx={{ fontSize: '0.8rem' }}
+        action={
+          isUnreachable ? (
+            <Button size="small" color="inherit" onClick={() => { setLoadError(null); setSpec(null) }}>
+              Retry
+            </Button>
+          ) : undefined
+        }
+      >
+        {isUnreachable ? (
+          <>
+            <strong>Agent container is not running.</strong> The container may have stopped after a
+            platform restart. Redeploy the agent from the Overview tab to restore it and view API docs.
+          </>
+        ) : (
+          <>Failed to load OpenAPI spec: {loadError}</>
+        )}
+      </Alert>
+    )
+  }
+
+  if (!spec) return null
+
+  const parsed = parseSpec(spec)
+
+  return (
+    <Box>
+      {/* Header */}
+      <Box sx={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', mb: 2 }}>
+        <Box>
+          <Typography variant="h6" fontWeight={600} sx={{ fontSize: '1rem' }}>
+            {parsed.info.title ?? name}
+          </Typography>
+          {parsed.info.version && (
+            <Chip label={`v${parsed.info.version}`} size="small" sx={{ mt: 0.5, fontSize: '0.65rem', height: 18 }} />
+          )}
+          {parsed.info.description && (
+            <Typography variant="body2" color="text.secondary" sx={{ mt: 1, fontSize: '0.82rem', maxWidth: 600 }}>
+              {parsed.info.description}
+            </Typography>
+          )}
+        </Box>
+        <Button
+          size="small"
+          variant="outlined"
+          startIcon={<DownloadIcon />}
+          onClick={handleDownload}
+        >
+          Download OpenAPI JSON
+        </Button>
+      </Box>
+
+      <Divider sx={{ mb: 2 }} />
+
+      {/* Paths grouped by tag */}
+      {Object.keys(parsed.tagGroups).length === 0 && (
+        <Typography variant="body2" color="text.secondary">No paths defined in spec.</Typography>
+      )}
+      {Object.entries(parsed.tagGroups).map(([tag, ops]) => (
+        <Box key={tag} sx={{ mb: 3 }}>
+          <Typography
+            variant="caption"
+            fontWeight={700}
+            color="text.secondary"
+            display="block"
+            sx={{ mb: 1, letterSpacing: '0.08em', textTransform: 'uppercase' }}
+          >
+            {tag}
+          </Typography>
+          <Paper variant="outlined" sx={{ borderRadius: 2, overflow: 'hidden' }}>
+            {ops.map((item, i) => (
+              <React.Fragment key={`${item.method}-${item.path}`}>
+                {i > 0 && <Divider />}
+                <OperationRow path={item.path} method={item.method} op={item.op} />
+              </React.Fragment>
+            ))}
+          </Paper>
+        </Box>
+      ))}
+    </Box>
+  )
+}
+
+// ---- Main page ----
+
 export default function AgentDetail() {
   const { name = '' } = useParams<{ name: string }>()
   const navigate = useNavigate()
-  const [tab, setTab] = useState<'overview' | 'deployments'>('overview')
+  const [tab, setTab] = useState<'overview' | 'deployments' | 'sessions' | 'apidocs'>('overview')
 
   const { data: agent, isLoading, error } = useQuery({
     queryKey: ['agent', name],
@@ -193,7 +926,7 @@ export default function AgentDetail() {
   })
 
   return (
-    <Box sx={{ p: 4, maxWidth: 860 }}>
+    <Box sx={{ p: 4, maxWidth: 960 }}>
       <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 3 }}>
         <Tooltip title="Back to registry">
           <IconButton size="small" onClick={() => navigate('/agents')}>
@@ -209,6 +942,8 @@ export default function AgentDetail() {
         <Tab value="overview" label="Overview" />
         <Tab value="deployments" label="Deployments"
           icon={<HistoryIcon sx={{ fontSize: 14 }} />} iconPosition="end" />
+        <Tab value="sessions" label="Sessions" />
+        <Tab value="apidocs" label="API Docs" />
       </Tabs>
 
       {isLoading && <CircularProgress size={20} />}
@@ -216,6 +951,10 @@ export default function AgentDetail() {
 
       {agent && tab === 'overview' && <OverviewTab agent={agent} />}
       {tab === 'deployments' && <DeploymentsTab name={name} />}
+      {tab === 'sessions' && <SessionsTab name={name} />}
+      {tab === 'apidocs' && (
+        <ApiDocsTab name={name} deployed={agent?.status === 'deployed'} />
+      )}
     </Box>
   )
 }

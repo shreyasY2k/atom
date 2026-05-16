@@ -15,6 +15,7 @@ import HistoryIcon from '@mui/icons-material/History'
 import BadgeIcon from '@mui/icons-material/Badge'
 import FactCheckIcon from '@mui/icons-material/FactCheck'
 import SettingsIcon from '@mui/icons-material/Settings'
+import ExtensionIcon from '@mui/icons-material/Extension'
 import { useAuth } from '../context/AuthContext'
 
 interface NavItem {
@@ -36,6 +37,7 @@ const ALL_GROUPS: NavGroup[] = [
     items: [
       { to: '/agents/build',  label: 'Build Agent', icon: <AutoFixHighIcon fontSize="small" /> },
       { to: '/agents',        label: 'Registry',    icon: <SmartToyIcon fontSize="small" />, exact: true },
+      { to: '/tools',         label: 'Tool Registry', icon: <ExtensionIcon fontSize="small" />, exact: true },
     ],
   },
   {

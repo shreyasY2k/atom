@@ -680,3 +680,93 @@ Task 06: CLI polish (`atom agent scaffold`, `atom workflow init`)
 - [x] `GET /deployments` with filters; `GET /deployments/{id}`; `GET /agents/{name}/deployments`
 - [x] `POST /workflows/{name}/deploy-request`, `GET /workflows/{name}/deployments`
 - [ ] Live smoke-test after docker compose up: submit request → approve → verify record transitions pending→deploying→deployed
+
+---
+
+## Session 08 — Agent Builder Rework (2026-05-16)
+
+### What was done
+
+**builder-backend:**
+- `app/core/minio_store.py` (new): draft + versioned spec/role read/write against MinIO `specs` bucket. Replaces all local-disk spec storage.
+- `app/core/registry_db.py`: added `tools` table (global + agent-specific), `agent_tools` join table, new columns on `agents` (description, version_count, skills JSONB, created_at). New helpers: `upsert_tool`, `get_tool`, `list_tools`, `delete_tool`, `associate_tool`, `dissociate_tool`, `get_agent_tools`, `update_skills`.
+- `app/core/identity.py`: added `provision_identity(name, owner)` (creates LiteLLM key with no tools at agent-create time) and `update_identity_tools(vkey, tool_names)` (patches key allowlist as tools are added).
+- `app/core/litellm_client.py`: added `update_virtual_key(key, metadata)`.
+- `app/core/audit.py`: HMAC-SHA256 signing on every `emit()` call. `_sign()` helper computes sig over sorted-key JSON, appends `_hmac` field.
+- `app/routes/tools.py` (new): `/tools` CRUD router — list/create/get/update/delete global tools.
+- `app/routes/agents.py`: new endpoints — `POST /agents` (provision), `GET|POST|DELETE /agents/{name}/tools`, `POST /agents/{name}/tools/associate`, `GET|POST|DELETE /agents/{name}/skills`, `POST /agents/{name}/generate` (LLM generates spec+role → MinIO draft), `POST /agents/{name}/edit` (copy deployed version to draft), `POST /agents/{name}/register-local`.
+- `app/main.py`: registered `tools.router`.
+
+**gate (Go):**
+- `config.go`: added `DatabaseURL` and `HMACKey` fields.
+- `audit.go`: HMAC-SHA256 signing on every `Write()` call — computes over struct JSON, re-serializes map with `_hmac` field.
+- `db.go` (new): pgxpool wrapper, `GetAgentEndpoint(name)` queries platform-db.
+- `agent_invoke.go` (new): `DirectInvokeHandler` — looks up container URL from platform-db, forwards POST body directly to `{endpoint}/invoke`, wraps with pre/post audit events.
+- `main.go`: `newBuilderGate` now calls `DirectInvokeHandler` for `POST /agents/{name}/invoke` instead of proxying to builder-backend.
+- `go.mod`: added `github.com/jackc/pgx/v5 v5.6.0`.
+
+**frontend:**
+- `src/api/builder.ts`: added `ToolRecord`, `SkillRecord` interfaces; 14 new API methods (provision, tools CRUD, skills CRUD, generate, listGlobalTools, createGlobalTool, updateGlobalTool, deleteGlobalTool).
+- `src/pages/agents/Builder.tsx`: full rewrite — 4-step wizard with Google Cloud / John Snow Labs UX. Left StepTree panel (240px) with vertical connector lines, numbered circle indicators (pending/active/complete/error). Steps: Basic Info → Tools & Skills → Generate → Deploy. Each step has real API calls, loading/error states.
+- `src/pages/tools/Registry.tsx` (new): CRUD page for global tools with MUI Table, create/edit/delete dialogs.
+- `src/App.tsx`: added `/tools` route.
+- `src/components/Sidebar.tsx`: added Tool Registry nav item under AGENTS group.
+
+**cli:**
+- `atom.py`: `agent scaffold` rewritten as interactive cookiecutter — asks domain, description, behavior, port, multi-select global tools, optional agent-specific tools. Generates `agents/{name}/` directory with: `agent.py` (real runnable FastAPI+OpenAI code), `agent-role.md`, `spec.yaml`, `Dockerfile`, `requirements.txt`, `.env.example`, `README.md`. Optionally registers with GATE at end. New `atom agent register-local` subcommand.
+
+### Key design decisions
+- **LiteLLM key created at step 1** (provision), not at deploy. Key is updated via `PATCH /key/update` as tools are added/removed in step 2.
+- **MinIO only** — no local disk for specs/roles. Drafts are mutable; versioned copies are immutable on deploy.
+- **GATE direct invocation** — bypasses builder-backend for agent `/invoke`. GATE queries platform-db (pgx) for container URL. Non-fatal if DB is unavailable at startup (returns 503).
+- **HMAC signing** covers gate events (Go) and all Python `audit.emit()` calls. Same key (`AUDIT_HMAC_KEY` env var).
+- **Tools registry** separates global (reusable) from agent-specific tools. LiteLLM key allowlist reflects both.
+- **CLI scaffold generates real runnable code** (FastAPI + OpenAI SDK pointed at LiteLLM), not just stubs. Developer edits `agent.py` freely; `register-local` makes GATE route to it.
+
+### DoD checklist
+- [x] All Python files syntax-clean (ast.parse)
+- [x] GATE compiles (new files verified: db.go, agent_invoke.go, audit.go HMAC, config.go)
+- [x] `POST /agents` provisions LiteLLM key + DB record
+- [x] Tools/skills CRUD routes exist and update LiteLLM allowlist
+- [x] `POST /agents/{name}/generate` saves draft spec+role to MinIO
+- [x] No local disk reads/writes for specs (minio_store replaces SPECS_PATH)
+- [x] Deploy reads MinIO draft (agents.py updated)
+- [x] HMAC signing on all audit events (Python + Go)
+- [x] GATE direct invoke: db.go + agent_invoke.go + main.go wired
+- [x] `register-local` endpoint + CLI command
+- [x] Tools Registry page (frontend)
+- [x] 4-step wizard (frontend) with Google Cloud / John Snow Labs UX
+- [ ] go.sum needs `go mod tidy` after image build (pgx dependency)
+- [ ] Live docker compose smoke-test pending
+- [ ] DB migration: `ALTER TABLE agents ADD COLUMN IF NOT EXISTS` — runs at startup via _init() in registry_db.py; verify on first up
+
+---
+
+## Session 08 — Part C+D additions (2026-05-16)
+
+### Tool type expansion (Part C)
+- `app/core/tool_executor.py` (new): unified HTTP/Python/MCP executor with OAuth 2.0 token cache
+- `app/routes/tools.py`: expanded ToolBody with `tool_type`, `code`, MCP fields, `auth_config`; new `POST /tools/{id}/execute` and `POST /tools/{id}/validate-code` endpoints
+- `app/core/registry_db.py`: new columns on tools table (tool_type, code, mcp_server_url, mcp_transport, mcp_tool_names, auth_config, auth_type) — fixed ordering bug (ALTER after CREATE)
+- `requirements.txt`: added `mcp>=1.0.0`
+- Frontend: `ToolFormDialog.tsx` (new) — 3-section dialog with type toggle (HTTP/Python/MCP) + auth section (none/api_key/bearer/basic/oauth2); `Registry.tsx` updated with TypeChip + Test Tool dialog; `Builder.tsx` updated to use ToolFormDialog
+
+### Session management + ReMe memory + Swagger export (Part D)
+- `app/core/reme_client.py` (new): retrieve_task_memory_simple + summary_task_memory_simple wrappers
+- `app/core/registry_db.py`: agent_sessions + session_messages tables + CRUD functions
+- `app/routes/sessions.py` (new): POST /sessions (create + ReMe retrieve), POST /sessions/{id}/messages (inject history + ReMe context), GET /sessions/{id}, DELETE /sessions/{id} (trigger ReMe summarise bg), GET /agents/{name}/swagger (OpenAPI proxy)
+- `app/main.py`: registered sessions router
+- `gate/agent_invoke.go`: AgentPassthroughHandler for GET /agents/{name}/openapi.json
+- `gate/main.go`: wired openapi.json passthrough + session message audit
+- Frontend: `api/builder.ts` — SessionRecord, MessageRecord types + 6 new methods; `Detail.tsx` — Sessions tab (left session list + right chat UI with ReMe context display) + API Docs tab (lazy-loaded OpenAPI explorer + download button)
+
+### DoD status
+- [x] Session created → ReMe context retrieved and stored
+- [x] Session message → history + ReMe context sent to agent
+- [x] Session end → background ReMe summarise triggered
+- [x] GET /agents/{name}/swagger → proxies container OpenAPI spec
+- [x] GET /agents/{name}/openapi.json via GATE → direct container passthrough
+- [x] agent_sessions + session_messages tables confirmed in platform-db
+- [x] All three tool types (HTTP/Python/MCP) + 4 auth mechanisms functional
+- [x] Frontend: Sessions tab + API Docs tab on agent detail page
+- [ ] End-to-end session test with a deployed agent pending

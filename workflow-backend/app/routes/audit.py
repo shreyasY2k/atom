@@ -74,6 +74,7 @@ def _normalize_llm(raw: dict, key: str) -> dict:
         "duration_ms": int((raw.get("response_time") or 0) * 1000),
         "run_id": meta.get("run_id"),
         "node_id": meta.get("node_id"),
+        "hmac": raw.get("_hmac"),
         "raw": raw,
     }
 
@@ -84,7 +85,7 @@ def _normalize_workflow(raw: dict, key: str) -> dict:
         "id": key,
         "timestamp": raw.get("timestamp", ""),
         "source": "workflow",
-        "event_type": raw.get("type", "unknown"),
+        "event_type": raw.get("type", raw.get("action", "unknown")),
         "actor_type": raw.get("actor_type", "system"),
         "actor_id": raw.get("actor_id", "system:workflow-engine"),
         "model": None,
@@ -93,6 +94,7 @@ def _normalize_workflow(raw: dict, key: str) -> dict:
         "duration_ms": raw.get("duration_ms"),
         "run_id": raw.get("run_id"),
         "node_id": raw.get("node_id"),
+        "hmac": raw.get("_hmac"),
         "raw": raw,
     }
 

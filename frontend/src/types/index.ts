@@ -217,5 +217,7 @@ export interface AuditEvent {
   duration_ms?: number | null
   run_id?: string | null
   node_id?: string | null
+  hmac?: string | null          // hmac-sha256:{hex} if event was signed
+  hmac_valid?: boolean | null   // client-side verified (when key available)
   raw: Record<string, unknown>
 }

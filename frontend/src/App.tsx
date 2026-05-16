@@ -21,6 +21,7 @@ import AuditEvents from './pages/audit/Events'
 import Identities from './pages/audit/Identities'
 import Approvals from './pages/approvals/Approvals'
 import Settings from './pages/settings/Settings'
+import ToolsRegistry from './pages/tools/Registry'
 
 export const ColorModeContext = createContext({ toggle: () => {} })
 
@@ -70,6 +71,7 @@ function AppRoutes() {
         <Route path="audit/identities" element={<Identities />} />
         <Route path="approvals" element={<Approvals />} />
         <Route path="settings" element={<Settings />} />
+        <Route path="tools" element={<ToolsRegistry />} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Route>
     </Routes>

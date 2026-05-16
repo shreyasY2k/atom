@@ -3,7 +3,10 @@ package main
 import (
 	"bytes"
 	"context"
+	"crypto/hmac"
 	"crypto/rand"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"log/slog"
@@ -33,9 +36,10 @@ type GateAuditEvent struct {
 }
 
 type Auditor struct {
-	client *minio.Client
-	bucket string
-	logger *slog.Logger
+	client  *minio.Client
+	bucket  string
+	logger  *slog.Logger
+	hmacKey string
 }
 
 func NewAuditor(cfg Config, logger *slog.Logger) (*Auditor, error) {
@@ -46,17 +50,49 @@ func NewAuditor(cfg Config, logger *slog.Logger) (*Auditor, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &Auditor{client: client, bucket: cfg.AuditBucket, logger: logger}, nil
+	return &Auditor{client: client, bucket: cfg.AuditBucket, logger: logger, hmacKey: cfg.HMACKey}, nil
 }
 
 // Write persists an audit event to MinIO.
+// HMAC-SHA256 is computed over the canonical (sorted-key) JSON so that the
+// Python verifier (scripts/verify_audit_hmac.py) can reproduce the same digest.
+// Go's json.Marshal on map[string]interface{} sorts keys alphabetically,
+// matching Python's json.dumps(..., sort_keys=True).
 // Failures are logged but never returned — the gate must not block on audit writes.
 func (a *Auditor) Write(ev GateAuditEvent) {
-	b, err := json.Marshal(ev)
+	// Step 1: marshal struct → convert to map for sorted-key canonical form.
+	structBytes, err := json.Marshal(ev)
 	if err != nil {
 		a.logger.Error("gate audit marshal failed", "err", err)
 		return
 	}
+	var m map[string]interface{}
+	if err := json.Unmarshal(structBytes, &m); err != nil {
+		a.logger.Error("gate audit unmarshal failed", "err", err)
+		return
+	}
+
+	// Step 2: re-marshal the map — Go sorts map keys alphabetically.
+	// This is the canonical payload both Go and Python sign/verify over.
+	canonical, err := json.Marshal(m)
+	if err != nil {
+		a.logger.Error("gate audit canonical marshal failed", "err", err)
+		return
+	}
+
+	// Step 3: compute HMAC-SHA256 over the sorted-key JSON.
+	mac := hmac.New(sha256.New, []byte(a.hmacKey))
+	mac.Write(canonical)
+	sig := hex.EncodeToString(mac.Sum(nil))
+
+	// Step 4: add _hmac and write final JSON.
+	m["_hmac"] = "hmac-sha256:" + sig
+	b, err := json.Marshal(m)
+	if err != nil {
+		a.logger.Error("gate audit sign marshal failed", "err", err)
+		return
+	}
+
 	key := fmt.Sprintf("gate/%s/%s-%s.json",
 		time.Now().UTC().Format("2006-01-02"),
 		ev.GateRunID,

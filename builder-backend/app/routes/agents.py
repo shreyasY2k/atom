@@ -12,8 +12,9 @@ import yaml
 from fastapi import APIRouter, BackgroundTasks, HTTPException, Request
 from pydantic import BaseModel, ValidationError
 
-from app.core import audit, codegen, identity, registry_db, deployments_store
+from app.core import audit, codegen, identity, registry_db, deployments_store, minio_store
 from app.core.container import LocalDeployManager, WORK_DIR, AGENT_PORT, container_healthy
+from app.core.litellm_client import chat_completion
 from app.core.schema import AgentSpec
 
 router = APIRouter(prefix="/agents", tags=["agents"])
@@ -66,16 +67,27 @@ _AGENT_ENV_BASE = {k: v for k, v in os.environ.items() if k.endswith("_URL") or 
 
 
 def _load_spec(name: str) -> tuple[AgentSpec, dict]:
+    """Load spec — tries MinIO draft first, falls back to local disk for backward compat."""
+    # Try MinIO draft first (new flow)
+    if minio_store.draft_exists(name):
+        try:
+            return _parse_spec_yaml(minio_store.read_draft_spec(name))
+        except Exception:
+            pass
+    # Fall back to disk (legacy agents deployed before MinIO migration)
     spec_path = SPECS_PATH / "agents" / f"{name}.yaml"
     if not spec_path.exists():
-        raise HTTPException(404, f"spec not found at {spec_path}")
-    raw = spec_path.read_text()
+        raise HTTPException(404, f"No spec found for agent '{name}'. Use the Generate step first.")
+    return _parse_spec_yaml(spec_path.read_text())
+
+
+def _parse_spec_yaml(raw: str) -> tuple[AgentSpec, dict]:
     try:
         spec_dict = yaml.safe_load(raw)
         spec = AgentSpec.model_validate(spec_dict)
+        return spec, spec_dict
     except (yaml.YAMLError, ValidationError) as e:
         raise HTTPException(422, f"Spec parse/validation error: {e}")
-    return spec, spec_dict
 
 
 # ---------------------------------------------------------------------------
@@ -117,6 +129,22 @@ def compile_agent(name: str, body: SaveAndDeployBody = SaveAndDeployBody(), requ
 def _do_deploy_agent(name: str, actor: str) -> dict:
     """Build container, issue identity, register. Raises HTTPException on failure."""
     spec, spec_dict = _load_spec(name)
+
+    # Write role markdown from MinIO onto local disk so container build context
+    # can copy it into the image (agent.py reads it at runtime from /app/agent-roles/).
+    try:
+        role_md = minio_store.read_draft_role(name)
+        if role_md:
+            role_rel = f"agent-roles/general/{name}.role.md"
+            for ag in spec.spec.agents:
+                if ag.agent_role_file:
+                    role_rel = ag.agent_role_file
+                    break
+            role_local = Path("/app") / role_rel
+            role_local.parent.mkdir(parents=True, exist_ok=True)
+            role_local.write_text(role_md)
+    except Exception:
+        pass
 
     try:
         code = codegen.compile_agent(name, spec, spec_dict)
@@ -218,6 +246,17 @@ def _do_deploy_agent(name: str, actor: str) -> dict:
         metadata={k: v for k, v in record.items() if k != "virtual_key"},
     )
     audit.write_agent_spec(name=name, version=spec.metadata.version, spec_yaml=spec_yaml_text)
+
+    # Mint immutable versioned copy in MinIO
+    agent_rec = registry_db.get(name)
+    new_version_count = (agent_rec.get("version_count") or 0) + 1
+    role_md = minio_store.read_draft_role(name)
+    minio_store.write_versioned(name, new_version_count, spec_yaml_text, role_md)
+    try:
+        with registry_db._cursor() as cur:
+            cur.execute("UPDATE agents SET version_count=%s WHERE name=%s", (new_version_count, name))
+    except Exception:
+        pass
 
     return {k: v for k, v in record.items() if k != "virtual_key"}
 
@@ -597,3 +636,375 @@ def _register_with_studio(
             "timestamp": completed_at,
         },
     })
+
+
+# ===========================================================================
+# New provisioning flow
+# ===========================================================================
+
+class ProvisionBody(BaseModel):
+    name: str
+    description: str = ""
+
+
+class AgentToolBody(BaseModel):
+    name: str
+    display_name: str | None = None
+    description: str = ""
+    endpoint: str | None = None
+    method: str = "POST"
+    input_schema: dict = {}
+    output_schema: dict = {}
+    tags: list[str] = []
+    tool_id: str | None = None  # if set, associate an existing global tool
+
+
+class AssociateToolBody(BaseModel):
+    tool_id: str
+
+
+class SkillBody(BaseModel):
+    name: str
+    content: str
+
+
+class GenerateBody(BaseModel):
+    behavior: str
+
+
+class RegisterLocalBody(BaseModel):
+    endpoint: str
+
+
+# ---------------------------------------------------------------------------
+# POST /agents  — provision (Step 1)
+# ---------------------------------------------------------------------------
+
+@router.post("")
+def provision_agent(body: ProvisionBody, request: Request):
+    """Create agent record + LiteLLM key immediately. Status: provisioned."""
+    actor = request.headers.get("X-Atom-Actor", "user:default@atom.io")
+    existing = registry_db.get(body.name)
+    if existing:
+        raise HTTPException(409, f"Agent '{body.name}' already exists")
+
+    try:
+        svc_id, vkey = identity.provision_identity(body.name, owner=actor)
+    except Exception as e:
+        raise HTTPException(502, f"Identity provisioning failed: {e}")
+
+    now = datetime.now(timezone.utc).isoformat()
+    record = {
+        "name": body.name, "description": body.description,
+        "version": "v0", "service_account_id": svc_id, "virtual_key": vkey,
+        "owner": actor, "deployed_at": now, "endpoint": None, "container_id": None,
+        "spec_hash": None, "code_hash": None, "status": "provisioned",
+        "version_count": 0,
+    }
+    registry_db.upsert(record)
+    audit.emit(f"provision/{body.name}", {
+        "actor_type": "human", "actor_id": actor,
+        "action": "provision_agent", "target": body.name,
+    })
+    return {k: v for k, v in record.items() if k != "virtual_key"}
+
+
+# ---------------------------------------------------------------------------
+# Tools (Step 2)
+# ---------------------------------------------------------------------------
+
+@router.get("/{name}/tools")
+def list_agent_tools(name: str):
+    agent = registry_db.get(name)
+    if not agent:
+        raise HTTPException(404, f"Agent '{name}' not found")
+    return {"tools": registry_db.get_agent_tools(name)}
+
+
+@router.post("/{name}/tools")
+def add_agent_tool(name: str, body: AgentToolBody, request: Request):
+    """Add an agent-specific tool OR associate an existing global tool."""
+    agent = registry_db.get(name)
+    if not agent:
+        raise HTTPException(404, f"Agent '{name}' not found")
+    actor = request.headers.get("X-Atom-Actor", "user:default@atom.io")
+    now = datetime.now(timezone.utc).isoformat()
+
+    if body.tool_id:
+        registry_db.associate_tool(name, body.tool_id)
+    else:
+        tool_id = str(uuid.uuid4())
+        registry_db.upsert_tool({
+            "tool_id": tool_id, "name": body.name,
+            "display_name": body.display_name or body.name,
+            "description": body.description, "scope": "agent",
+            "owner_agent": name, "endpoint": body.endpoint,
+            "method": body.method, "input_schema": body.input_schema,
+            "output_schema": body.output_schema, "tags": body.tags,
+            "created_by": actor, "created_at": now, "updated_at": now,
+        })
+        registry_db.associate_tool(name, tool_id)
+
+    tools = registry_db.get_agent_tools(name)
+    try:
+        identity.update_identity_tools(agent["virtual_key"], [t["name"] for t in tools])
+    except Exception:
+        pass
+    return {"tools": tools}
+
+
+@router.post("/{name}/tools/associate")
+def associate_global_tool(name: str, body: AssociateToolBody, request: Request):
+    """Link an existing global tool to this agent."""
+    agent = registry_db.get(name)
+    if not agent:
+        raise HTTPException(404, f"Agent '{name}' not found")
+    registry_db.associate_tool(name, body.tool_id)
+    tools = registry_db.get_agent_tools(name)
+    try:
+        identity.update_identity_tools(agent["virtual_key"], [t["name"] for t in tools])
+    except Exception:
+        pass
+    return {"tools": tools}
+
+
+@router.delete("/{name}/tools/{tool_id}")
+def remove_agent_tool(name: str, tool_id: str, request: Request):
+    agent = registry_db.get(name)
+    if not agent:
+        raise HTTPException(404, f"Agent '{name}' not found")
+    registry_db.dissociate_tool(name, tool_id)
+    tools = registry_db.get_agent_tools(name)
+    try:
+        identity.update_identity_tools(agent["virtual_key"], [t["name"] for t in tools])
+    except Exception:
+        pass
+    return {"tools": tools}
+
+
+# ---------------------------------------------------------------------------
+# Skills (Step 2)
+# ---------------------------------------------------------------------------
+
+@router.get("/{name}/skills")
+def list_skills(name: str):
+    agent = registry_db.get(name)
+    if not agent:
+        raise HTTPException(404, f"Agent '{name}' not found")
+    return {"skills": agent.get("skills") or []}
+
+
+@router.post("/{name}/skills")
+def upsert_skill(name: str, body: SkillBody, request: Request):
+    agent = registry_db.get(name)
+    if not agent:
+        raise HTTPException(404, f"Agent '{name}' not found")
+    skills = [s for s in (agent.get("skills") or []) if s["name"] != body.name]
+    skills.append({"name": body.name, "content": body.content})
+    registry_db.update_skills(name, skills)
+    return {"skills": skills}
+
+
+@router.delete("/{name}/skills/{skill_name}")
+def delete_skill(name: str, skill_name: str):
+    agent = registry_db.get(name)
+    if not agent:
+        raise HTTPException(404, f"Agent '{name}' not found")
+    skills = [s for s in (agent.get("skills") or []) if s["name"] != skill_name]
+    registry_db.update_skills(name, skills)
+    return {"skills": skills}
+
+
+# ---------------------------------------------------------------------------
+# Generate spec + role via LLM (Step 3)
+# ---------------------------------------------------------------------------
+
+@router.post("/{name}/generate")
+def generate_agent(name: str, body: GenerateBody, request: Request):
+    """LLM generates role markdown + spec YAML. Saves draft to MinIO."""
+    agent = registry_db.get(name)
+    if not agent:
+        raise HTTPException(404, f"Agent '{name}' not found")
+
+    tools = registry_db.get_agent_tools(name)
+    skills = agent.get("skills") or []
+
+    tools_desc = "\n".join(
+        f"- {t['name']}: {t.get('description', '')} — endpoint: {t.get('endpoint', 'n/a')}"
+        for t in tools
+    ) or "No tools defined yet."
+
+    skills_list = "\n".join(f"- {s['name']}" for s in skills) or "None."
+
+    prompt = f"""You are generating configuration for an AI agent on the Atom Platform.
+
+Agent name: {name}
+Description: {agent.get('description', '')}
+Behavior instructions: {body.behavior}
+
+Tools available to this agent:
+{tools_desc}
+
+Skills:
+{skills_list}
+
+Produce exactly two sections separated by the delimiters below.
+
+---ROLE---
+Write a concise agent-role markdown file (200-400 words) covering:
+# {name}
+A persona statement, ## Process (numbered steps referencing the tools), ## Output format (JSON block), ## Critical rules.
+
+---SPEC---
+Write a valid atom.platform/v1 AgentDeployment YAML spec. Use this structure:
+apiVersion: atom.platform/v1
+kind: AgentDeployment
+metadata:
+  name: {name}
+  domain: general
+  version: "0.1.0"
+  description: <one line>
+  owner: {agent.get('owner', 'user:default@atom.io')}
+spec:
+  agents:
+    - name: {name}-agent
+      role: standalone
+      agent_role_file: agent-roles/general/{name}.role.md
+      model: gemini-3.1-pro
+      temperature: 1.0
+      reasoning_effort: medium
+      max_iterations: 6
+      tools: {[t['name'] for t in tools]}
+  flow:
+    type: standalone
+  audit:
+    log_to: minio://audit-logs/agent/{name}
+    retention_days: 90
+  deployment:
+    runtime: agentscope
+    sandbox: base
+    replicas: 1
+"""
+
+    try:
+        response = chat_completion(
+            messages=[{"role": "user", "content": prompt}],
+            model="gemini-3-flash",
+            reasoning_effort="low",
+        )
+    except Exception as e:
+        raise HTTPException(502, f"LLM generation failed: {e}")
+
+    role_md = ""
+    spec_yaml = ""
+    if "---ROLE---" in response and "---SPEC---" in response:
+        parts = response.split("---SPEC---", 1)
+        role_md = parts[0].replace("---ROLE---", "").strip()
+        spec_yaml = parts[1].strip()
+    else:
+        role_md = f"# {name}\n\n{agent.get('description', '')}\n\n## Behavior\n\n{body.behavior}\n"
+        spec_yaml = _make_minimal_spec(name, agent, tools)
+
+    minio_store.write_draft_spec(name, spec_yaml)
+    minio_store.write_draft_role(name, role_md)
+
+    try:
+        with registry_db._cursor() as cur:
+            cur.execute("UPDATE agents SET status='draft' WHERE name=%s", (name,))
+    except Exception:
+        pass
+
+    return {"spec_yaml": spec_yaml, "role_md": role_md, "status": "draft"}
+
+
+def _make_minimal_spec(name: str, agent: dict, tools: list) -> str:
+    return yaml.dump({
+        "apiVersion": "atom.platform/v1",
+        "kind": "AgentDeployment",
+        "metadata": {
+            "name": name, "domain": "general", "version": "0.1.0",
+            "description": agent.get("description", ""),
+            "owner": agent.get("owner", "user:default@atom.io"),
+        },
+        "spec": {
+            "agents": [{
+                "name": f"{name}-agent", "role": "standalone",
+                "agent_role_file": f"agent-roles/general/{name}.role.md",
+                "model": "gemini-3.1-pro", "temperature": 1.0,
+                "reasoning_effort": "medium", "max_iterations": 6,
+                "tools": [t["name"] for t in tools],
+            }],
+            "flow": {"type": "standalone"},
+            "audit": {"log_to": f"minio://audit-logs/agent/{name}", "retention_days": 90},
+            "deployment": {"runtime": "agentscope", "sandbox": "base", "replicas": 1},
+        },
+    }, sort_keys=False, allow_unicode=True)
+
+
+# ---------------------------------------------------------------------------
+# Edit deployed agent — start new draft (same LiteLLM key)
+# ---------------------------------------------------------------------------
+
+@router.post("/{name}/edit")
+def start_edit(name: str, request: Request):
+    """Copy the latest deployed version to draft so the agent can be edited."""
+    agent = registry_db.get(name)
+    if not agent:
+        raise HTTPException(404, f"Agent '{name}' not found")
+    version_count = agent.get("version_count") or 0
+    if version_count > 0:
+        try:
+            spec_yaml = minio_store.read_versioned_spec(name, version_count)
+            minio_store.write_draft_spec(name, spec_yaml)
+            try:
+                role_md = minio_store.read_versioned_role(name, version_count)
+                minio_store.write_draft_role(name, role_md)
+            except Exception:
+                pass
+        except Exception:
+            pass
+    return {"status": "draft_created", "base_version": version_count}
+
+
+# ---------------------------------------------------------------------------
+# Register local dev agent (CLI scaffold workflow)
+# ---------------------------------------------------------------------------
+
+@router.post("/{name}/register-local")
+def register_local(name: str, body: RegisterLocalBody, request: Request):
+    """Register a locally-running agent container so GATE can route to it."""
+    actor = request.headers.get("X-Atom-Actor", "user:default@atom.io")
+    agent = registry_db.get(name)
+    now = datetime.now(timezone.utc).isoformat()
+
+    if agent:
+        svc_id = agent["service_account_id"]
+        vkey = agent["virtual_key"]
+    else:
+        try:
+            svc_id, vkey = identity.provision_identity(name, owner=actor)
+        except Exception as e:
+            raise HTTPException(502, f"Identity provisioning failed: {e}")
+
+    record = {
+        "name": name,
+        "description": agent.get("description", "") if agent else "",
+        "version": "local",
+        "service_account_id": svc_id,
+        "virtual_key": vkey,
+        "owner": actor,
+        "deployed_at": now,
+        "endpoint": body.endpoint,
+        "container_id": None,
+        "spec_hash": "local",
+        "code_hash": "local",
+        "status": "deployed",
+        "version_count": agent.get("version_count", 0) if agent else 0,
+    }
+    registry_db.upsert(record)
+    audit.emit(f"register-local/{name}", {
+        "actor_type": "human", "actor_id": actor,
+        "action": "register_local", "target": name,
+        "endpoint": body.endpoint,
+    })
+    return {k: v for k, v in record.items() if k != "virtual_key"}

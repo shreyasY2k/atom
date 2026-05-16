@@ -10,6 +10,82 @@ const json = (r: Response) => {
 
 const actor = () => ({ 'X-Atom-Actor': getActorHeader() })
 
+export interface AuthConfig {
+  type: 'none' | 'api_key' | 'bearer' | 'basic' | 'oauth2'
+  // api_key
+  header_name?: string
+  key?: string
+  in_?: 'header' | 'query'
+  param_name?: string
+  // bearer
+  token?: string
+  // basic
+  username?: string
+  password?: string
+  // oauth2
+  grant_type?: 'client_credentials' | 'authorization_code'
+  token_url?: string
+  client_id?: string
+  client_secret?: string
+  scope?: string
+  audience?: string
+}
+
+export interface ToolRecord {
+  tool_id: string
+  name: string
+  display_name?: string
+  description?: string
+  scope: 'global' | 'agent'
+  owner_agent?: string | null
+  tool_type: 'http' | 'python' | 'mcp'
+  // HTTP
+  endpoint?: string | null
+  method?: string
+  // Python
+  code?: string | null
+  // MCP
+  mcp_server_url?: string | null
+  mcp_transport?: 'sse' | 'stdio'
+  mcp_tool_names?: string[]
+  // Auth
+  auth_type?: string
+  auth_config?: AuthConfig
+  // Schema
+  input_schema?: Record<string, unknown>
+  output_schema?: Record<string, unknown>
+  tags?: string[]
+  created_by?: string
+  created_at?: string
+  updated_at?: string
+}
+
+export interface SkillRecord {
+  name: string
+  content: string
+}
+
+export interface SessionRecord {
+  session_id: string
+  agent_name: string
+  owner: string
+  created_at: string
+  updated_at: string
+  status: 'active' | 'ended'
+  reme_context?: string | null
+  message_count?: number
+  metadata?: Record<string, unknown>
+}
+
+export interface MessageRecord {
+  message_id: string
+  session_id: string
+  role: 'user' | 'assistant' | 'system'
+  content: string
+  created_at: string
+  run_id?: string | null
+}
+
 export interface DeploymentRecord {
   deployment_id: string
   target_type: 'agent' | 'workflow'
@@ -144,4 +220,113 @@ export const builderApi = {
       headers: { 'Content-Type': 'application/json', ...actor() },
       body: JSON.stringify({ comments }),
     }).then(json),
+
+  // New provisioning flow
+  provisionAgent: (name: string, description: string): Promise<Record<string, unknown>> =>
+    fetch(`${BASE}/agents`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...actor() },
+      body: JSON.stringify({ name, description }),
+    }).then(json),
+
+  getAgentTools: (name: string): Promise<{ tools: ToolRecord[] }> =>
+    fetch(`${BASE}/agents/${name}/tools`, { headers: actor() }).then(json),
+
+  addAgentTool: (name: string, tool: Partial<ToolRecord>): Promise<{ tools: ToolRecord[] }> =>
+    fetch(`${BASE}/agents/${name}/tools`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...actor() },
+      body: JSON.stringify(tool),
+    }).then(json),
+
+  associateGlobalTool: (agentName: string, toolId: string): Promise<{ tools: ToolRecord[] }> =>
+    fetch(`${BASE}/agents/${agentName}/tools/associate`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...actor() },
+      body: JSON.stringify({ tool_id: toolId }),
+    }).then(json),
+
+  removeAgentTool: (agentName: string, toolId: string): Promise<{ tools: ToolRecord[] }> =>
+    fetch(`${BASE}/agents/${agentName}/tools/${toolId}`, {
+      method: 'DELETE', headers: actor(),
+    }).then(json),
+
+  getAgentSkills: (name: string): Promise<{ skills: SkillRecord[] }> =>
+    fetch(`${BASE}/agents/${name}/skills`, { headers: actor() }).then(json),
+
+  upsertSkill: (name: string, skillName: string, content: string): Promise<{ skills: SkillRecord[] }> =>
+    fetch(`${BASE}/agents/${name}/skills`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...actor() },
+      body: JSON.stringify({ name: skillName, content }),
+    }).then(json),
+
+  deleteSkill: (agentName: string, skillName: string): Promise<{ skills: SkillRecord[] }> =>
+    fetch(`${BASE}/agents/${agentName}/skills/${encodeURIComponent(skillName)}`, {
+      method: 'DELETE', headers: actor(),
+    }).then(json),
+
+  generateAgent: (name: string, behavior: string): Promise<{ spec_yaml: string; role_md: string; status: string }> =>
+    fetch(`${BASE}/agents/${name}/generate`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...actor() },
+      body: JSON.stringify({ behavior }),
+    }).then(json),
+
+  // Tools registry
+  listGlobalTools: (): Promise<{ tools: ToolRecord[] }> =>
+    fetch(`${BASE}/tools`, { headers: actor() }).then(json),
+
+  createGlobalTool: (tool: Partial<ToolRecord>): Promise<ToolRecord> =>
+    fetch(`${BASE}/tools`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...actor() },
+      body: JSON.stringify(tool),
+    }).then(json),
+
+  updateGlobalTool: (toolId: string, tool: Partial<ToolRecord>): Promise<ToolRecord> =>
+    fetch(`${BASE}/tools/${toolId}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json', ...actor() },
+      body: JSON.stringify(tool),
+    }).then(json),
+
+  deleteGlobalTool: (toolId: string): Promise<unknown> =>
+    fetch(`${BASE}/tools/${toolId}`, { method: 'DELETE', headers: actor() }).then(json),
+
+  executeGlobalTool: (toolId: string, input: Record<string, unknown>): Promise<{ result: unknown }> =>
+    fetch(`${BASE}/tools/${toolId}/execute`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...actor() },
+      body: JSON.stringify({ input }),
+    }).then(json),
+
+  // Sessions
+  createSession: (agentName: string, workspaceId?: string): Promise<{ session_id: string; status: string; reme_context?: string }> =>
+    fetch(`${BASE}/agents/${agentName}/sessions`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...actor() },
+      body: JSON.stringify({ workspace_id: workspaceId ?? null, metadata: {} }),
+    }).then(json),
+
+  listSessions: (agentName: string): Promise<{ sessions: SessionRecord[]; total: number }> =>
+    fetch(`${BASE}/agents/${agentName}/sessions`, { headers: actor() }).then(json),
+
+  getSession: (agentName: string, sessionId: string): Promise<SessionRecord & { messages: MessageRecord[] }> =>
+    fetch(`${BASE}/agents/${agentName}/sessions/${sessionId}`, { headers: actor() }).then(json),
+
+  sendMessage: (agentName: string, sessionId: string, text: string, workspaceId?: string): Promise<{ session_id: string; run_id: string; role: string; content: string; result: unknown }> =>
+    fetch(`${BASE}/agents/${agentName}/sessions/${sessionId}/messages`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...actor() },
+      body: JSON.stringify({ text, workspace_id: workspaceId ?? null }),
+    }).then(json),
+
+  endSession: (agentName: string, sessionId: string): Promise<{ status: string }> =>
+    fetch(`${BASE}/agents/${agentName}/sessions/${sessionId}`, {
+      method: 'DELETE', headers: actor(),
+    }).then(json),
+
+  getAgentSwagger: (agentName: string): Promise<Record<string, unknown>> =>
+    fetch(`${BASE}/agents/${agentName}/swagger`, { headers: actor() }).then(json),
 }
