@@ -23,29 +23,31 @@ _DEMO_TOOLS = [
         "tool_id": _stable_id("kyc-lookup"),
         "name": "kyc-lookup",
         "display_name": "KYC Lookup",
-        "description": "Get KYC profile for a customer from the KYC mock service",
+        "description": "Get KYC profile for any customer. Pass customer_id (e.g. CUST-100442) to retrieve identity, risk category, and KYC staleness.",
         "scope": "global",
-        "tool_type": "http",
-        "endpoint": "http://kyc-svc:8095/profile/CUST-100442",
-        "method": "GET",
-        "auth_type": "api_key",
-        "auth_config": {
-            "type": "api_key",
-            "header_name": "X-API-Key",
-            "key": "demo-key-123",
-            "in": "header",
-            "param_name": "api_key",
-            "token": "",
-            "username": "",
-            "password": "",
-            "grant_type": "client_credentials",
-            "token_url": "",
-            "client_id": "",
-            "client_secret": "",
-            "scope": "",
-            "audience": "",
+        "tool_type": "python",
+        "code": (
+            "def run(input: dict) -> dict:\n"
+            "    import httpx\n"
+            "    customer_id = input.get('customer_id', '').strip()\n"
+            "    if not customer_id:\n"
+            "        return {'error': 'customer_id is required'}\n"
+            "    url = f'http://kyc-svc:8095/profile/{customer_id}'\n"
+            "    try:\n"
+            "        resp = httpx.get(url, headers={'X-API-Key': 'demo-key-123'}, timeout=10)\n"
+            "        if resp.status_code == 404:\n"
+            "            return {'error': f'Customer {customer_id} not found in KYC system'}\n"
+            "        return resp.json()\n"
+            "    except Exception as e:\n"
+            "        return {'error': f'KYC service unavailable: {str(e)}'}\n"
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "customer_id": {"type": "string", "description": "Bank customer identifier, e.g. CUST-100442"},
+            },
+            "required": ["customer_id"],
         },
-        "input_schema": {},
         "output_schema": {
             "type": "object",
             "properties": {
@@ -100,11 +102,13 @@ _DEMO_TOOLS = [
 
 def seed_tools() -> None:
     """Insert demo tools that don't already exist in the registry."""
-    existing_names = {t["name"] for t in registry_db.list_tools()}
+    existing = {t["name"]: t for t in registry_db.list_tools()}
     now = datetime.now(timezone.utc).isoformat()
 
     for tool in _DEMO_TOOLS:
-        if tool["name"] in existing_names:
+        existing_tool = existing.get(tool["name"])
+        # Skip only if the correct tool_type is already present; re-seed if type changed.
+        if existing_tool and existing_tool.get("tool_type") == tool.get("tool_type"):
             continue
         registry_db.upsert_tool({
             **tool,
