@@ -15,9 +15,10 @@
 7. [Sessions and Memory](#sessions-and-memory)
 8. [Invoking Agents via API](#invoking-agents-via-api)
 9. [HMAC Audit Log Verification](#hmac-audit-log-verification)
-10. [Architecture Overview](#architecture-overview)
-11. [Service Ports](#service-ports)
-12. [Troubleshooting](#troubleshooting)
+10. [Guardrails (AgentArmor)](#guardrails-agentarmor)
+11. [Architecture Overview](#architecture-overview)
+12. [Service Ports](#service-ports)
+13. [Troubleshooting](#troubleshooting)
 
 ---
 
@@ -124,6 +125,8 @@ When a customer asks about their account status:
 Click **Generate** — Gemini Flash generates the agent-role markdown and spec YAML, saved to MinIO as a draft.
 
 ### Step 4 — Deploy
+
+Before deploying, you can configure the **AgentArmor Guardrails** toggle (default: ON). When enabled, every LLM request and response for this agent is scanned by AgentArmor. Toggle it off only for trusted, controlled environments.
 
 Review the generated spec and role markdown. Click:
 - **Deploy directly** — deploys immediately (admin/approver role)
@@ -512,6 +515,84 @@ Hover the shield to see the full `hmac-sha256:{hex}`. Expand a row to see it in 
 
 ---
 
+## Guardrails (AgentArmor)
+
+Every LLM call on the platform passes through [AgentArmor](https://github.com/Agastya910/agentarmor) — an 8-layer, defence-in-depth guardrail framework integrated directly into the LiteLLM gateway as a custom guardrail pair.
+
+### What it does
+
+| Phase | Hook | What is scanned |
+|-------|------|----------------|
+| **Pre-call** | Before the request reaches Gemini | Prompt injection, goal hijacking, planning risk score |
+| **Post-call** | After the model responds | PII leakage, credential exposure, data exfiltration patterns |
+
+AgentArmor runs as its own Docker service (`agentarmor`, port 8400, built from source). LiteLLM calls it as a side-channel on every request — it never sits in the proxy path, so latency impact is bounded by a 5-second timeout.
+
+### Fail-open design
+
+If AgentArmor is unreachable (container restart, timeout), the request is **allowed through** and a warning is logged. This prevents a dead guardrail container from taking down the LLM gateway.
+
+### What a violation looks like
+
+When a scan fails, LiteLLM returns HTTP 400 to the caller with a structured body:
+
+```json
+{
+  "error": "guardrail_violation",
+  "guardrail": "agentarmor",
+  "phase": "pre_call",
+  "verdict": "deny",
+  "threat_level": "high",
+  "blocked_by": "planning_validator",
+  "layers": [
+    { "layer": "ingestion",          "verdict": "allow", "message": "" },
+    { "layer": "planning_validator", "verdict": "deny",  "message": "risk score 8 — EXECUTE hard deny" }
+  ],
+  "message": "AgentArmor pre_call guardrail blocked this request (threat: high, blocked_by: planning_validator)"
+}
+```
+
+In the Sessions tab, violations render as an inline conversation bubble (not a generic error) with the layer breakdown expandable below it.
+
+### Per-agent opt-out
+
+By default every agent has guardrails enabled. To disable for a specific agent, set in `agent-spec.yaml`:
+
+```yaml
+spec:
+  guardrails:
+    agentarmor: false
+```
+
+The builder UI's Step 4 exposes this as a toggle switch. The setting is baked into the LiteLLM virtual key metadata at deploy time — the agent cannot disable its own guardrails at request time.
+
+### Tuning guardrail layers
+
+Edit `agentarmor/config.yaml` and restart the service — no image rebuild needed:
+
+```bash
+docker compose restart agentarmor
+```
+
+Key knobs:
+
+| Setting | Default | Effect |
+|---------|---------|--------|
+| `layers.ingestion.scan_prompt_injection` | `true` | Detect prompt injection in user messages |
+| `layers.planning.risk_score_threshold` | `7` | Deny if action risk score ≥ N (0–10) |
+| `layers.output.scan_pii` | `true` | Redact / block PII in model responses |
+| `layers.output.scan_credentials` | `true` | Block responses containing secrets or tokens |
+| `layers.output.scan_exfiltration` | `true` | Block exfiltration-pattern responses |
+
+### Verifying AgentArmor is healthy
+
+```bash
+docker compose ps agentarmor           # should show "healthy"
+docker compose logs agentarmor --tail 20
+```
+
+---
+
 ## Architecture Overview
 
 ```
@@ -533,9 +614,15 @@ Hover the shield to see the full `hmac-sha256:{hex}`. Expand a row to see it in 
                   |           |
         +---------v--+  +-----v--------+
         |  LiteLLM   |  |  platform-db |
-        |  :4000     |  |  (PostgreSQL)|
+        |  :4000     |<-+  (PostgreSQL)|
         | Gemini-only|  +--------------+
-        +------------+
+        +-----+------+
+              |  pre/post-call guardrail side-channel
+        +-----v----------+
+        |  AgentArmor    |  :8400
+        |  8-layer scan  |
+        | (built source) |
+        +----------------+
 
         Storage : MinIO (audit-logs, specs, agent-artifacts)
         Memory  : ReMe :8002 (long-term, cross-session)
@@ -545,10 +632,11 @@ Hover the shield to see the full `hmac-sha256:{hex}`. Expand a row to see it in 
 
 **Key invariants:**
 1. Every LLM call goes through LiteLLM (`http://litellm:4000`)
-2. Every agent has a non-human service-account identity (LiteLLM virtual key) issued at creation time
-3. Agent invocation: GATE queries platform-db → calls container directly (no builder-backend on hot path)
-4. All platform audit events are HMAC-SHA256 signed (sorted-key canonical JSON)
-5. Audit logs stored in MinIO with 90-day COMPLIANCE object lock
+2. Every LLM request and response is scanned by AgentArmor guardrails (pre-call + post-call)
+3. Every agent has a non-human service-account identity (LiteLLM virtual key) issued at creation time
+4. Agent invocation: GATE queries platform-db → calls container directly (no builder-backend on hot path)
+5. All platform audit events are HMAC-SHA256 signed (sorted-key canonical JSON)
+6. Audit logs stored in MinIO with 90-day COMPLIANCE object lock
 
 ---
 
@@ -560,6 +648,7 @@ Hover the shield to see the full `hmac-sha256:{hex}`. Expand a row to see it in 
 | GATE (builder) | 8080 | Agent builder surface + audit proxy |
 | GATE (workflow) | 8082 | Workflow surface + audit proxy |
 | LiteLLM | 4000 | LLM gateway (Gemini only) |
+| AgentArmor | 8400 | Pre/post-call guardrail (prompt injection, PII, exfiltration) |
 | MinIO API | 9000 | Object storage |
 | MinIO UI | 9001 | MinIO web console |
 | Temporal UI | 8233 | Workflow engine UI |
@@ -570,6 +659,32 @@ Hover the shield to see the full `hmac-sha256:{hex}`. Expand a row to see it in 
 ---
 
 ## Troubleshooting
+
+### LLM calls return 400 with `error: guardrail_violation`
+
+AgentArmor blocked the request. The response body contains `phase`, `threat_level`, `blocked_by`, and a `layers` array showing which layer fired. Common causes:
+
+- **`planning_validator` deny** — the action's risk score exceeded the threshold (default 7). Legitimate agent invocations should not trigger this; it fires on shell-exec-style or high-risk actions.
+- **`ingestion` deny** — prompt injection detected in user input. Sanitise the input or adjust `layers.ingestion.scan_prompt_injection` in `agentarmor/config.yaml`.
+- **`output` deny** — model response contained PII or credentials. Review the agent's role file to avoid generating sensitive content in outputs.
+
+To temporarily lower strictness during development:
+```bash
+# Raise the planning risk threshold (0-10, higher = more permissive)
+# Edit agentarmor/config.yaml → layers.planning.risk_score_threshold: 9
+docker compose restart agentarmor
+```
+
+### LiteLLM starts but logs `agentarmor: pre-call scan error`
+
+AgentArmor was not healthy when LiteLLM started. Because guardrails fail open, calls succeed — but check that AgentArmor is running:
+
+```bash
+docker compose ps agentarmor
+docker compose logs agentarmor --tail 30
+```
+
+If it's crashing, check that `agentarmor/config.yaml` is valid YAML and that the `agentarmor` build completed cleanly (`docker compose build agentarmor`).
 
 ### reme is restarting
 

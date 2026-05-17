@@ -72,7 +72,9 @@ flowchart TB
 
     WB["<b>Workflow Backend</b> (FastAPI + Temporal SDK, :8082)<br/><i>internal only</i><br/>• validate spec<br/>• register workflow<br/>• run worker<br/>• expose human task queue<br/>• emit audit events"]
 
-    LiteLLM["<b>LiteLLM Gateway</b> (:4000)<br/>• Gemini-only model_list<br/>• virtual keys per service account (= NHI for agents)<br/>• MCP gateway for tool calls<br/>• guardrails: per-agent tool allowlists<br/>• S3 callback → MinIO audit-logs"]
+    LiteLLM["<b>LiteLLM Gateway</b> (:4000)<br/>• Gemini-only model_list<br/>• virtual keys per service account (= NHI for agents)<br/>• MCP gateway for tool calls<br/>• guardrails: per-agent tool allowlists + AgentArmor pre/post<br/>• S3 callback → MinIO audit-logs"]
+
+    AgentArmor["<b>AgentArmor</b> (:8400)<br/>• 8-layer defence-in-depth<br/>• pre-call: prompt injection · planning risk<br/>• post-call: PII · credentials · exfiltration<br/>• built from source (Agastya910/agentarmor)"]
 
     Gemini[("Gemini API<br/>(the only LLM provider)")]
     Mocks[("Mock services<br/>KYC · OFAC · SWIFT<br/>treasury · FNOL · OCR")]
@@ -86,6 +88,7 @@ flowchart TB
     LiteLLM --> Gemini
     LiteLLM --> Mocks
     LiteLLM --> MinIO
+    LiteLLM <-->|pre/post guardrail side-channel| AgentArmor
 ```
 
 ## Component map
@@ -99,6 +102,7 @@ flowchart TB
 | `temporal` | 7233 (gRPC) / 8233 (web) | Workflow engine | image |
 | `temporal-db` | 5432 (internal) | Postgres for Temporal | image |
 | `litellm` | 4000 | Gemini gateway, MCP, virtual keys, audit | image |
+| `agentarmor` | **8400** | Pre/post-call guardrail — prompt injection, planning risk, PII, credential, exfiltration scans | **built from source** |
 | `litellm-db` | 5432 (internal) | Postgres for LiteLLM | image |
 | `studio` | 3000 | AgentScope Studio | **built from source** |
 | `runtime-sandbox` | 8001 | AgentScope Runtime sandbox | **built from source** |
@@ -116,6 +120,78 @@ flowchart TB
 | `swift-gw` | 8097 | Mock: SWIFT/DTC instruction submit | local |
 | `task-queue` | 8098 | Mock: human task queue (back-office) | local |
 | `agent-{name}` | 8100+ | Deployed agents (one container each) | generated |
+
+## AgentArmor guardrail layer
+
+AgentArmor ([Agastya910/agentarmor](https://github.com/Agastya910/agentarmor)) is integrated as a **LiteLLM custom guardrail** pair — one for pre-call and one for post-call — that fires on every model request passing through the gateway.
+
+### Integration topology
+
+```
+Agent container
+    │  LITELLM_API_KEY (virtual key)
+    ▼
+LiteLLM :4000
+    │  pre-call: POST /v1/scan/input ──────► AgentArmor :8400
+    │  (if deny → 400 to caller)
+    ▼
+Gemini API
+    │
+    ▼
+LiteLLM :4000
+    │  post-call: POST /v1/scan/output ────► AgentArmor :8400
+    │  (if deny → 400 to caller)
+    ▼
+Agent container (response)
+```
+
+AgentArmor is a **side-channel** call, not a proxy. LiteLLM holds the request, calls AgentArmor synchronously (5 s timeout), then either proceeds or blocks. On timeout or network error it **fails open** — the LLM call is allowed through and a warning is logged. This prevents a dead guardrail from taking down the gateway.
+
+### Active layers
+
+Of AgentArmor's 8 layers, the following are active in this stack:
+
+| Layer | Phase | What fires |
+|-------|-------|-----------|
+| L1 Ingestion | pre-call | Prompt injection detection |
+| L3 Context | pre-call | GoalLock — detects goal hijacking attempts |
+| L4 Planning | pre-call | Action risk scoring; deny if score ≥ 7 |
+| L5 Execution | pre-call | Per-agent rate limiting |
+| L6 Output | post-call | PII, credential, harmful content, exfiltration scans |
+
+Disabled (not relevant to this topology): L2 Storage, L7 Inter-agent, L8 Identity (identity is handled by LiteLLM virtual keys).
+
+### Violation response
+
+A blocked request returns HTTP 400 with a structured detail body — never a generic 500. Callers receive the full layer breakdown so they can distinguish a guardrail block from a model error or a network fault.
+
+### Per-agent opt-out
+
+Stored in the LiteLLM virtual key metadata at deploy time:
+
+```python
+metadata = {
+    "actor_type": "agent",
+    "guardrails": { "agentarmor": False },   # disables both pre and post hooks
+    ...
+}
+```
+
+The guardrail class reads `user_api_key_dict.metadata["guardrails"]["agentarmor"]` on each request. Agents cannot override this at request time — it is fixed at deploy time and only changeable by redeploying the agent.
+
+### Configuration
+
+`agentarmor/config.yaml` — volume-mounted, restart `agentarmor` to apply. Key tunable:
+
+```yaml
+layers:
+  planning:
+    risk_score_threshold: 7   # raise to 9 to reduce false positives during dev
+  output:
+    scan_pii: true
+    scan_credentials: true
+    scan_exfiltration: true
+```
 
 ## The four workflow node types
 
@@ -141,7 +217,9 @@ Every actor in an audit log entry is one of three types:
 When the Builder deploys an agent, it:
 
 1. Generates a service account ID: `svc-acct-{agent-name}-{version-hash}`
-2. Creates a virtual key in LiteLLM under that ID with the agent's tool allowlist as guardrails
+2. Creates a virtual key in LiteLLM under that ID with:
+   - The agent's tool allowlist (gateway-enforced)
+   - `guardrails: { agentarmor: true/false }` from the spec (read by the AgentArmor guardrail on every call)
 3. Records `owner: <human user>` in the agent registry (not for auth, for accountability)
 4. Injects the virtual key into the deployed container as `LITELLM_API_KEY`
 
@@ -274,6 +352,8 @@ flowchart TB
 | LLM call | LiteLLM s3 callback | `minio://audit-logs/llm/{date}/...` | agent (via virtual key) | 90d locked |
 | Tool / MCP call | LiteLLM s3 callback | `minio://audit-logs/tool/{date}/...` | agent | 90d locked |
 | ReMe operation | LiteLLM (ReMe routes through it) | same | agent (memory caller's identity) | 90d locked |
+| **Guardrail violation (pre-call)** | **LiteLLM → AgentArmor** | HTTP 400 returned to caller; warning in LiteLLM logs | agent | — (not persisted to MinIO; surfaced to caller) |
+| **Guardrail violation (post-call)** | **LiteLLM → AgentArmor** | HTTP 400 returned to caller; warning in LiteLLM logs | agent | — |
 | Agent generation | builder-backend | `minio://audit-logs/build/{date}/...` | human (creator) | 90d locked |
 | Agent deployment + identity issuance | builder-backend | `minio://audit-logs/deploy/{date}/...` | system | 90d locked |
 | Workflow generation | workflow-backend | `minio://audit-logs/workflow-build/{date}/...` | human (creator) | 90d locked |
