@@ -36,7 +36,12 @@ class SaveAndDeployBody(BaseModel):
 
 
 def _save_spec_files(name: str, spec_yaml: str, skill_content: str | None) -> None:
-    """Write spec YAML and role file to disk. Called only on explicit save/deploy."""
+    """Write spec YAML and role file to disk and mirror both to MinIO draft.
+
+    MinIO is the authoritative source for _do_deploy_agent (disk is the fallback).
+    Keeping them in sync ensures user edits made in the UI are what gets deployed.
+    Both MinIO writes are fail-open: a transient MinIO error won't abort the deploy.
+    """
     spec_dict = yaml.safe_load(spec_yaml)
     spec = AgentSpec.model_validate(spec_dict)
 
@@ -52,11 +57,20 @@ def _save_spec_files(name: str, spec_yaml: str, skill_content: str | None) -> No
             role_path = Path("/app") / role_rel
             role_path.parent.mkdir(parents=True, exist_ok=True)
             role_path.write_text(skill_content)
+        try:
+            minio_store.write_draft_role(name, skill_content)
+        except Exception:
+            pass  # disk copy is the fallback in _do_deploy_agent
 
-    # Write spec YAML (with role path annotations)
+    # Write spec YAML (with role path annotations) to disk
+    updated_yaml = yaml.dump(spec_dict, sort_keys=False, allow_unicode=True)
     spec_file = SPECS_PATH / "agents" / f"{name}.yaml"
     spec_file.parent.mkdir(parents=True, exist_ok=True)
-    spec_file.write_text(yaml.dump(spec_dict, sort_keys=False, allow_unicode=True))
+    spec_file.write_text(updated_yaml)
+    try:
+        minio_store.write_draft_spec(name, updated_yaml)
+    except Exception:
+        pass  # disk copy is the fallback in _do_deploy_agent
 
 SPECS_PATH  = Path(os.environ.get("SPECS_PATH", "/app/specs"))
 LITELLM_BASE_URL = os.environ.get("LITELLM_BASE_URL", "http://litellm:4000")

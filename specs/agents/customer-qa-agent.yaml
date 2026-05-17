@@ -1,0 +1,37 @@
+apiVersion: atom.platform/v1
+kind: AgentDeployment
+metadata:
+  name: customer-qa-agent
+  domain: general
+  version: 0.1.0
+  description: Answers customer questions about KYC status and transaction risk using
+    real-time lookup tools.
+  owner: user:admin@atom.io
+spec:
+  agents:
+  - name: customer-qa-agent-agent
+    role: standalone
+    agent_role_file: agent-roles/general/customer-qa-agent.role.md
+    model: gemini-3.1-pro
+    temperature: 1.0
+    reasoning_effort: medium
+    max_iterations: 6
+    tools:
+    - kyc-lookup
+    - calculate-risk
+    memory:
+      type: short_term
+      cross_conversation:
+        enabled: true
+        kind: task
+        task_key: customer-qa-agent-memory
+        identity_field: input.workspace_id
+  flow:
+    type: standalone
+  audit:
+    log_to: minio://audit-logs/agent/customer-qa-agent
+    retention_days: 90
+  deployment:
+    runtime: agentscope
+    sandbox: base
+    replicas: 1

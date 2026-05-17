@@ -12,13 +12,14 @@
 4. [Creating an Agent (UI)](#creating-an-agent-ui)
 5. [Creating an Agent (CLI)](#creating-an-agent-cli)
 6. [Creating and Testing Tools](#creating-and-testing-tools)
-7. [Sessions and Memory](#sessions-and-memory)
-8. [Invoking Agents via API](#invoking-agents-via-api)
-9. [HMAC Audit Log Verification](#hmac-audit-log-verification)
-10. [Guardrails (AgentArmor)](#guardrails-agentarmor)
-11. [Architecture Overview](#architecture-overview)
-12. [Service Ports](#service-ports)
-13. [Troubleshooting](#troubleshooting)
+7. [Domain Tool Registry](#domain-tool-registry)
+8. [Sessions and Memory](#sessions-and-memory)
+9. [Invoking Agents via API](#invoking-agents-via-api)
+10. [HMAC Audit Log Verification](#hmac-audit-log-verification)
+11. [Guardrails (AgentArmor)](#guardrails-agentarmor)
+12. [Architecture Overview](#architecture-overview)
+13. [Service Ports](#service-ports)
+14. [Troubleshooting](#troubleshooting)
 
 ---
 
@@ -103,8 +104,8 @@ Click **Create Agent** — this immediately provisions a LiteLLM virtual key and
 ### Step 2 — Tools & Skills
 
 **Associate global tools** (select from the Tool Registry):
-- `kyc-lookup` — HTTP tool calling the KYC mock service
-- `calculate-risk` — Python tool that computes risk scores
+- `kyc-lookup` — HTTP tool calling the KYC mock service (pre-registered on startup)
+- `calculate-risk` — Python tool that computes risk scores (pre-registered on startup)
 
 **Add an agent-specific skill:**
 - Name: `qa-reasoning`
@@ -352,6 +353,173 @@ Valid customer IDs in the KYC mock service:
 
 ```bash
 curl http://localhost:8095/profile/CUST-100442
+```
+
+---
+
+## Domain Tool Registry
+
+The platform ships with a pre-built domain tool library in `builder-backend/app/tools/registry.py`. These are Python callables that wrap the mock services. At code-gen time the spec's `domain` field and `tools` list are resolved against this registry, and the matching functions are embedded directly into the deployed agent container.
+
+These are distinct from tools you create via the Tool Registry UI (those are stored in the DB as HTTP/Python/MCP records). Domain tools live in code; they require no manual creation before building an agent.
+
+### Tools by domain
+
+#### `banking-kyc`
+
+| Tool | Description | Mock service |
+|------|-------------|-------------|
+| `get_customer_profile(customer_id)` | KYC profile + staleness flag (`is_stale` = age > 730d) | kyc-svc :8095 |
+| `get_kyc_documents(customer_id)` | Passports, licenses on file | kyc-svc :8095 |
+| `get_external_screening(customer_id, name, address)` | Adverse media + PEP screening | kyc-svc :8095 |
+
+```bash
+curl http://localhost:8095/profile/CUST-100442
+curl http://localhost:8095/documents/CUST-100442
+curl -X POST http://localhost:8095/screening \
+  -H "Content-Type: application/json" \
+  -d '{"customer_id":"CUST-100442","name":"Margaret Wong","address":""}'
+```
+
+#### `banking-securities-ops`
+
+| Tool | Description | Mock service |
+|------|-------------|-------------|
+| `get_customer_positions(transfer_id)` | Transfer details + current holdings for reconciliation | securities-ops :8099 |
+| `get_security_master(cusip)` | Reference data for a security | securities-ops :8099 |
+| `check_position_lots(customer_id, cusip)` | Lot-level position breakdown | securities-ops :8099 |
+
+```bash
+curl http://localhost:8099/positions/XFER-100442-001
+curl http://localhost:8099/security-master/912828ZQ6
+curl -X POST http://localhost:8099/position-lots \
+  -H "Content-Type: application/json" \
+  -d '{"customer_id":"CUST-100442","cusip":"912828ZQ6"}'
+```
+
+#### `banking-treasury`
+
+| Tool | Description | Mock service |
+|------|-------------|-------------|
+| `get_overnight_positions()` | Overnight liquidity from treasury data warehouse | treasury-dw :8090 |
+| `get_market_data()` | Current rates + FX data | market-data :8091 |
+| `compute_lcr(hqla_total, outflows_30d)` | Liquidity Coverage Ratio calculation | lcr-engine :8092 |
+| `get_trailing_metrics()` | 30/90-day trailing LCR metrics (synthetic) | — (inline) |
+| `validate_hqla_composition(positions)` | HQLA L1/L2 regulatory cap check | — (inline) |
+
+```bash
+curl http://localhost:8090/positions
+curl http://localhost:8091/rates
+curl http://localhost:8091/fx
+curl -X POST http://localhost:8092/calculate \
+  -H "Content-Type: application/json" \
+  -d '{"hqla_total":500000000,"outflows_30d":350000000}'
+```
+
+#### `banking-fraud`
+
+| Tool | Description | Mock service |
+|------|-------------|-------------|
+| `get_transaction_history(customer_id, limit)` | Recent transactions including flagged items | fraud-svc :8102 |
+| `get_customer_baseline(customer_id)` | Spending baseline + risk tier | fraud-svc :8102 |
+| `get_peer_segment_stats(customer_id)` | Peer segment comparison stats | fraud-svc :8102 |
+
+```bash
+curl "http://localhost:8102/transactions?customer_id=CUST-100442&limit=5"
+curl "http://localhost:8102/customer-baseline?customer_id=CUST-100442"
+curl "http://localhost:8102/peer-segment?customer_id=CUST-100442"
+```
+
+#### `payments`
+
+Combines KYC, fraud, and OFAC tools. Includes common Gemini-generated name aliases (`get_risk_baseline`, `check_kyc_profile`, `ofac_screen`, etc.) so agent code-gen is tolerant of minor naming variation.
+
+| Tool | Description | Mock service |
+|------|-------------|-------------|
+| `get_fraud_signals(customer_id)` | Combined: history + baseline + peer segment in one call | fraud-svc :8102 |
+| `get_kyc_profile(customer_id)` | KYC profile status | kyc-svc :8095 |
+| `screen_ofac_sanctions(customer_id, amount_usd)` | OFAC sanctions list screening | ofac-svc :8096 |
+| `get_transaction_history(customer_id)` | Transaction history | fraud-svc :8102 |
+| `get_customer_baseline(customer_id)` | Spending baseline | fraud-svc :8102 |
+| `get_peer_segment_stats(customer_id)` | Peer segment stats | fraud-svc :8102 |
+| `get_customer_profile(customer_id)` | Full KYC profile | kyc-svc :8095 |
+| `get_external_screening(customer_id)` | Adverse media screening | kyc-svc :8095 |
+
+```bash
+curl -X POST http://localhost:8096/screen \
+  -H "Content-Type: application/json" \
+  -d '{"customer_id":"CUST-100442","amount_usd":40000}'
+```
+
+#### `insurance-claims`
+
+| Tool | Description | Mock service |
+|------|-------------|-------------|
+| `extract_document_text(sample_id)` | OCR text from pre-staged claim document | ocr-svc :8094 |
+| `parse_repair_estimate(text)` | Parse repair invoice text → structured line items | — (inline) |
+| `lookup_policy(policy_number)` | Policy detail by number | fnol-svc :8093 |
+| `get_claims_history(policy_number, lookback_days)` | Prior claims (default 730d) | fnol-svc :8093 |
+| `verify_arithmetic(line_items, claimed_total)` | Invoice line-item sum vs claimed total | fnol-svc :8093 |
+| `check_coverage(policy_number, claim_type, claim_amount)` | Is this claim covered under the policy? | fnol-svc :8093 |
+| `get_red_flag_signals(policy_number, claim_amount, loss_date)` | Fraud pattern signals | fnol-svc :8093 |
+
+```bash
+curl "http://localhost:8094/ocr/extract-by-sample-id?sample_id=auto-repair-invoice"
+curl http://localhost:8093/policies/POL-882-447-AC
+curl http://localhost:8093/claims-history/POL-882-447-AC
+curl -X POST http://localhost:8093/coverage-check \
+  -H "Content-Type: application/json" \
+  -d '{"policy_number":"POL-882-447-AC","claim_type":"windshield_repair","claim_amount":485.00}'
+curl -X POST http://localhost:8093/red-flag-signals \
+  -H "Content-Type: application/json" \
+  -d '{"policy_number":"POL-882-447-AC","claim_amount":485.00,"loss_date":"2026-04-10"}'
+```
+
+### Test data reference
+
+#### Customers (KYC / fraud / payments)
+
+| Customer ID | Name | Risk | KYC Status | Notes |
+|-------------|------|------|------------|-------|
+| CUST-100442 | Margaret Wong | LOW | Fresh (2026-01-01) | Routine path — clean profile |
+| CUST-200119 | David Eisenberg | MEDIUM | Fresh (2025-08-04) | High-value path — clean profile |
+| CUST-300577 | Aaron Patel | MEDIUM | **Stale** (2023-01-10, >730d) | Low-confidence KYC path |
+
+#### Securities transfers (banking-securities-ops)
+
+| Transfer ID | Customer | Amount | Security (CUSIP) | Scenario |
+|-------------|----------|--------|------------------|----------|
+| XFER-100442-001 | CUST-100442 | ~$40K | UST 2Y (912828ZQ6) | Routine recon |
+| XFER-200119-001 | CUST-200119 | ~$1.2M | UST 10Y (912810RW0) | High-value recon |
+| XFER-300577-001 | CUST-300577 | ~$50K | UST 2Y (912828ZQ6) | Stale KYC recon |
+
+#### Insurance policies (insurance-claims)
+
+| Policy Number | Policyholder | Scenario |
+|---------------|-------------|---------|
+| POL-882-447-AC | Robert Chen | Windshield repair invoice |
+| POL-771-993-CL | Sandra Martinez | Collision damage claim |
+| POL-339-228-MD | James Okafor | Medical bill claim |
+
+#### OCR documents (insurance-claims)
+
+| Sample ID | Description |
+|-----------|-------------|
+| `auto-repair-invoice` | Pre-staged windshield repair invoice for POL-882-447-AC demo |
+
+### ATS workflow mock services
+
+| Service | Port | Used for |
+|---------|------|---------|
+| swift-gw | 8097 | Accepts MT103 transfer instructions (`POST /instructions`) |
+| task-queue | 8098 | Human-task notification queue |
+| incoming-queue | 8101 | Incoming transfer notification queue |
+
+```bash
+# Simulate submitting a transfer instruction through the SWIFT/DTC gateway
+curl -X POST http://localhost:8097/instructions \
+  -H "Content-Type: application/json" \
+  -d '{"transfer_id":"XFER-100442-001","instructions_ref":"MT103-XFER-100442-001"}'
 ```
 
 ---
@@ -654,6 +822,8 @@ docker compose logs agentarmor --tail 20
 
 ## Service Ports
 
+**Platform services**
+
 | Service | Port | Purpose |
 |---------|------|---------|
 | Frontend | 5173 | React UI |
@@ -662,11 +832,28 @@ docker compose logs agentarmor --tail 20
 | LiteLLM | 4000 | LLM gateway (Gemini only) |
 | AgentArmor | 8400 | Pre/post-call guardrail (prompt injection, PII, exfiltration) |
 | MinIO API | 9000 | Object storage |
-| MinIO UI | 9001 | MinIO web console |
+| MinIO UI | 9002 | MinIO web console |
 | Temporal UI | 8233 | Workflow engine UI |
 | Grafana | 3001 | Observability dashboards |
 | ReMe | 8002 | Long-term memory service |
 | Studio | 3000 | AgentScope Studio |
+
+**Mock services** (synthetic data — see [Domain Tool Registry](#domain-tool-registry) for test IDs)
+
+| Service | Port | Domain | Endpoints |
+|---------|------|--------|-----------|
+| kyc-svc | 8095 | banking-kyc, payments | `GET /profile/{id}`, `/documents/{id}`, `POST /screening` |
+| ofac-svc | 8096 | payments | `POST /screen` |
+| swift-gw | 8097 | ATS workflow | `POST /instructions` |
+| task-queue | 8098 | ATS workflow | Human-task notification queue |
+| securities-ops | 8099 | banking-securities-ops | `GET /positions/{id}`, `/security-master/{cusip}`, `POST /position-lots` |
+| incoming-queue | 8101 | ATS workflow | Incoming transfer notification queue |
+| fraud-svc | 8102 | banking-fraud, payments | `GET /transactions`, `/customer-baseline`, `/peer-segment` |
+| treasury-dw | 8090 | banking-treasury | `GET /positions` |
+| market-data | 8091 | banking-treasury | `GET /rates`, `/fx` |
+| lcr-engine | 8092 | banking-treasury | `POST /calculate` |
+| fnol-svc | 8093 | insurance-claims | `GET /policies/{num}`, `/claims-history/{num}`, `POST /coverage-check`, `/red-flag-signals`, `/verify-arithmetic` |
+| ocr-svc | 8094 | insurance-claims | `GET /ocr/extract-by-sample-id?sample_id=...` |
 
 ---
 

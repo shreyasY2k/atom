@@ -1,14 +1,25 @@
 """ATOM Agent Platform — Builder Backend."""
 
+from contextlib import asynccontextmanager
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from app.routes import specs, agents, registry, studio, auth, deployments, tools, sessions, files
 from app.core.observability import setup
+from app.core.seed import seed_tools
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    seed_tools()
+    yield
+
 
 app = FastAPI(
     title="ATOM Agent Platform — Agent Builder",
     version="1.0.0",
     description="Validates, generates, compiles, and deploys agents.",
+    lifespan=lifespan,
 )
 
 app.include_router(auth.router)

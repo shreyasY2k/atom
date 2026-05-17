@@ -17,6 +17,7 @@ import RocketLaunchIcon from '@mui/icons-material/RocketLaunch'
 import CheckCircleOutlineIcon from '@mui/icons-material/CheckCircleOutline'
 import LinkIcon from '@mui/icons-material/Link'
 import SecurityIcon from '@mui/icons-material/Security'
+import Editor from '@monaco-editor/react'
 import { builderApi, ToolRecord, SkillRecord } from '../../api/builder'
 import { useAuth } from '../../context/AuthContext'
 import ToolFormDialog from '../../components/ToolFormDialog'
@@ -563,7 +564,9 @@ interface StepGenerateProps {
   setBehavior: (v: string) => void
   generating: boolean
   generatedSpec: string
+  setGeneratedSpec: (v: string) => void
   generatedRole: string
+  setGeneratedRole: (v: string) => void
   generateError: string
   previewTab: number
   setPreviewTab: (v: number) => void
@@ -579,7 +582,9 @@ function StepGenerate({
   setBehavior,
   generating,
   generatedSpec,
+  setGeneratedSpec,
   generatedRole,
+  setGeneratedRole,
   generateError,
   previewTab,
   setPreviewTab,
@@ -656,19 +661,40 @@ function StepGenerate({
               <Tab label="Role Markdown" sx={{ fontSize: '0.8rem' }} />
               <Tab label="Spec YAML" sx={{ fontSize: '0.8rem' }} />
             </Tabs>
-            <Box sx={{ maxHeight: 360, overflowY: 'auto' }}>
+            <Box>
               {previewTab === 0 && (
-                <Box component="pre" sx={{ m: 0, p: 2, fontFamily: 'monospace', fontSize: '0.78rem', lineHeight: 1.6, bgcolor: 'grey.50', whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
-                  {generatedRole || '(no role file generated)'}
-                </Box>
+                <Box
+                  component="textarea"
+                  value={generatedRole}
+                  onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) => setGeneratedRole(e.target.value)}
+                  spellCheck={false}
+                  sx={{
+                    display: 'block', width: '100%', minHeight: 300,
+                    m: 0, p: 2, boxSizing: 'border-box',
+                    fontFamily: 'monospace', fontSize: '0.78rem', lineHeight: 1.6,
+                    bgcolor: 'grey.50', border: 'none', outline: 'none', resize: 'vertical',
+                  }}
+                />
               )}
               {previewTab === 1 && (
-                <Box component="pre" sx={{ m: 0, p: 2, fontFamily: 'monospace', fontSize: '0.78rem', lineHeight: 1.6, bgcolor: 'grey.50', whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
-                  {generatedSpec || '(no spec generated)'}
-                </Box>
+                <Box
+                  component="textarea"
+                  value={generatedSpec}
+                  onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) => setGeneratedSpec(e.target.value)}
+                  spellCheck={false}
+                  sx={{
+                    display: 'block', width: '100%', minHeight: 300,
+                    m: 0, p: 2, boxSizing: 'border-box',
+                    fontFamily: 'monospace', fontSize: '0.78rem', lineHeight: 1.6,
+                    bgcolor: 'grey.50', border: 'none', outline: 'none', resize: 'vertical',
+                  }}
+                />
               )}
             </Box>
           </Paper>
+          <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 0.75, ml: 0.5 }}>
+            You can edit the generated files above. Changes carry through to the Deploy step.
+          </Typography>
         </Box>
       )}
 
@@ -703,7 +729,9 @@ function injectGuardrails(specYaml: string, enabled: boolean): string {
 interface StepDeployProps {
   agentName: string
   generatedSpec: string
+  setGeneratedSpec: (v: string) => void
   generatedRole: string
+  setGeneratedRole: (v: string) => void
   guardrailEnabled: boolean
   setGuardrailEnabled: (v: boolean) => void
   deploying: boolean
@@ -716,7 +744,9 @@ interface StepDeployProps {
 function StepDeploy({
   agentName,
   generatedSpec,
+  setGeneratedSpec,
   generatedRole,
+  setGeneratedRole,
   guardrailEnabled,
   setGuardrailEnabled,
   deploying,
@@ -731,56 +761,40 @@ function StepDeploy({
         Review and deploy
       </Typography>
       <Typography variant="body2" color="text.secondary" sx={{ mb: 3 }}>
-        Review the generated spec and role file for{' '}
+        Edit the spec and role file for{' '}
         <Box component="span" fontFamily="monospace" sx={{ color: 'primary.main' }}>{agentName}</Box>
-        , then deploy or submit for approval.
+        {' '}if needed, then deploy. What you see here is exactly what gets deployed and versioned in MinIO.
       </Typography>
 
-      <Box sx={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 2, mb: 3 }}>
+      <Stack spacing={2} sx={{ mb: 3 }}>
         <Paper variant="outlined" sx={{ overflow: 'hidden' }}>
-          <Box sx={{ px: 1.5, py: 0.75, borderBottom: 1, borderColor: 'divider', bgcolor: 'background.default' }}>
+          <Box sx={{ px: 1.5, py: 0.75, borderBottom: 1, borderColor: 'divider', bgcolor: 'background.default', display: 'flex', alignItems: 'center', gap: 1 }}>
             <Typography variant="caption" fontFamily="monospace" fontWeight={600}>role.md</Typography>
+            <Typography variant="caption" color="text.secondary">— Markdown</Typography>
           </Box>
-          <Box
-            component="pre"
-            sx={{
-              m: 0, p: 2,
-              fontFamily: 'monospace',
-              fontSize: '0.75rem',
-              lineHeight: 1.6,
-              maxHeight: 400,
-              overflowY: 'auto',
-              whiteSpace: 'pre-wrap',
-              wordBreak: 'break-word',
-              bgcolor: 'grey.50',
-            }}
-          >
-            {generatedRole || '(no role file)'}
-          </Box>
+          <Editor
+            height="300px"
+            language="markdown"
+            value={generatedRole}
+            onChange={v => setGeneratedRole(v ?? '')}
+            options={{ minimap: { enabled: false }, wordWrap: 'on', fontSize: 12, scrollBeyondLastLine: false, lineNumbers: 'off' }}
+          />
         </Paper>
 
         <Paper variant="outlined" sx={{ overflow: 'hidden' }}>
-          <Box sx={{ px: 1.5, py: 0.75, borderBottom: 1, borderColor: 'divider', bgcolor: 'background.default' }}>
+          <Box sx={{ px: 1.5, py: 0.75, borderBottom: 1, borderColor: 'divider', bgcolor: 'background.default', display: 'flex', alignItems: 'center', gap: 1 }}>
             <Typography variant="caption" fontFamily="monospace" fontWeight={600}>agent-spec.yaml</Typography>
+            <Typography variant="caption" color="text.secondary">— YAML</Typography>
           </Box>
-          <Box
-            component="pre"
-            sx={{
-              m: 0, p: 2,
-              fontFamily: 'monospace',
-              fontSize: '0.75rem',
-              lineHeight: 1.6,
-              maxHeight: 400,
-              overflowY: 'auto',
-              whiteSpace: 'pre-wrap',
-              wordBreak: 'break-word',
-              bgcolor: 'grey.50',
-            }}
-          >
-            {generatedSpec || '(no spec)'}
-          </Box>
+          <Editor
+            height="300px"
+            language="yaml"
+            value={generatedSpec}
+            onChange={v => setGeneratedSpec(v ?? '')}
+            options={{ minimap: { enabled: false }, wordWrap: 'on', fontSize: 12, scrollBeyondLastLine: false, lineNumbers: 'off' }}
+          />
         </Paper>
-      </Box>
+      </Stack>
 
       {deployError && (
         <Alert severity="error" sx={{ mb: 2, fontFamily: 'monospace', fontSize: '0.75rem' }}>
@@ -1097,7 +1111,9 @@ export default function Builder() {
               setBehavior={setBehavior}
               generating={generating}
               generatedSpec={generatedSpec}
+              setGeneratedSpec={setGeneratedSpec}
               generatedRole={generatedRole}
+              setGeneratedRole={setGeneratedRole}
               generateError={generateError}
               previewTab={previewTab}
               setPreviewTab={setPreviewTab}
@@ -1109,7 +1125,9 @@ export default function Builder() {
             <StepDeploy
               agentName={agentName}
               generatedSpec={generatedSpec}
+              setGeneratedSpec={setGeneratedSpec}
               generatedRole={generatedRole}
+              setGeneratedRole={setGeneratedRole}
               guardrailEnabled={guardrailEnabled}
               setGuardrailEnabled={setGuardrailEnabled}
               deploying={deploying}

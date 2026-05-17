@@ -14,6 +14,9 @@ scrape_configs:
       - targets: ["workflow-backend:8082"]
 
   - job_name: litellm
+    authorization:
+      type: Bearer
+      credentials_file: /tmp/litellm_bearer
     static_configs:
       - targets: ["litellm:4000"]
 

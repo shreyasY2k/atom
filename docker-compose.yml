@@ -128,7 +128,7 @@ services:
     image: minio/minio:latest
     container_name: minio
     restart: unless-stopped
-    ports: ["9000:9000", "9001:9001"]
+    ports: ["9000:9000", "9002:9001"]
     environment:
       - MINIO_ROOT_USER=${MINIO_ACCESS_KEY:-minioadmin}
       - MINIO_ROOT_PASSWORD=${MINIO_SECRET_KEY:-minioadmin}
@@ -190,13 +190,20 @@ services:
     container_name: prometheus
     restart: unless-stopped
     ports: ["9090:9090"]
+    environment:
+      - LITELLM_MASTER_KEY=${LITELLM_MASTER_KEY:-sk-master-change-me}
     volumes:
       - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
       - prometheus-data:/prometheus
-    command:
-      - "--config.file=/etc/prometheus/prometheus.yml"
-      - "--storage.tsdb.path=/prometheus"
-      - "--storage.tsdb.retention.time=7d"
+    entrypoint:
+      - /bin/sh
+      - -c
+      - >-
+        echo -n "$$LITELLM_MASTER_KEY" > /tmp/litellm_bearer &&
+        exec /bin/prometheus
+        --config.file=/etc/prometheus/prometheus.yml
+        --storage.tsdb.path=/prometheus
+        --storage.tsdb.retention.time=7d
     networks: [agentnet]
 
   loki:
