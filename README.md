@@ -566,6 +566,18 @@ spec:
 
 The builder UI's Step 4 exposes this as a toggle switch. The setting is baked into the LiteLLM virtual key metadata at deploy time — the agent cannot disable its own guardrails at request time.
 
+### Optional ML detection sub-layers (D3/D4)
+
+By default, L1 runs heuristic-only detection (D1/D2). Two additional ML-based
+sub-detectors (D3 = HuggingFace transformers, D4 = torch) are available but
+not installed by default — they add ~900 MB and can over-fire on domain-specific
+language. To enable them:
+
+```bash
+docker compose build --build-arg INSTALL_ML_DEPS=true agentarmor
+docker compose up -d agentarmor
+```
+
 ### Tuning guardrail layers
 
 Edit `agentarmor/config.yaml` and restart the service — no image rebuild needed:

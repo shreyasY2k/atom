@@ -53,20 +53,19 @@ litellm_settings:
 # Per-agent opt-out: set metadata.guardrails.agentarmor=false on the virtual key.
 guardrails:
   # ── AgentArmor: pre-call input scan ──────────────────────────────────────
+  # LiteLLM resolves dotted paths relative to the config directory (/app).
+  # "guardrails.agentarmor_guardrail.AgentArmorGuardrail" maps to
+  # /app/guardrails/agentarmor_guardrail.py → class AgentArmorGuardrail.
   - guardrail_name: "agentarmor-pre"
     litellm_params:
-      guardrail: custom
-      guardrail_path: /app/guardrails/agentarmor_guardrail.py
-      guardrail_class: AgentArmorGuardrail
+      guardrail: guardrails.agentarmor_guardrail.AgentArmorGuardrail
       mode: pre_call
       default_on: true
 
   # ── AgentArmor: post-call output scan ────────────────────────────────────
   - guardrail_name: "agentarmor-post"
     litellm_params:
-      guardrail: custom
-      guardrail_path: /app/guardrails/agentarmor_guardrail.py
-      guardrail_class: AgentArmorGuardrail
+      guardrail: guardrails.agentarmor_guardrail.AgentArmorGuardrail
       mode: post_call
       default_on: true
   - guardrail_name: "treasury-tool-policy"

@@ -1,44 +1,46 @@
-# AgentArmor runtime config — mounted into the container.
-# Edit this to tune guardrail behaviour without rebuilding the image.
+# AgentArmor runtime config — mounted into the container at /app/config.yaml.
+# Edit this file and run `docker compose restart agentarmor` to apply.
+# Field names must match ArmorConfig / layer config classes in agentarmor-core.
 
-layers:
-  ingestion:
-    enabled: true
-    scan_prompt_injection: true
-    verify_sources: false
+version: "1.0"
+agent_type: "general"
+risk_level: "medium"
 
-  storage:
-    enabled: false
+# L1 — Ingestion: prompt injection detection
+ingestion:
+  enabled: true
+  scan_for_injection: true
+  injection_detection_model: heuristic
 
-  context:
-    enabled: true
-    goallock: true
-    canary_tokens: false
+# L2 — Storage: not relevant in gateway mode
+storage:
+  enabled: false
 
-  planning:
-    enabled: true
-    risk_score_threshold: 7
+# L3 — Context: goal-lock / template injection stripping
+context:
+  enabled: true
 
-  execution:
-    enabled: true
-    rate_limit_per_minute: 300
-    circuit_breaker: false
+# L4 — Planning: action risk scoring
+planning:
+  enabled: true
+  require_plan_validation: true
 
-  output:
-    enabled: true
-    scan_credentials: true
-    scan_pii: true
-    scan_harmful: true
-    scan_exfiltration: true
-    schema_validation: false
+# L5 — Execution: per-agent rate limiting
+execution:
+  enabled: true
+  sandbox_enabled: false
+  network_egress_allowed: true   # agents make HTTP calls to mock services
 
-  inter_agent:
-    enabled: false
+# L6 — Output: PII, credential, sensitivity scanning
+output:
+  enabled: true
+  pii_redaction: true
+  sensitivity_filtering: true
 
-  identity:
-    enabled: false
+# L7 — Inter-agent: not used (single-gateway topology)
+interagent:
+  enabled: false
 
-server:
-  host: "0.0.0.0"
-  port: 8400
-  log_level: "INFO"
+# L8 — Identity: disabled — identity is managed by LiteLLM virtual keys
+identity:
+  enabled: false

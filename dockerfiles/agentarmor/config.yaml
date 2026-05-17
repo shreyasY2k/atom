@@ -1,44 +1,37 @@
 # AgentArmor default config — baked into image.
 # The compose mount (./agentarmor/config.yaml) overrides this at runtime.
 
-layers:
-  ingestion:
-    enabled: true
-    scan_prompt_injection: true
-    verify_sources: false
+version: "1.0"
+agent_type: "general"
+risk_level: "medium"
 
-  storage:
-    enabled: false   # no persistent store in gateway mode
+ingestion:
+  enabled: true
+  scan_for_injection: true
+  injection_detection_model: heuristic
 
-  context:
-    enabled: true
-    goallock: true
-    canary_tokens: false
+storage:
+  enabled: false
 
-  planning:
-    enabled: true
-    risk_score_threshold: 7
+context:
+  enabled: true
 
-  execution:
-    enabled: true
-    rate_limit_per_minute: 300
-    circuit_breaker: false
+planning:
+  enabled: true
+  require_plan_validation: true
 
-  output:
-    enabled: true
-    scan_credentials: true
-    scan_pii: true
-    scan_harmful: true
-    scan_exfiltration: true
-    schema_validation: false
+execution:
+  enabled: true
+  sandbox_enabled: false
+  network_egress_allowed: true
 
-  inter_agent:
-    enabled: false   # single-gateway topology
+output:
+  enabled: true
+  pii_redaction: true
+  sensitivity_filtering: true
 
-  identity:
-    enabled: false   # identity managed by LiteLLM virtual keys
+interagent:
+  enabled: false
 
-server:
-  host: "0.0.0.0"
-  port: 8400
-  log_level: "INFO"
+identity:
+  enabled: false
