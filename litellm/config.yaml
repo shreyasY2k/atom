@@ -45,6 +45,7 @@ litellm_settings:
   # the Prisma version bundled with this LiteLLM release — spams ERROR logs every 12s.
   # Budget limits aren't used in this stack so disabling this is safe.
   disable_reset_budget: true
+  disable_spend_logs: false
 
 # Tool-permission guardrails: enforced at the gateway, regardless of agent code.
 # This is the second line of defense behind the per-agent allowlist in the spec.
@@ -137,3 +138,12 @@ general_settings:
   master_key: os.environ/LITELLM_MASTER_KEY
   database_url: os.environ/DATABASE_URL
   enforce_user_param: True
+
+  # Allow health/liveness endpoints without authentication so the LiteLLM UI
+  # and external health-check probes don't flood logs with "No api key passed" 401s.
+  # /health/liveliness is the correct unauthenticated liveness probe.
+  # /health still requires auth (returns full model status).
+  public_routes:
+    - /health
+    - /health/liveliness
+    - /health/readiness
