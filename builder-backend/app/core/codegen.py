@@ -259,7 +259,29 @@ _FASTAPI_OVERRIDE = textwrap.dedent("""
         else:
             # Structured JSON path: workflow invocation or direct API call with known fields
             structured = payload
-        result = await <flow_run_function>(structured)
+        try:
+            result = await <flow_run_function>(structured)
+        except Exception as _invoke_err:
+            # Guardrail violation (HTTP 400 from LiteLLM) — return a clean error dict
+            # instead of letting FastAPI convert it to a 500.
+            _err_str = str(_invoke_err)
+            if "guardrail_violation" in _err_str or "400" in _err_str:
+                _blocked_by = "guardrail"
+                try:
+                    import re as _re_err
+                    _m = _re_err.search(r"blocked_by.*?'([^']+)'", _err_str)
+                    if _m:
+                        _blocked_by = _m.group(1)
+                except Exception:
+                    pass
+                result = {
+                    "error": "guardrail_violation",
+                    "blocked_by": _blocked_by,
+                    "message": "Request blocked by security guardrail before reaching the LLM.",
+                    "recommendation": "BLOCK",
+                }
+            else:
+                raise
         if run_id:
             result["_run_id"] = run_id
         return result

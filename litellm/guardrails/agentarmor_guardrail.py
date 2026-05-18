@@ -39,8 +39,13 @@ _BUILDER_URL = os.environ.get("BUILDER_BACKEND_URL", "http://builder-backend:808
 _INJECTION_PATTERNS: list[re.Pattern] = [
     # Classic prompt injection: "ignore/forget/disregard previous instructions"
     re.compile(
-        r'(ignore|disregard|forget|override|bypass)\s+(all\s+)?(previous|prior|above|earlier|your|these?)\s+'
+        r'(ignore|disregard|forget|override|bypass)\s+(all\s+|everything\s+)?(previous|prior|above|earlier|your|these?)?\s*'
         r'(instructions?|prompts?|context|constraints?|rules?|guidelines?|directives?)',
+        re.IGNORECASE,
+    ),
+    # "forget everything you were told"
+    re.compile(
+        r'forget\s+everything\s+(you\s+(were\s+told|have\s+been|know|learned)|about\s+)',
         re.IGNORECASE,
     ),
     # "You are now / you will now act as ..."
@@ -78,9 +83,9 @@ _INJECTION_PATTERNS: list[re.Pattern] = [
         r'(all\s+)?(safety|guardrails?|restrictions?|limits?|filters?|censorship|ethical)\b',
         re.IGNORECASE,
     ),
-    # "no restrictions / no limits / no filters"
+    # "no restrictions / no limits / no filters / no rules"
     re.compile(
-        r'\b(no|without)\s+(restrictions?|limits?|filters?|guardrails?|safety|censorship)\b',
+        r'\b(no|without)\s+(restrictions?|limits?|filters?|guardrails?|safety|censorship|rules?|constraints?|boundaries)\b',
         re.IGNORECASE,
     ),
     # Instruction injection via newline tricks
@@ -247,10 +252,24 @@ class AgentArmorGuardrail(CustomGuardrail):
             return None
 
         messages = data.get("messages", [])
+
+        def _extract_text(content) -> str:
+            """Extract text from string or OpenAI multi-modal content blocks."""
+            if isinstance(content, str):
+                return content
+            if isinstance(content, list):
+                # [{"type": "text", "text": "..."}, ...]  — AgentScope format
+                return " ".join(
+                    item.get("text", "")
+                    for item in content
+                    if isinstance(item, dict) and item.get("type") == "text"
+                )
+            return ""
+
         text = " ".join(
-            m.get("content", "")
+            _extract_text(m.get("content", ""))
             for m in messages
-            if isinstance(m.get("content"), str)
+            if m.get("content") is not None
         ).strip()
         if not text:
             return None
