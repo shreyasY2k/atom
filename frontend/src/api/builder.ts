@@ -284,6 +284,12 @@ export const builderApi = {
       body: JSON.stringify({ behavior }),
     }).then(json),
 
+  getDraft: (name: string): Promise<{ spec_yaml: string; role_md: string; has_draft: boolean }> =>
+    fetch(`${BASE}/agents/${name}/draft`, { headers: actor() }).then(json),
+
+  startEdit: (name: string): Promise<{ status: string; base_version: number }> =>
+    fetch(`${BASE}/agents/${name}/edit`, { method: 'POST', headers: actor() }).then(json),
+
   // Tools registry
   listGlobalTools: (): Promise<{ tools: ToolRecord[] }> =>
     fetch(`${BASE}/tools`, { headers: actor() }).then(json),

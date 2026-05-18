@@ -13,6 +13,9 @@ export interface AgentRecord {
   reasoning_mode?: 'prescribed' | 'guided'
   sample_prompts?: string[]
   agent_role_name?: string   // e.g. "kyc-analyst" for the kyc-refresh spec
+  description?: string
+  skills?: { name: string; content: string }[]
+  version_count?: number
 }
 
 export interface TraceMessage {

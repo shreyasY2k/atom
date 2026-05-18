@@ -17,6 +17,7 @@ import AddIcon from '@mui/icons-material/Add'
 import DownloadIcon from '@mui/icons-material/Download'
 import SecurityIcon from '@mui/icons-material/Security'
 import GppBadIcon from '@mui/icons-material/GppBad'
+import EditIcon from '@mui/icons-material/Edit'
 import { builderApi, type DeploymentRecord, type SessionRecord, type MessageRecord } from '../../api/builder'
 import { useAuth } from '../../context/AuthContext'
 import DeploymentThread from '../../components/DeploymentThread'
@@ -105,6 +106,11 @@ function OverviewTab({ agent }: { agent: AgentRecord }) {
     onSuccess: () => navigate('/agents'),
   })
 
+  const editMut = useMutation({
+    mutationFn: () => builderApi.startEdit(agent.name),
+    onSuccess: () => navigate(`/agents/build?edit=${encodeURIComponent(agent.name)}`),
+  })
+
   const deployLabel = role === 'builder' ? 'Submit for Approval'
     : role === 'platform_admin' ? 'Redeploy (bypass)' : 'Redeploy'
 
@@ -162,12 +168,19 @@ function OverviewTab({ agent }: { agent: AgentRecord }) {
         </Alert>
       )}
 
-      <Box sx={{ display: 'flex', gap: 1 }}>
+      <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap' }}>
         <Button size="small" variant="contained"
           startIcon={deployMut.isPending ? <CircularProgress size={12} color="inherit" /> : <CheckCircleOutlineIcon />}
           onClick={() => deployMut.mutate()} disabled={deployMut.isPending}>
           {deployLabel}
         </Button>
+        <Tooltip title="Edit spec, role and behavior, then regenerate and redeploy">
+          <Button size="small" variant="outlined"
+            startIcon={editMut.isPending ? <CircularProgress size={12} /> : <EditIcon />}
+            onClick={() => editMut.mutate()} disabled={editMut.isPending}>
+            Edit Agent
+          </Button>
+        </Tooltip>
         <Button size="small" variant="outlined" color="primary"
           onClick={() => navigate(`/chat?agent=${agent.name}`)}>
           Test in Chat

@@ -848,7 +848,14 @@ def generate_agent(name: str, body: GenerateBody, request: Request):
         for t in tools
     ) or "No tools defined yet."
 
-    skills_list = "\n".join(f"- {s['name']}" for s in skills) or "None."
+    # Inject both name AND full content so the LLM can use the skill instructions
+    if skills:
+        skills_list = "\n\n".join(
+            f"### Skill: {s['name']}\n{s.get('content', '')}"
+            for s in skills
+        )
+    else:
+        skills_list = "None."
 
     prompt = f"""You are generating configuration for an AI agent on the Atom Platform.
 
@@ -996,6 +1003,33 @@ def start_edit(name: str, request: Request):
         except Exception:
             pass
     return {"status": "draft_created", "base_version": version_count}
+
+
+@router.get("/{name}/draft")
+def get_draft(name: str):
+    """Return the current draft spec_yaml and role_md for an agent.
+
+    Used by the Builder wizard when opening an existing agent for editing.
+    Returns empty strings when no draft exists (caller shows blank editors).
+    """
+    agent = registry_db.get(name)
+    if not agent:
+        raise HTTPException(404, f"Agent '{name}' not found")
+    spec_yaml = ""
+    role_md = ""
+    try:
+        spec_yaml = minio_store.read_draft_spec(name)
+    except Exception:
+        pass
+    try:
+        role_md = minio_store.read_draft_role(name) or ""
+    except Exception:
+        pass
+    return {
+        "spec_yaml": spec_yaml,
+        "role_md": role_md,
+        "has_draft": bool(spec_yaml),
+    }
 
 
 # ---------------------------------------------------------------------------

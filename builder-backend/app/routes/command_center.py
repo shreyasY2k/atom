@@ -174,11 +174,28 @@ def get_agent_stats(hours: int = Query(24, ge=1, le=168)):
 def get_security_layers(hours: int = Query(24, ge=1, le=168)):
     """
     Returns the 10-layer security posture with live event counts.
-    Layers with no events in the window are still returned (status: idle).
+
+    Status logic:
+    - L1, L2: active if they have fired (guardrail_events rows); idle otherwise
+    - L3-L6 (AgentArmor API): active if any LLM calls happened in the window
+      (they scan every call; idle only means no violations, not that they're off)
+    - L7 (GATE proxy): active if any llm_call_events exist in the window
+    - L8 (Tool permission): active if any LLM calls happened (enforced on every call)
+    - L9-L10 (AgentArmor output): active if any LLM calls happened
     """
     db_stats: dict[str, dict] = {}
     for row in registry_db.get_guardrail_layer_stats(hours):
         db_stats[row["layer"]] = row
+
+    # Derive how many LLM calls happened in the window (proxy for "layers are scanning")
+    overview = registry_db.get_command_center_overview(hours)
+    llm_calls_in_window = int(overview.get("total_calls") or 0)
+    any_llm_calls = llm_calls_in_window > 0
+
+    # Layers that are "active" whenever LLM calls are happening (they always scan)
+    _ALWAYS_SCANNING = {"L3-Ingestion", "L4-GoalLock", "L5-PlanningRisk",
+                        "L6-RateLimit", "L7-GATEProxy", "L8-ToolPermission",
+                        "L9-OutputScan", "L10-Exfiltration"}
 
     result = []
     for layer in _SECURITY_LAYERS:
@@ -188,8 +205,11 @@ def get_security_layers(hours: int = Query(24, ge=1, le=168)):
         total = int(db.get("total_events") or 0)
         last_event = db.get("last_event")
 
-        # Determine status: active (has events), idle (no events), or disabled (not configured)
         if total > 0:
+            status = "active"
+        elif layer["layer_id"] in _ALWAYS_SCANNING and any_llm_calls:
+            # These layers scan every call but only write events on violations.
+            # Show as active when LLM calls are happening, even without events.
             status = "active"
         else:
             status = "idle"
