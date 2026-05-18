@@ -52,17 +52,26 @@ litellm_settings:
 # AgentArmor guardrails run first (pre + post) for every call.
 # Per-agent opt-out: set metadata.guardrails.agentarmor=false on the virtual key.
 guardrails:
-  # ── AgentArmor: pre-call input scan ──────────────────────────────────────
-  # LiteLLM resolves dotted paths relative to the config directory (/app).
-  # "guardrails.agentarmor_guardrail.AgentArmorGuardrail" maps to
-  # /app/guardrails/agentarmor_guardrail.py → class AgentArmorGuardrail.
+  # ── L1+L3-L6: AgentArmor pre-call (local heuristics + API scan) ──────────
+  # L1 runs inline (fail-closed): prompt injection, jailbreak, destructive cmds.
+  # L3-L6 call AgentArmor API (fail-open on timeout): goal-lock, planning risk,
+  # rate limiting, semantic injection detection.
   - guardrail_name: "agentarmor-pre"
     litellm_params:
       guardrail: guardrails.agentarmor_guardrail.AgentArmorGuardrail
       mode: pre_call
       default_on: true
 
-  # ── AgentArmor: post-call output scan ────────────────────────────────────
+  # ── L2: PII Detection + Redaction ─────────────────────────────────────────
+  # Masks PII tokens (email, SSN, credit card, phone, DOB, IP) before the LLM
+  # ever sees them. Continues with redacted content (does not block).
+  - guardrail_name: "pii-redact"
+    litellm_params:
+      guardrail: guardrails.pii_guardrail.PIIGuardrail
+      mode: pre_call
+      default_on: true
+
+  # ── L9-L10: AgentArmor post-call output scan ──────────────────────────────
   - guardrail_name: "agentarmor-post"
     litellm_params:
       guardrail: guardrails.agentarmor_guardrail.AgentArmorGuardrail

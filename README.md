@@ -81,8 +81,9 @@ The frontend is available at **http://localhost:5173**
 
 ```bash
 curl http://localhost:8080/health       # builder-backend
-curl http://localhost:8080/gate/health  # GATE (port 8080)
+curl http://localhost:8080/gate/health  # GATE (port 8080, builder surface)
 curl http://localhost:8082/gate/health  # GATE (port 8082, workflow surface)
+curl http://localhost:8083/gate/health  # GATE (port 8083, LLM proxy — all agent LLM calls)
 ```
 
 ---
@@ -683,20 +684,63 @@ Hover the shield to see the full `hmac-sha256:{hex}`. Expand a row to see it in 
 
 ---
 
-## Guardrails (AgentArmor)
+## Security Command Center
 
-Every LLM call on the platform passes through [AgentArmor](https://github.com/Agastya910/agentarmor) — an 8-layer, defence-in-depth guardrail framework integrated directly into the LiteLLM gateway as a custom guardrail pair.
+Navigate to **http://localhost:5173/command-center** to see the real-time security dashboard.
 
-### What it does
+It shows:
+- **Overview cards**: total LLM calls, active agents, guardrail blocks, PII redactions, latency (avg + p95)
+- **10-layer security posture grid**: live status (active/idle), event counts, fail mode, and phase for each layer
+- **Per-agent stats table**: call counts, latency, errors, blocks, PII redactions, guard rate bar
+- **Recent events feed**: live guardrail decisions (block/redact/allow) with threat type and agent attribution
 
-| Phase | Hook | What is scanned |
-|-------|------|----------------|
-| **Pre-call** | Before the request reaches Gemini | Prompt injection, goal hijacking, planning risk score |
-| **Post-call** | After the model responds | PII leakage, credential exposure, data exfiltration patterns |
+Data refreshes every 30 seconds from `platform-db` (`llm_call_events` + `guardrail_events` tables).
 
-AgentArmor runs as its own Docker service (`agentarmor`, port 8400, built from source). LiteLLM calls it as a side-channel on every request — it never sits in the proxy path, so latency impact is bounded by a 5-second timeout.
+---
 
-### Fail-open design
+## Guardrails (10-Layer Defence-in-Depth)
+
+Every LLM call on the platform is protected by a 10-layer security posture. Layers 1–2 run inline in the LiteLLM proxy; layers 3–6 and 9–10 call [AgentArmor](https://github.com/Agastya910/agentarmor); layer 7 is the GATE LLM proxy; layer 8 is the tool permission guardrail.
+
+### LLM Call Path
+
+```
+Agent container
+  └─ LITELLM_BASE_URL=http://gate:8083
+        ↓
+  GATE:8083 (llm_proxy.go)       ← L7: mandatory audit, llm_call_events DB write
+        ↓
+  LiteLLM:4000
+    ├─ L1 Local Heuristic Scan   ← fail-CLOSED regex (injection/jailbreak/destructive)
+    ├─ L2 PII Redaction          ← masks email/SSN/CC/phone before LLM
+    ├─ L3-L6 AgentArmor pre      ← semantic injection, goal-lock, planning risk, rate limit
+    ├─ → Gemini API
+    ├─ L8 Tool permission        ← allowlist/denylist per agent domain
+    └─ L9-L10 AgentArmor post    ← output PII, credential, exfiltration scan
+```
+
+### Security Layer Reference
+
+| # | Layer | Phase | Fail Mode | What it catches |
+|---|-------|-------|-----------|----------------|
+| L1 | Local Heuristic Scan | pre-call | **CLOSED** | Prompt injection, jailbreaks, `rm -rf`, privilege escalation |
+| L2 | PII Detection + Redaction | pre-call | OPEN | Email, SSN, credit card, phone, DOB, IP → `[PII:TYPE]` |
+| L3 | AgentArmor Input Ingestion | pre-call | OPEN | Semantic injection detection |
+| L4 | Goal-Lock | pre-call | OPEN | Context hijacking — agent off its assigned goal |
+| L5 | Planning Risk Score | pre-call | OPEN | Action risk ≥ 7 → block |
+| L6 | Rate Limiting | pre-call | OPEN | Per-agent call rate enforcement |
+| L7 | GATE LLM Proxy | proxy | N/A | Mandatory audit — agents cannot bypass |
+| L8 | Tool Permission | post-call | **CLOSED** | Tool allowlist/denylist per agent domain |
+| L9 | Output PII + Credential | post-call | OPEN | PII leakage, credential exposure in LLM output |
+| L10 | Exfiltration Detection | post-call | OPEN | Data exfiltration patterns in output |
+
+AgentArmor runs as its own Docker service (`agentarmor`, port 8400, built from source). LiteLLM calls it as a side-channel — it never sits in the proxy path, so latency impact is bounded by a 5-second timeout.
+
+### L1 is fail-closed
+
+L1 runs inline with no network call. A regex match blocks immediately regardless of AgentArmor state. This is the only truly fail-closed layer for injection/jailbreak/destructive command patterns.
+
+### Fail-open design (L3-L6, L9-L10)
 
 If AgentArmor is unreachable (container restart, timeout), the request is **allowed through** and a warning is logged. This prevents a dead guardrail container from taking down the LLM gateway.
 

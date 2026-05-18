@@ -16,6 +16,7 @@ import BadgeIcon from '@mui/icons-material/Badge'
 import FactCheckIcon from '@mui/icons-material/FactCheck'
 import SettingsIcon from '@mui/icons-material/Settings'
 import ExtensionIcon from '@mui/icons-material/Extension'
+import SecurityIcon from '@mui/icons-material/Security'
 import { useAuth } from '../context/AuthContext'
 
 interface NavItem {
@@ -60,6 +61,12 @@ const ALL_GROUPS: NavGroup[] = [
     items: [
       { to: '/chat',   label: 'Chat',  icon: <ChatIcon fontSize="small" /> },
       { to: '/tasks',  label: 'Tasks', icon: <AssignmentIcon fontSize="small" /> },
+    ],
+  },
+  {
+    heading: 'SECURITY',
+    items: [
+      { to: '/command-center', label: 'Command Center', icon: <SecurityIcon fontSize="small" />, exact: true },
     ],
   },
   {

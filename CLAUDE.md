@@ -23,17 +23,18 @@ The platform must be:
 
 ## Hard invariants — never violate
 
-1. **Every LLM call goes through LiteLLM** at `http://litellm:4000`.
-2. **Every tool call goes through LiteLLM's MCP gateway or a registered Python tool.**
-3. **Gemini-only stack** (`gemini-3.1-pro` for reasoning, `gemini-3-flash` for light, `gemini-embedding-2` for ReMe). No Anthropic, no OpenAI.
-4. **Temperature is 1.0 for Gemini 3.** Determinism via pinned models + structured output + reasoning_effort.
-5. **Every agent has a non-human service-account identity** issued at deploy time. The identity is a LiteLLM virtual key. Every audit log entry records `actor_type` (`agent`|`human`|`system`) and `actor_id`. The human user who created the agent is recorded as `owner` in metadata, but the agent's identity in audit is its own service account.
-6. **Every agent and every workflow is built from a spec.** `agent-spec.yaml` for agents; `workflow-spec.yaml` for workflows. Specs are version-controlled and reviewable. Visual UIs are UX over specs.
-7. **Workflow has exactly four node types**: `agent`, `http` (or `mcp`), `decision` (rule-based, no LLM), `human_task`. No loops, parallel forks, or sub-workflows in V1.
-8. **Audit logs go to MinIO with object lock**, 90-day compliance retention.
-9. **Humans retain final accept/override.** Workflows must have a `human_task` node before any state-changing external call (or immediately after if the call is reversible).
-10. **Synthetic data only.** All external system calls hit mock services.
-11. **Build from source** for AgentScope, AgentScope Runtime, AgentScope Studio, ReMe. Temporal can use the official image (CNCF, not vendor-branded).
+1. **Every LLM call goes through GATE:8083 first**, then to LiteLLM at `http://litellm:4000`. Agents use `LITELLM_BASE_URL=http://gate:8083`. GATE:8083 is the mandatory audit chokepoint for all LLM traffic.
+2. **Every LLM call goes through LiteLLM** at `http://litellm:4000` (via GATE:8083).
+3. **Every tool call goes through LiteLLM's MCP gateway or a registered Python tool.**
+4. **Gemini-only stack** (`gemini-3.1-pro` for reasoning, `gemini-3-flash` for light, `gemini-embedding-2` for ReMe). No Anthropic, no OpenAI.
+5. **Temperature is 1.0 for Gemini 3.** Determinism via pinned models + structured output + reasoning_effort.
+6. **Every agent has a non-human service-account identity** issued at deploy time. The identity is a LiteLLM virtual key. Every audit log entry records `actor_type` (`agent`|`human`|`system`) and `actor_id`. The human user who created the agent is recorded as `owner` in metadata, but the agent's identity in audit is its own service account.
+7. **Every agent and every workflow is built from a spec.** `agent-spec.yaml` for agents; `workflow-spec.yaml` for workflows. Specs are version-controlled and reviewable. Visual UIs are UX over specs.
+8. **Workflow has exactly four node types**: `agent`, `http` (or `mcp`), `decision` (rule-based, no LLM), `human_task`. No loops, parallel forks, or sub-workflows in V1.
+9. **Audit logs go to MinIO with object lock**, 90-day compliance retention.
+10. **Humans retain final accept/override.** Workflows must have a `human_task` node before any state-changing external call (or immediately after if the call is reversible).
+11. **Synthetic data only.** All external system calls hit mock services.
+12. **Build from source** for AgentScope, AgentScope Runtime, AgentScope Studio, ReMe. Temporal can use the official image (CNCF, not vendor-branded).
 
 ## Tech stack (locked)
 

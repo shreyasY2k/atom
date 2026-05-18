@@ -17,8 +17,11 @@ spec:
     reasoning_effort: medium
     max_iterations: 6
     tools:
-    - kyc-lookup
-    - calculate-risk
+    - get_customer_profile
+    - get_kyc_profile
+    - screen_ofac_sanctions
+    - get_transaction_history
+    - calculate_risk
     memory:
       type: short_term
       cross_conversation:

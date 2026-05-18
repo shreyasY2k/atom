@@ -48,6 +48,8 @@ services:
       - OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4318
       - AGENTARMOR_URL=http://agentarmor:8400
       - AGENTARMOR_TIMEOUT_SECS=5
+      # Builder-backend internal URL for guardrail event writes (fire-and-forget via httpx)
+      - BUILDER_BACKEND_URL=http://builder-backend:8080
     volumes:
       - ./litellm/config.yaml:/app/config.yaml:ro
       - ./litellm/guardrails:/app/guardrails:ro
@@ -378,10 +380,12 @@ services:
     build: { context: ./gate }
     container_name: gate
     restart: unless-stopped
-    ports: ["8080:8080", "8082:8082"]
+    # :8080 builder, :8082 workflow, :8083 LLM proxy (agents → LiteLLM)
+    ports: ["8080:8080", "8082:8082", "8083:8083"]
     environment:
       - BUILDER_BACKEND_URL=http://builder-backend:8080
       - WORKFLOW_BACKEND_URL=http://workflow-backend:8082
+      - LITELLM_URL=http://litellm:4000
       - MINIO_ENDPOINT=minio:9000
       - MINIO_ACCESS_KEY=${MINIO_ACCESS_KEY:-minioadmin}
       - MINIO_SECRET_KEY=${MINIO_SECRET_KEY:-minioadmin}
@@ -402,7 +406,9 @@ services:
     restart: unless-stopped
     # No host port — external traffic enters via gate only.
     environment:
-      - LITELLM_BASE_URL=http://litellm:4000
+      # Route ALL LLM calls (builder-backend + deployed agents) through GATE:8083.
+      # Agents inherit this URL at deploy time from agents.py LITELLM_BASE_URL.
+      - LITELLM_BASE_URL=http://gate:8083
       - LITELLM_MASTER_KEY=${LITELLM_MASTER_KEY:-sk-master-change-me}
       - MINIO_ENDPOINT=minio:9000
       - MINIO_ACCESS_KEY=${MINIO_ACCESS_KEY:-minioadmin}
@@ -451,7 +457,7 @@ services:
     environment:
       - TEMPORAL_HOST=temporal:7233
       - TEMPORAL_NAMESPACE=default
-      - LITELLM_BASE_URL=http://litellm:4000
+      - LITELLM_BASE_URL=http://gate:8083
       - LITELLM_MASTER_KEY=${LITELLM_MASTER_KEY:-sk-master-change-me}
       - MINIO_ENDPOINT=minio:9000
       - MINIO_ACCESS_KEY=${MINIO_ACCESS_KEY:-minioadmin}

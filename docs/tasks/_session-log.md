@@ -770,3 +770,70 @@ Task 06: CLI polish (`atom agent scaffold`, `atom workflow init`)
 - [x] All three tool types (HTTP/Python/MCP) + 4 auth mechanisms functional
 - [x] Frontend: Sessions tab + API Docs tab on agent detail page
 - [ ] End-to-end session test with a deployed agent pending
+
+## Session 09 — Guardrails Hardening, GATE LLM Proxy & Command Center
+**Date**: 2026-05-18
+**Status**: COMPLETE ✅
+
+### What was done
+
+**AgentArmor — L1 heuristic detection (fail-closed)**
+- Added inline regex-based L1 detection to `agentarmor_guardrail.py` that runs BEFORE any AgentArmor API call
+- Catches: prompt injection ("ignore all previous instructions", "forget prior context"), jailbreaks (DAN, unrestricted mode), destructive commands (`rm -rf`, `DROP TABLE`, disk wipe), privilege escalation ("bypass security", "admin mode")
+- L1 is fail-CLOSED: a pattern match blocks the request immediately, no network call needed
+- All guardrail violations written to `guardrail_events` table in platform-db for the Command Center
+
+**PII Detection + Redaction (L2)**
+- New `litellm/guardrails/pii_guardrail.py` registered as pre-call guardrail in LiteLLM
+- Detects and masks: EMAIL, SSN, CREDIT_CARD, PHONE, DOB, IP_ADDRESS, PASSPORT
+- Replaces with `[PII:TYPE]` tokens — LLM never sees raw sensitive data
+- Redaction events written to `guardrail_events` table asynchronously
+- Registered as `pii-redact` guardrail in `litellm/config.yaml`
+
+**GATE LLM Proxy (:8083)**
+- New port 8083 on GATE — all agents now route LLM calls through GATE before reaching LiteLLM
+- New `gate/llm_proxy.go`: streaming-safe reverse proxy with audit wrapping
+  - Reads request body to extract `user` (service_account_id) and model name
+  - Writes pre/post audit events to MinIO (HMAC-signed like other gate events)
+  - Inserts `llm_call_events` row to platform-db (start + update with latency/status)
+  - `statusCapturingWriter` captures status code without buffering the response body
+- New `gate/main.go` goroutine starts :8083 LLM gate
+- `gate/config.go` gains `LiteLLMURL` field
+- `gate/db.go` gains `CreateSecurityTables`, `InsertLLMCall`, `UpdateLLMCall`
+- `docker-compose.yml` changes:
+  - Gate exposes port 8083
+  - `LITELLM_URL=http://litellm:4000` added to gate env
+  - `LITELLM_BASE_URL=http://gate:8083` for builder-backend and workflow-backend (cascades to all deployed agents)
+  - `PLATFORM_DB_URL=postgresql://atom:atom@platform-db:5432/atom` for LiteLLM container (guardrail event writes)
+
+**Command Center API**
+- New `/command-center/*` router in builder-backend
+- Endpoints: `/overview`, `/agents`, `/layers`, `/events`
+- Aggregates from `llm_call_events` (GATE writes) + `guardrail_events` (guardrail code writes)
+- `registry_db.py` gains `guardrail_events` + `llm_call_events` tables with query helpers
+
+**Security Command Center UI**
+- New page `/command-center` in React frontend (Google Cloud / CloudWatch style)
+- Overview metric cards: total calls, active agents, blocks, PII events, avg/p95 latency
+- 10-layer security posture grid: each layer shows status (active/idle), event counts, fail-mode, phase
+- Per-agent stats table: call count, latency, errors, guardrail blocks, PII redactions, guard rate bar
+- Recent guardrail events feed (last 30 events, live verdict/threat/PII chips)
+- Auto-refreshes every 30s
+- Added "SECURITY > Command Center" nav item to Sidebar
+
+**CLAUDE.md**
+- Renumbered hard invariants 1→11
+- New invariant #1: all LLM calls must go through GATE:8083 before LiteLLM
+
+### DoD checklist
+- [x] L1 heuristic scan: `agentarmor_guardrail.py` has fail-closed regex detection
+- [x] PII guardrail: `pii_guardrail.py` created, registered in `litellm/config.yaml`
+- [x] GATE:8083: `gate/llm_proxy.go` + `gate/main.go` updated
+- [x] GATE Go code builds cleanly (`go build ./...`)
+- [x] All Python files parse cleanly (syntax check)
+- [x] `llm_call_events` and `guardrail_events` tables added to platform-db
+- [x] Command Center API: 4 endpoints at `/command-center/*`
+- [x] Command Center frontend: `CommandCenter.tsx` page created
+- [x] Sidebar: "SECURITY > Command Center" nav item added
+- [x] `LITELLM_BASE_URL=http://gate:8083` in docker-compose for builder/workflow backends
+- [ ] Live end-to-end test with deployed agent (requires `docker compose up`)

@@ -100,10 +100,18 @@ func main() {
 		db = nil
 	}
 
+	// Create security tables in platform-db (idempotent).
+	if db != nil {
+		if err := db.CreateSecurityTables(); err != nil {
+			logger.Warn("could not create security tables in platform-db", "err", err)
+		}
+	}
+
 	builderGate := LoggingMiddleware(logger, newBuilderGate(cfg, auditor, db, logger))
 	workflowGate := LoggingMiddleware(logger, newWorkflowGate(cfg, auditor))
+	llmGate := LoggingMiddleware(logger, newLLMGate(cfg, auditor, db, logger))
 
-	errCh := make(chan error, 2)
+	errCh := make(chan error, 3)
 
 	go func() {
 		logger.Info("gate/builder listening", "addr", ":8080", "backend", cfg.BuilderBackendURL)
@@ -113,6 +121,11 @@ func main() {
 	go func() {
 		logger.Info("gate/workflow listening", "addr", ":8082", "backend", cfg.WorkflowBackendURL)
 		errCh <- http.ListenAndServe(":8082", workflowGate)
+	}()
+
+	go func() {
+		logger.Info("gate/llm listening", "addr", ":8083", "backend", cfg.LiteLLMURL)
+		errCh <- http.ListenAndServe(":8083", llmGate)
 	}()
 
 	logger.Error("gate exited", "err", <-errCh)

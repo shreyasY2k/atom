@@ -304,6 +304,24 @@ def get_fraud_signals(customer_id: str) -> dict:
 
 
 # ---------------------------------------------------------------------------
+# General-purpose tools (not domain-specific)
+# ---------------------------------------------------------------------------
+
+def calculate_risk(amount: float, country: str = "US") -> dict:
+    """Calculate transaction risk score from amount and country code.
+
+    Args:
+        amount: Transaction amount in USD.
+        country: ISO-3166-1 alpha-2 country code (default US).
+    """
+    high_risk = ['IR', 'KP', 'SY', 'CU', 'RU', 'BY']
+    base = min(1.0, float(amount) / 50000)
+    risk = min(1.0, base * 2.0 if country in high_risk else base)
+    band = 'HIGH' if risk > 0.7 else 'MEDIUM' if risk > 0.3 else 'LOW'
+    return {'risk_score': round(risk, 3), 'band': band, 'amount': amount, 'country': country}
+
+
+# ---------------------------------------------------------------------------
 # Tool name aliases (must be defined BEFORE DOMAIN_TOOLS)
 # ---------------------------------------------------------------------------
 
@@ -342,6 +360,16 @@ _PAYMENTS_ALIASES = [
 # ---------------------------------------------------------------------------
 
 DOMAIN_TOOLS: dict[str, list] = {
+    "general": [
+        calculate_risk,
+        get_kyc_profile,
+        screen_ofac_sanctions,
+        get_transaction_history,
+        get_fraud_signals,
+        get_customer_profile,
+        get_kyc_documents,
+        get_external_screening,
+    ],
     "banking-kyc": [
         get_customer_profile,
         get_kyc_documents,
@@ -404,3 +432,30 @@ def resolve_tools(domain: str, names: list[str]) -> list:
             print(f"[tools.registry] WARNING: tool '{n}' not found in domain '{domain}'. "
                   f"Available: {sorted(available)}", file=sys.stderr)
     return result
+
+
+# Flat name → callable lookup across ALL domains.
+# Preferred over resolve_tools() for generated agents — no domain guessing needed.
+_GLOBAL_REGISTRY: dict[str, object] = {
+    fn.__name__: fn
+    for fns in DOMAIN_TOOLS.values()
+    for fn in fns
+}
+
+
+def get_tool_by_name(name: str):
+    """Return the callable tool function by name, searching all domains.
+
+    Returns None and prints a warning if the name is not registered.
+    Use this in generated agents instead of resolve_tools() — no domain
+    inference required.
+    """
+    import sys
+    fn = _GLOBAL_REGISTRY.get(name)
+    if fn is None:
+        print(
+            f"[tools.registry] WARNING: tool '{name}' not found. "
+            f"Available: {sorted(_GLOBAL_REGISTRY)}",
+            file=sys.stderr,
+        )
+    return fn

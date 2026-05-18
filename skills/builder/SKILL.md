@@ -17,7 +17,7 @@ You are compiling a YAML spec into a single Python file. The deployed agent will
 
 ## Hard rules — never violate
 
-1. **Use AgentScope's `OpenAIChatModel`** with `client_args` pointing at LiteLLM (`http://litellm:4000/v1`). Never `import google.generativeai`. Never set Gemini keys in code.
+1. **Use AgentScope's `OpenAIChatModel`** with `client_args` pointing at `LITELLM_BASE_URL` from env (resolves to `http://gate:8083/v1` — GATE LLM proxy — never hardcode). Never `import google.generativeai`. Never set Gemini keys in code.
 2. **Temperature is 1.0** for every Gemini 3 model. Pass it explicitly.
 3. **`reasoning_effort` is set per spec** ("low", "medium", or "high"). LiteLLM maps this to Gemini's `thinking_level`.
 4. **Import every tool from `tools.registry`.** Never define new tool functions in the generated file.
@@ -71,7 +71,7 @@ from memory.reme_client import ReMeClient
 # Identity & gateway — service-account virtual key is in env
 # ============================================================
 
-LITELLM_BASE_URL = os.environ.get("LITELLM_BASE_URL", "http://litellm:4000")
+LITELLM_BASE_URL = os.environ.get("LITELLM_BASE_URL", "http://gate:8083")  # GATE LLM proxy
 LITELLM_API_KEY = os.environ.get("LITELLM_API_KEY")  # service-account virtual key
 SERVICE_ACCOUNT_ID = os.environ.get("SERVICE_ACCOUNT_ID")  # for logging only
 
@@ -137,7 +137,7 @@ AGENT_INPUT_SCHEMA = <<agent.input_schema or {}>>
 # ── TOOL-USING PATH: if agent.tools is non-empty ───────────────────────────────
 # << Else: >>
 
-from tools.registry import resolve_tools
+from tools.registry import get_tool_by_name  # REQUIRED — no domain guessing needed
 
 import json as _json
 from agentscope.tool._toolkit import ToolResponse
@@ -149,17 +149,6 @@ def _as_tool_response(fn):
         result = fn(*args, **kwargs)
         return ToolResponse(content=[{"type": "text", "text": _json.dumps(result, default=str)}])
     return wrapper
-
-# Domain tools
-<<agent_name>>_domain_tools = resolve_tools(
-    domain="<<spec.metadata.domain>>",
-    names=<<agent.tools>>,
-)
-
-# agentscope_skills (if declared) — import each and add to toolkit
-# << If agent.agentscope_skills contains "web_search": >>
-# from agentscope_skills import web_search as _web_search_fn
-# << end if >>
 
 # System prompt: prescribed vs guided
 # << If agent.reasoning_mode == "prescribed": >>
@@ -175,9 +164,12 @@ def _as_tool_response(fn):
 # Input schema for free-text extraction
 AGENT_INPUT_SCHEMA = <<agent.input_schema or {}>>
 
+# Load tools by name — use EXACTLY the names from agent.tools in the spec
 toolkit = Toolkit()
-for fn in <<agent_name>>_domain_tools:
-    toolkit.register_tool_function(_as_tool_response(fn))
+for _tool_name in <<agent.tools>>:
+    _fn = get_tool_by_name(_tool_name)
+    if _fn:
+        toolkit.register_tool_function(_as_tool_response(_fn))
 # << For each skill in agent.agentscope_skills: >>
 # toolkit.register_tool_function(_as_tool_response(_web_search_fn))
 # << end for >>

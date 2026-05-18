@@ -407,6 +407,259 @@ _init()
 
 
 # ---------------------------------------------------------------------------
+# Security / Command Center tables
+# ---------------------------------------------------------------------------
+
+def _init_security():
+    with _cursor() as cur:
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS llm_call_events (
+                id                  SERIAL PRIMARY KEY,
+                gate_run_id         TEXT NOT NULL,
+                service_account_id  TEXT,
+                model               TEXT,
+                path                TEXT,
+                status_code         INTEGER,
+                latency_ms          BIGINT,
+                created_at          TIMESTAMPTZ DEFAULT NOW()
+            )
+        """)
+        cur.execute("""
+            CREATE INDEX IF NOT EXISTS llm_call_events_svc_idx
+            ON llm_call_events (service_account_id, created_at)
+        """)
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS guardrail_events (
+                id                  SERIAL PRIMARY KEY,
+                gate_run_id         TEXT,
+                service_account_id  TEXT,
+                agent_name          TEXT,
+                layer               TEXT NOT NULL,
+                phase               TEXT NOT NULL,
+                verdict             TEXT NOT NULL,
+                threat_type         TEXT,
+                threat_level        TEXT,
+                pii_types           TEXT,
+                created_at          TIMESTAMPTZ DEFAULT NOW()
+            )
+        """)
+        cur.execute("""
+            CREATE INDEX IF NOT EXISTS guardrail_events_svc_idx
+            ON guardrail_events (service_account_id, created_at)
+        """)
+
+
+_init_security()
+
+
+def get_command_center_overview(hours: int = 24) -> dict:
+    """Aggregate platform-wide stats for the command center overview panel."""
+    with _cursor() as cur:
+        cur.execute("""
+            SELECT
+                COUNT(*) AS total_calls,
+                COUNT(*) FILTER (WHERE status_code >= 400) AS failed_calls,
+                ROUND(AVG(latency_ms)) AS avg_latency_ms,
+                ROUND(PERCENTILE_CONT(0.95) WITHIN GROUP (ORDER BY latency_ms)) AS p95_latency_ms
+            FROM llm_call_events
+            WHERE created_at >= NOW() - INTERVAL '%s hours'
+        """, (hours,))
+        row = cur.fetchone()
+        overview = dict(row) if row else {}
+
+        cur.execute("""
+            SELECT COUNT(*) AS total_blocks
+            FROM guardrail_events
+            WHERE verdict = 'deny'
+              AND created_at >= NOW() - INTERVAL '%s hours'
+        """, (hours,))
+        block_row = cur.fetchone()
+        overview['total_blocks'] = (block_row or {}).get('total_blocks', 0)
+
+        cur.execute("""
+            SELECT COUNT(*) AS pii_events
+            FROM guardrail_events
+            WHERE layer = 'L2-PII'
+              AND created_at >= NOW() - INTERVAL '%s hours'
+        """, (hours,))
+        pii_row = cur.fetchone()
+        overview['pii_events'] = (pii_row or {}).get('pii_events', 0)
+
+        cur.execute("SELECT COUNT(*) AS active_agents FROM agents WHERE status='deployed'")
+        agents_row = cur.fetchone()
+        overview['active_agents'] = (agents_row or {}).get('active_agents', 0)
+
+    return {k: (int(v) if v is not None else 0) for k, v in overview.items()}
+
+
+def get_per_agent_stats(hours: int = 24) -> list[dict]:
+    """Per-agent LLM call stats joined with the agents registry."""
+    with _cursor() as cur:
+        cur.execute("""
+            SELECT
+                a.name AS agent_name,
+                a.status,
+                a.service_account_id,
+                COUNT(l.id) AS call_count,
+                COALESCE(ROUND(AVG(l.latency_ms)), 0) AS avg_latency_ms,
+                COALESCE(ROUND(PERCENTILE_CONT(0.95) WITHIN GROUP (ORDER BY l.latency_ms)), 0) AS p95_latency_ms,
+                COUNT(l.id) FILTER (WHERE l.status_code >= 400) AS error_count
+            FROM agents a
+            LEFT JOIN llm_call_events l
+                ON l.service_account_id = a.service_account_id
+                AND l.created_at >= NOW() - INTERVAL '%s hours'
+            GROUP BY a.name, a.status, a.service_account_id
+            ORDER BY COUNT(l.id) DESC
+        """, (hours,))
+        rows = [dict(r) for r in cur.fetchall()]
+
+        # Attach guardrail stats per agent
+        for row in rows:
+            cur.execute("""
+                SELECT
+                    COUNT(*) FILTER (WHERE verdict = 'deny') AS blocks,
+                    COUNT(*) FILTER (WHERE verdict = 'redact') AS redactions,
+                    COUNT(*) AS total_events
+                FROM guardrail_events
+                WHERE service_account_id = %s
+                  AND created_at >= NOW() - INTERVAL '%s hours'
+            """, (row['service_account_id'], hours))
+            g = cur.fetchone()
+            row['guardrail_blocks'] = int((g or {}).get('blocks', 0) or 0)
+            row['pii_redactions'] = int((g or {}).get('redactions', 0) or 0)
+            row['guardrail_events'] = int((g or {}).get('total_events', 0) or 0)
+
+        return rows
+
+
+def get_guardrail_layer_stats(hours: int = 24) -> list[dict]:
+    """Per-layer guardrail event counts for the 10-layer security grid."""
+    with _cursor() as cur:
+        cur.execute("""
+            SELECT
+                layer,
+                COUNT(*) AS total_events,
+                COUNT(*) FILTER (WHERE verdict = 'deny') AS blocks,
+                COUNT(*) FILTER (WHERE verdict = 'redact') AS redactions,
+                MAX(created_at) AS last_event
+            FROM guardrail_events
+            WHERE created_at >= NOW() - INTERVAL '%s hours'
+            GROUP BY layer
+            ORDER BY layer
+        """, (hours,))
+        return [dict(r) for r in cur.fetchall()]
+
+
+def get_timeseries(hours: int = 24) -> dict:
+    """Hourly bucketed call volume, error counts, and latency percentiles."""
+    with _cursor() as cur:
+        cur.execute("""
+            WITH buckets AS (
+                SELECT generate_series(
+                    DATE_TRUNC('hour', NOW() - INTERVAL '%s hours'),
+                    DATE_TRUNC('hour', NOW()),
+                    INTERVAL '1 hour'
+                ) AS bucket
+            )
+            SELECT
+                TO_CHAR(b.bucket, 'HH24:MI') AS hour,
+                b.bucket AS bucket_ts,
+                COUNT(l.id) AS calls,
+                COUNT(l.id) FILTER (WHERE l.status_code >= 400) AS errors,
+                COALESCE(ROUND(AVG(l.latency_ms)), 0) AS avg_latency,
+                COALESCE(ROUND(PERCENTILE_CONT(0.50) WITHIN GROUP (ORDER BY l.latency_ms)), 0) AS p50,
+                COALESCE(ROUND(PERCENTILE_CONT(0.95) WITHIN GROUP (ORDER BY l.latency_ms)), 0) AS p95,
+                COALESCE(ROUND(PERCENTILE_CONT(0.99) WITHIN GROUP (ORDER BY l.latency_ms)), 0) AS p99
+            FROM buckets b
+            LEFT JOIN llm_call_events l
+                ON DATE_TRUNC('hour', l.created_at) = b.bucket
+            GROUP BY b.bucket
+            ORDER BY b.bucket
+        """, (hours,))
+
+        calls_series, latency_series = [], []
+        for row in cur.fetchall():
+            d = dict(row)
+            bucket_ts = d.get('bucket_ts')
+            label = d['hour']
+            calls_series.append({
+                'time': label,
+                'calls': int(d.get('calls') or 0),
+                'errors': int(d.get('errors') or 0),
+            })
+            latency_series.append({
+                'time': label,
+                'p50':  int(d.get('p50') or 0),
+                'p95':  int(d.get('p95') or 0),
+                'p99':  int(d.get('p99') or 0),
+            })
+
+        cur.execute("""
+            WITH buckets AS (
+                SELECT generate_series(
+                    DATE_TRUNC('hour', NOW() - INTERVAL '%s hours'),
+                    DATE_TRUNC('hour', NOW()),
+                    INTERVAL '1 hour'
+                ) AS bucket
+            )
+            SELECT
+                TO_CHAR(b.bucket, 'HH24:MI') AS hour,
+                COUNT(g.id) FILTER (WHERE g.verdict = 'deny') AS blocks,
+                COUNT(g.id) FILTER (WHERE g.verdict = 'redact') AS redactions
+            FROM buckets b
+            LEFT JOIN guardrail_events g
+                ON DATE_TRUNC('hour', g.created_at) = b.bucket
+            GROUP BY b.bucket
+            ORDER BY b.bucket
+        """, (hours,))
+
+        guardrail_series = [
+            {'time': row['hour'], 'blocks': int(row.get('blocks') or 0), 'redactions': int(row.get('redactions') or 0)}
+            for row in (dict(r) for r in cur.fetchall())
+        ]
+
+        # Layer distribution (all time)
+        cur.execute("""
+            SELECT layer, COUNT(*) AS n
+            FROM guardrail_events
+            WHERE verdict IN ('deny','redact')
+              AND created_at >= NOW() - INTERVAL '%s hours'
+            GROUP BY layer
+            ORDER BY COUNT(*) DESC
+        """, (hours,))
+        layer_dist = [{'layer': row['layer'], 'events': int(row['n'])} for row in (dict(r) for r in cur.fetchall())]
+
+    return {
+        'calls': calls_series,
+        'latency': latency_series,
+        'guardrails': guardrail_series,
+        'layer_dist': layer_dist,
+    }
+
+
+def get_recent_guardrail_events(limit: int = 50) -> list[dict]:
+    """Most recent guardrail events across all agents."""
+    with _cursor() as cur:
+        cur.execute("""
+            SELECT
+                g.id, g.layer, g.phase, g.verdict, g.threat_type,
+                g.threat_level, g.pii_types, g.created_at,
+                a.name AS agent_name
+            FROM guardrail_events g
+            LEFT JOIN agents a ON a.service_account_id = g.service_account_id
+            ORDER BY g.created_at DESC
+            LIMIT %s
+        """, (limit,))
+        rows = []
+        for r in cur.fetchall():
+            d = dict(r)
+            if d.get('created_at'):
+                d['created_at'] = d['created_at'].isoformat()
+            rows.append(d)
+        return rows
+
+
+# ---------------------------------------------------------------------------
 # Session tables
 # ---------------------------------------------------------------------------
 

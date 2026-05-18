@@ -30,7 +30,7 @@ _REQUIRED_PATTERNS = [
     (r"from agentscope", "must import from agentscope"),
     (r"LITELLM_BASE_URL", "must read LITELLM_BASE_URL from env"),
     (r"SERVICE_ACCOUNT_ID", "must read SERVICE_ACCOUNT_ID from env"),
-    (r"from tools\.registry import resolve_tools", "must import resolve_tools"),
+    (r"from tools\.registry import (resolve_tools|get_tool_by_name)", "must import get_tool_by_name (or resolve_tools) from tools.registry"),
     (r"temperature=1\.0", "must set temperature=1.0"),
     (r'"actor_type"', "must include actor_type in metadata"),
     (r'"actor_id"', "must include actor_id in metadata"),
@@ -91,16 +91,21 @@ _FASTAPI_OVERRIDE = textwrap.dedent("""
     Place this BEFORE the agent setup block (after the identity asserts).
 
     For tools: use `from agentscope.tool import Toolkit`, create `toolkit = Toolkit()`,
-    then call `toolkit.register_tool_function(fn)` for each callable from resolve_tools().
+    then call `toolkit.register_tool_function(fn)` for each callable.
 
     ## REQUIRED: wrap tool functions so they return ToolResponse objects.
 
     AgentScope's Toolkit requires tool functions to return ToolResponse, not plain dicts.
-    Wrap each tool before registering it:
+    Wrap each tool before registering it.
+
+    Use `get_tool_by_name` (preferred) — it searches all domains by function name,
+    no domain guessing required. Use the EXACT function names from the spec's tools list.
 
     ```python
     import json as _json
+    from agentscope.tool import Toolkit
     from agentscope.tool._toolkit import ToolResponse
+    from tools.registry import get_tool_by_name
 
     def _as_tool_response(fn):
         from functools import wraps
@@ -111,9 +116,14 @@ _FASTAPI_OVERRIDE = textwrap.dedent("""
         return wrapper
 
     toolkit = Toolkit()
-    for fn in resolve_tools("banking-kyc", ["get_customer_profile", "get_kyc_documents", "get_external_screening"]):
-        toolkit.register_tool_function(_as_tool_response(fn))
+    for _tool_name in ["get_customer_profile", "get_kyc_documents"]:
+        _fn = get_tool_by_name(_tool_name)
+        if _fn:
+            toolkit.register_tool_function(_as_tool_response(_fn))
     ```
+
+    NEVER use resolve_tools(domain, names) — it requires domain guessing and fails silently.
+    ALWAYS use get_tool_by_name(name) for each tool name listed in the spec's tools array.
 
     ## REQUIRED: include "user" in generate_kwargs to satisfy LiteLLM enforce_user_param.
 
