@@ -889,7 +889,7 @@ _SPEC_GEN_SYSTEM = textwrap.dedent("""
        If the schema has no customer identifier, set cross_conversation.enabled to false.
 
     Rules:
-    - temperature MUST be 1.0
+    - temperature must be a float in range 0.0–2.0 (default 1.0 for Gemini 3)
     - Only use tools that exist for the chosen domain — never guess tool names
     - If no tools are needed, tools: [] is correct and complete
     - Output ONE ```yaml``` block. Nothing else.

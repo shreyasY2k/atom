@@ -63,7 +63,7 @@ from agentscope.memory import InMemoryMemory
 from agentscope.pipeline import MsgHub
 from agentscope_runtime.engine.agent_app import AgentApp
 
-from tools.registry import resolve_tools
+from tools.registry import get_tool_by_name
 from memory.reme_client import ReMeClient
 
 
