@@ -269,7 +269,7 @@ _FASTAPI_OVERRIDE = textwrap.dedent("""
                 _blocked_by = "guardrail"
                 try:
                     import re as _re_err
-                    _m = _re_err.search(r"blocked_by.*?'([^']+)'", _err_str)
+                    _m = _re_err.search(r"'blocked_by'\\s*:\\s*'([^']+)'", _err_str)
                     if _m:
                         _blocked_by = _m.group(1)
                 except Exception:
@@ -491,6 +491,10 @@ def _fix_generated_patterns(code: str) -> str:
 
             async def persist_memory(input_data: dict, output_text: str) -> None:
                 if not _MEM_KIND or _reme is None:
+                    return
+                # Never store guardrail violations — the blocked input text would be
+                # retrieved on future calls and re-trigger the guardrail (false positive).
+                if "guardrail_violation" in output_text or '"recommendation": "BLOCK"' in output_text:
                     return
                 content = f"Input: {str(input_data)[:200]} -> Output: {output_text[:400]}"
                 if _MEM_KIND == "personal":

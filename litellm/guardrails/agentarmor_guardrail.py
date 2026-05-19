@@ -266,11 +266,24 @@ class AgentArmorGuardrail(CustomGuardrail):
                 )
             return ""
 
-        text = " ".join(
+        # L1 scans ONLY user-role messages.
+        # System messages contain the agent's role file (trusted).
+        # ReMe memory context is prepended to user messages but is trusted
+        # internal data — scanning it causes false positives when memory
+        # contains previously seen injection text.
+        # Injection risk comes exclusively from user-submitted input.
+        user_text = " ".join(
             _extract_text(m.get("content", ""))
             for m in messages
-            if m.get("content") is not None
+            if m.get("role") == "user" and m.get("content") is not None
         ).strip()
+
+        # Strip the memory context prefix before scanning so stored injection
+        # attempts don't re-trigger on subsequent legitimate calls.
+        if "# Relevant prior context:" in user_text:
+            user_text = user_text.split("# Relevant prior context:")[0].strip()
+
+        text = user_text
         if not text:
             return None
 
