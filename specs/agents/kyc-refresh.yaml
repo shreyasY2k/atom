@@ -1,55 +1,52 @@
 apiVersion: atom.platform/v1
 kind: AgentDeployment
-
 metadata:
   name: kyc-refresh
   domain: banking-kyc
   version: 1.0.0
-  description: >
-    Refresh customer KYC: pull current profile, identify what's stale,
-    flag any items needing human attention, return a refreshed profile
-    with a confidence score.
-  owner: atom-platform-team
+  description: 'Refresh customer KYC: pull current profile, identify what''s stale,
+    flag any items needing human attention, return a refreshed profile with a confidence
+    score.
 
+    '
+  owner: atom-platform-team
 spec:
   agents:
-    - name: kyc-analyst
-      role: standalone
-      agent_role_file: agent-roles/ats/kyc-refresh.role.md
-      reasoning_mode: prescribed
-      model: gemini-3.1-pro
-      temperature: 1.0
-      reasoning_effort: medium
-      max_iterations: 6
-      tools:
-        - get_customer_profile
-        - get_kyc_documents
-        - get_external_screening
-      input_schema:
-        type: object
-        required: [customer_id]
-        properties:
-          customer_id:
-            type: string
-            description: "Bank customer identifier, e.g. CUST-100442"
-      sample_prompts:
-        - "Refresh KYC for customer CUST-100442"
-        - "Check KYC status for CUST-300577 — docs may be stale"
-        - "Run KYC refresh for high-value customer CUST-200119"
-      memory:
-        type: short_term
-        cross_conversation:
-          enabled: true
-          kind: personal
-          identity_field: input.customer_id
-
+  - name: kyc-analyst
+    role: standalone
+    agent_role_file: agent-roles/ats/kyc-refresh.role.md
+    reasoning_mode: prescribed
+    model: gemini-3.1-pro
+    temperature: 1.0
+    reasoning_effort: medium
+    max_iterations: 6
+    tools:
+    - get_customer_profile
+    - get_kyc_documents
+    - get_external_screening
+    input_schema:
+      type: object
+      required:
+      - customer_id
+      properties:
+        customer_id:
+          type: string
+          description: Bank customer identifier, e.g. CUST-100442
+    sample_prompts:
+    - Refresh KYC for customer CUST-100442
+    - Check KYC status for CUST-300577 — docs may be stale
+    - Run KYC refresh for high-value customer CUST-200119
+    memory:
+      type: short_term
+      cross_conversation:
+        enabled: true
+        kind: personal
+        identity_field: input.customer_id
   flow:
     type: standalone
-
   audit:
     log_to: minio://audit-logs/agent/kyc-refresh
     retention_days: 90
-
   deployment:
     runtime: agentscope
     sandbox: base

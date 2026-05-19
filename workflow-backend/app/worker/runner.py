@@ -13,6 +13,7 @@ Supports:
 """
 
 import ast as _ast
+import os
 import re
 from datetime import timedelta
 from typing import Any
@@ -67,12 +68,39 @@ def _resolve(template: Any, ctx: dict) -> Any:
 
     def repl(m):
         raw = m.group(1).strip()
+        # Handle | default(...) filter — supports quoted strings, unquoted booleans, [] etc.
+        default_val: str | None = None
+        if "|" in raw:
+            expr_part, filter_part = raw.split("|", 1)
+            raw = expr_part.strip()
+            # Match: default('...') | default("...") | default(false) | default([]) | default(0)
+            dm = re.search(r"default\((.+?)\)\s*$", filter_part.strip())
+            if dm:
+                dv = dm.group(1).strip().strip("'\"")
+                # Map Jinja primitives to Python string representations
+                if dv in ("false", "False"):
+                    default_val = "false"
+                elif dv in ("true", "True"):
+                    default_val = "true"
+                elif dv in ("null", "None"):
+                    default_val = ""
+                elif dv in ("[]", "{}"):
+                    default_val = dv
+                else:
+                    default_val = dv
+
         parts = raw.split(".")
+        # Support {{ env.VARIABLE_NAME }} — resolves from os.environ
+        if parts[0] == "env" and len(parts) == 2:
+            val = os.environ.get(parts[1], default_val)
+            return val if val is not None else m.group(0)
         # Support {{ input.foo }} as shorthand for {{ ctx.input.foo }}
         if parts[0] != "ctx":
             parts = ["ctx"] + parts
         v = _walk_path(parts, ctx)
-        return str(v) if v is not None else m.group(0)
+        if v is not None:
+            return str(v)
+        return default_val if default_val is not None else m.group(0)
 
     return re.sub(r"\{\{\s*([^}]+)\s*\}\}", repl, template)
 
@@ -132,7 +160,7 @@ class AtomWorkflowRunner:
         task_queue_url = args.get("task_queue_url", "http://task-queue:8098")
         run_id         = args.get("run_id", "unknown")
 
-        ctx: dict = {"input": input_data}
+        ctx: dict = {"input": input_data, "_run_id": run_id}
         spec_inner = spec["spec"]
         nodes = spec_inner["nodes"]
         nodes_by_id = {n["id"]: n for n in nodes}
@@ -398,6 +426,9 @@ class AtomWorkflowRunner:
                 "evidence": node.get("evidence"),
                 "escalation_policy": node.get("escalation_policy"),
                 "context": ctx,
+                # external_notify_url: defined on the node spec (configurable per workflow/node),
+                # falls back to env var for backwards compat.  Empty string → no notification.
+                "external_notify_url": node.get("external_notify_url") or os.environ.get("UVAB_GATEWAY_URL", ""),
             },
             # SLA + escalation time + buffer
             start_to_close_timeout=timedelta(seconds=sla * 2 + 120),

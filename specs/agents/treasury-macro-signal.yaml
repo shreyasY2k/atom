@@ -1,0 +1,66 @@
+apiVersion: atom.platform/v1
+kind: AgentDeployment
+metadata:
+  name: treasury-macro-signal
+  domain: treasury-alm
+  version: 1.0.0
+  description: 'Treasury ALM IRRBB pipeline — Step 1: Macro Signal Collection.
+
+    Collects, normalises, and interprets macro-economic indicators and
+
+    regulatory factors. Classifies the rate regime, computes a macro
+
+    surprise index, identifies key rate drivers, and produces a structured
+
+    MacroSignalObject that feeds the rate forecast and ALCO pipelines.
+
+    '
+  owner: atom-platform-team
+spec:
+  agents:
+  - name: macro-signal-collector
+    role: standalone
+    agent_role_file: agent-roles/treasury/macro-signal-collector.role.md
+    reasoning_mode: prescribed
+    model: gemini-3.1-pro
+    temperature: 1.0
+    reasoning_effort: medium
+    max_iterations: 4
+    tools:
+    - get_macro_factors
+    - get_treasury_instruments
+    input_schema:
+      type: object
+      required: []
+      properties:
+        as_of_date:
+          type: string
+          description: 'Optional. Analysis date in YYYY-MM-DD format. Defaults to
+            today. Use to run macro signal collection for a historical date.
+
+            '
+        include_regulatory_watch:
+          type: boolean
+          description: 'Optional. If true, include active regulatory watch items (Basel
+            III Endgame, FDIC FIL IRR, etc.) in the output.
+
+            '
+          default: true
+    sample_prompts:
+    - Collect macro signals for today's IRR forecast run
+    - Run macro signal analysis — what is the current rate regime?
+    - Generate MacroSignalObject for the treasury ALM pipeline as of today
+    - What macro indicators are driving the current rate environment?
+    memory:
+      type: short_term
+      cross_conversation:
+        enabled: false
+  flow:
+    type: standalone
+  audit:
+    log_to: minio://audit-logs/agent/treasury-macro-signal
+    retention_days: 90
+  deployment:
+    runtime: agentscope
+    sandbox: base
+    replicas: 1

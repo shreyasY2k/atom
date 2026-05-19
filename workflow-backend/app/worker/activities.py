@@ -306,6 +306,29 @@ async def human_task_activity(payload: dict) -> dict:
     task_id = task["task_id"]
     node_paused(run_id, node_id, task_id)
 
+    # Notify external system (e.g., UVAB gateway) about the pending task
+    external_notify_url = payload.get("external_notify_url")
+    if external_notify_url:
+        notify_body = {
+            "task_id": task_id,
+            "workflow_run_id": run_id,
+            "node_id": node_id,
+            "title": payload["title"],
+            "description": payload.get("description", ""),
+            "actions": payload["actions"],
+            "context": context_for_task,
+            "assignee_group": payload.get("assignee_group", "ops"),
+            "priority": payload.get("priority", "medium"),
+            "resolve_url": f"{os.environ.get('WORKFLOW_BACKEND_PUBLIC_URL', 'http://localhost:8082')}/tasks/{task_id}/resolve",
+        }
+        try:
+            async with httpx.AsyncClient(timeout=5) as client:
+                await client.post(external_notify_url, json=notify_body)
+        except Exception as e:
+            # Non-fatal — workflow continues even if external notification fails
+            import logging
+            logging.getLogger(__name__).warning("External task notify failed: %s", e)
+
     sla_seconds   = payload.get("sla_seconds", 3600)
     escalation    = payload.get("escalation_policy")
     poll_interval = 2  # seconds between polls (demo pacing)

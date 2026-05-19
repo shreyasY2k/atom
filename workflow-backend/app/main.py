@@ -56,15 +56,23 @@ app.add_middleware(
 # ---------------------------------------------------------------------------
 
 _worker_task: asyncio.Task | None = None
+_treasury_worker_task: asyncio.Task | None = None
+
+_WORKER_ACTIVITIES = [
+    invoke_agent_activity,
+    http_call_activity,
+    decision_activity,
+    human_task_activity,
+]
 
 
-async def _run_worker():
+async def _run_worker_on_queue(tq: str):
+    """Start a Temporal worker on the given task queue. Retries forever on failure."""
     from temporalio.client import Client
     from temporalio.worker import Worker
 
     host = os.environ.get("TEMPORAL_HOST", "temporal:7233")
     ns   = os.environ.get("TEMPORAL_NAMESPACE", "default")
-    tq   = os.environ.get("TEMPORAL_TASK_QUEUE", "ats-task-queue")
     logger.info("Temporal worker connecting", extra={"host": host, "namespace": ns, "task_queue": tq})
 
     while True:
@@ -74,28 +82,27 @@ async def _run_worker():
                 client,
                 task_queue=tq,
                 workflows=[AtomWorkflowRunner],
-                activities=[
-                    invoke_agent_activity,
-                    http_call_activity,
-                    decision_activity,
-                    human_task_activity,
-                ],
+                activities=_WORKER_ACTIVITIES,
             )
             logger.info("Temporal worker started on task queue '%s'", tq)
             await worker.run()
         except Exception as e:
-            logger.warning("Temporal worker error: %s — retrying in 5s", e)
+            logger.warning("Temporal worker error on '%s': %s — retrying in 5s", tq, e)
             await asyncio.sleep(5)
 
 
 @app.on_event("startup")
 async def startup():
-    global _worker_task
-    _worker_task = asyncio.create_task(_run_worker())
-    logger.info("Workflow backend started; Temporal worker launching in background")
+    global _worker_task, _treasury_worker_task
+    default_tq   = os.environ.get("TEMPORAL_TASK_QUEUE", "ats-task-queue")
+    treasury_tq  = os.environ.get("TREASURY_TASK_QUEUE", "treasury-task-queue")
+    _worker_task          = asyncio.create_task(_run_worker_on_queue(default_tq))
+    _treasury_worker_task = asyncio.create_task(_run_worker_on_queue(treasury_tq))
+    logger.info("Workflow backend started; workers launching for '%s' and '%s'", default_tq, treasury_tq)
 
 
 @app.on_event("shutdown")
 async def shutdown():
-    if _worker_task:
-        _worker_task.cancel()
+    for task in (_worker_task, _treasury_worker_task):
+        if task:
+            task.cancel()

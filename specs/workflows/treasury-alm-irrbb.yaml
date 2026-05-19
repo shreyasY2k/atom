@@ -1,0 +1,362 @@
+apiVersion: atom.platform/v1
+kind: WorkflowDeployment
+metadata:
+  name: treasury-alm-irrbb
+  domain: treasury-alm
+  version: 1.0.0
+  description: >
+    Full IRR → ALM treasury pipeline: macro signal collection → NLP sentiment analysis → rate forecast modelling →
+    Treasurer governance gate → parallel ALM risk analysis (gap, NII, EVE, duration) → AI-driven ALCO intelligence brief
+    with 5 hedge recommendations backed by 3-pillar evidence. Implements the VAB Treasury Process Flow (IRR 5 agents +
+    ALM 6 agents).
+  owner: atom-platform-team
+  layout:
+    nodes:
+      collect-macro-signals:
+        x: 300
+        'y': 0
+      ingest-nlp-sentiment:
+        x: 300
+        'y': 140
+      rate-forecast-modelling:
+        x: 300
+        'y': 280
+      confidence-gate:
+        x: 300
+        'y': 420
+      low-confidence-review:
+        x: 592.3974677566607
+        'y': 539.9594975990858
+      governance-treasurer-review:
+        x: 298.91392396523725
+        'y': 696.8455803801046
+      alm-full-suite:
+        x: 298.5224174390056
+        'y': 837.9095542885144
+      alco-intelligence-brief:
+        x: 300
+        'y': 1057.4859218014321
+      alco-approval:
+        x: 300
+        'y': 1400
+  sample_inputs:
+    - label: Base EASING cycle run
+      input:
+        run_date: '2026-05-19'
+        scenario_profile: base
+        triggered_by: ALCO_TRIGGER
+    - label: Rate shock +200bps stress
+      input:
+        run_date: '2026-05-19'
+        scenario_profile: rate_shock_200bps
+        triggered_by: BALANCE_SHEET_CHANGE
+    - label: Low confidence path
+      input:
+        run_date: '2026-05-19'
+        scenario_profile: base
+        triggered_by: MANUAL
+        force_low_confidence: true
+spec:
+  input_schema:
+    type: object
+    required:
+      - run_date
+      - scenario_profile
+    properties:
+      run_date:
+        type: string
+        description: ISO date YYYY-MM-DD
+      scenario_profile:
+        type: string
+        enum:
+          - base
+          - rate_shock_200bps
+          - rate_shock_300bps
+          - credit_stress
+          - liquidity_crunch
+      triggered_by:
+        type: string
+        enum:
+          - ALCO_TRIGGER
+          - BALANCE_SHEET_CHANGE
+          - MANUAL
+          - SCHEDULED
+      force_low_confidence:
+        type: boolean
+        default: false
+  nodes:
+    - id: collect-macro-signals
+      label: Macro Signal Collection
+      description: >
+        Collect macro-economic indicators, compute surprise index, classify rate regime (EASING/TIGHTENING/FLAT),
+        identify key rate drivers.
+      type: agent
+      agent_ref:
+        name: treasury-macro-signal
+        version: latest
+      input_mapping:
+        run_date: ctx.input.run_date
+        scenario_profile: ctx.input.scenario_profile
+      output_capture: macro_signal
+      timeout_seconds: 120
+      retry:
+        max_attempts: 2
+        backoff: exponential
+        initial_delay_seconds: 5
+      on_error: alco-approval
+      tags:
+        - treasury
+        - macro
+        - irr
+      next: ingest-nlp-sentiment
+    - id: ingest-nlp-sentiment
+      label: Sentiment & NLP Analysis
+      description: >
+        Apply hawkish/dovish scoring to macro signals. Build H/D momentum indices. Identify active behavioral patterns
+        relevant to current regime.
+      type: agent
+      agent_ref:
+        name: treasury-sentiment-nlp
+        version: latest
+      input_mapping:
+        macro_signal: ctx.macro_signal
+        run_date: ctx.input.run_date
+      output_capture: sentiment_signal
+      timeout_seconds: 120
+      retry:
+        max_attempts: 2
+        backoff: exponential
+        initial_delay_seconds: 5
+      on_error: alco-approval
+      tags:
+        - treasury
+        - nlp
+        - sentiment
+        - irr
+      next: rate-forecast-modelling
+    - id: rate-forecast-modelling
+      label: Rate Forecast Modelling
+      description: >
+        Taylor Rule + H/D overlay → 4-scenario rate tree (Base/Hike/Cut/Pause) with probability weights. 3-pillar
+        dynamic weighting → WeightedSignalComposite. Compute model confidence score.
+      type: agent
+      agent_ref:
+        name: treasury-rate-forecast
+        version: latest
+      input_mapping:
+        regime: ctx.macro_signal.regime
+        rate_direction: ctx.macro_signal.rate_direction
+        fed_funds_rate: ctx.macro_signal.fed_funds_rate
+        ten_year_ust: ctx.macro_signal.ten_year_ust
+        hd_regime: ctx.sentiment_signal.regime_flag
+        hd_index: ctx.sentiment_signal.hd_index_7d
+        scenario_profile: ctx.input.scenario_profile
+      output_capture: forecast_object
+      timeout_seconds: 180
+      retry:
+        max_attempts: 2
+        backoff: exponential
+        initial_delay_seconds: 5
+      on_error: alco-approval
+      tags:
+        - treasury
+        - forecast
+        - taylor-rule
+        - irr
+      next: confidence-gate
+    - id: confidence-gate
+      label: Model Confidence Check
+      description: >
+        Route based on model confidence threshold. >70% confidence proceeds to Treasurer governance. <70% triggers human
+        overlay review.
+      type: decision
+      cases:
+        - condition: ctx.forecast_object.confidence_score > 0.70
+          target: governance-treasurer-review
+          label: Confidence >= 70% — proceed to governance
+      default: low-confidence-review
+      tags:
+        - treasury
+        - routing
+        - confidence
+    - id: low-confidence-review
+      label: Low Confidence — Treasurer Overlay
+      external_notify_url: http://host.docker.internal:13000/api/v1/atom/tasks/notify
+      description: >
+        Model confidence below 70% threshold. Treasurer provides qualitative overlay (geopolitical factors, unusual
+        macro conditions). Approved overlay adjusts forecast before ALM analysis proceeds.
+      type: human_task
+      assignee_group: risk-management
+      task_template:
+        title: Low confidence forecast — qualitative overlay required ({{ ctx.input.run_date }})
+        description: >
+          Model confidence is below the 70% threshold for this run. Scenario: {{ ctx.input.scenario_profile }}.
+          Confidence: {{ ctx.forecast_object.confidence_score }}. Please provide qualitative overlay (geopolitical
+          factors, unusual macro conditions) before ALM analysis proceeds.
+        actions:
+          - accept
+          - reject
+      sla_seconds: 28800
+      priority: high
+      evidence:
+        - forecast_object
+        - macro_signal
+        - sentiment_signal
+      escalation_policy:
+        action: escalate
+        escalate_to_group: risk-management
+      output_capture: low_confidence_overlay
+      tags:
+        - treasury
+        - human-in-the-loop
+        - overlay
+      next: governance-treasurer-review
+    - id: governance-treasurer-review
+      label: Governance & Treasurer Review
+      external_notify_url: http://host.docker.internal:13000/api/v1/atom/tasks/notify
+      description: >
+        Treasurer reviews and approves the rate forecast. Shows downstream impact preview (Gap/NII/EVE estimates). All
+        approvals logged with timestamp, actor, and rationale for audit.
+      type: human_task
+      assignee_group: risk-management
+      task_template:
+        title: Rate forecast approval required — {{ ctx.input.scenario_profile }} ({{ ctx.input.run_date }})
+        description: >
+          Rate forecast ready for approval. Scenario: {{ ctx.input.scenario_profile }}.
+          Regime: {{ ctx.macro_signal.regime }}. Confidence: {{ ctx.forecast_object.confidence_score }}.
+          Fed Funds: {{ ctx.macro_signal.fed_funds_rate }}. 10Y UST: {{ ctx.macro_signal.ten_year_ust }}.
+          Approving will trigger ALM analysis and generate 5 AI hedge recommendations.
+        actions:
+          - accept
+          - reject
+          - edit
+      sla_seconds: 86400
+      priority: high
+      evidence:
+        - forecast_object
+        - macro_signal
+        - sentiment_signal
+        - low_confidence_overlay
+      escalation_policy:
+        action: escalate
+        escalate_to_group: compliance
+      output_capture: forecast_approval
+      tags:
+        - treasury
+        - governance
+        - human-in-the-loop
+      next: alm-full-suite
+    - id: alm-full-suite
+      label: ALM Full Suite (Gap / NII / EVE / Duration)
+      description: >
+        Runs the complete IRRBB suite via the VAB treasury gateway, which extracts the live balance sheet from the
+        treasury_instruments table, runs Gap Analysis, NII Simulation, EVE Sensitivity, and Duration of Equity via the
+        Python compute service, and returns all results in one response. No balance sheet context required — gateway
+        handles extraction.
+      type: http
+      method: POST
+      url_template: http://host.docker.internal:13000/api/v1/alm/run-suite
+      body_template:
+        scenario_profile: "{{ ctx.input.scenario_profile }}"
+        bank_profile: "{{ ctx.input.bank_profile | default('regional_bank') }}"
+      extract:
+        gap_analysis: gap_analysis
+        nii_simulation: nii_simulation
+        eve_sensitivity: eve_sensitivity
+        duration_of_equity: duration_of_equity
+        any_regulatory_breach: any_regulatory_breach
+        breach_flag: breach_flag
+      output_capture: alm_suite
+      timeout_seconds: 120
+      retry:
+        max_attempts: 2
+        backoff: constant
+        initial_delay_seconds: 5
+      on_error: alco-intelligence-brief
+      tags:
+        - treasury
+        - alm
+        - irrbb
+        - gap
+        - nii
+        - eve
+        - duration
+      next: alco-intelligence-brief
+    - id: alco-intelligence-brief
+      label: ALCO Intelligence & Recommendations
+      description: >
+        Synthesise all context — macro signal, sentiment, forecast, gap/NII/EVE/duration results, behavioral patterns,
+        instrument portfolio — into exactly 5 prioritised hedge recommendations. Each backed by 3-pillar evidence:
+        historical insight, macro factor, analytical metric. Stores results for UVAB frontend display.
+      type: agent
+      agent_ref:
+        name: treasury-alco-intelligence
+        version: latest
+      input_mapping:
+        run_id: ctx._run_id
+        regime: ctx.macro_signal.regime
+        rate_direction: ctx.macro_signal.rate_direction
+        fed_funds_rate: ctx.macro_signal.fed_funds_rate
+        ten_year_ust: ctx.macro_signal.ten_year_ust
+        hd_regime: ctx.sentiment_signal.regime_flag
+        hd_index: ctx.sentiment_signal.hd_index_7d
+        active_patterns: ctx.sentiment_signal.active_behavioral_patterns
+        forecast_confidence: ctx.forecast_object.confidence_score
+        alm_breach_flag: ctx.alm_suite.breach_flag
+        alm_nii_breach: ctx.alm_suite.nii_simulation.regulatory_breach_flag
+        alm_eve_breach: ctx.alm_suite.eve_sensitivity.regulatory_breach_flag
+        alm_duration_breach: ctx.alm_suite.duration_of_equity.breach_flag
+        scenario_profile: ctx.input.scenario_profile
+      output_capture: alco_recommendations
+      timeout_seconds: 300
+      retry:
+        max_attempts: 2
+        backoff: exponential
+        initial_delay_seconds: 10
+      on_error: alco-approval
+      tags:
+        - treasury
+        - alco
+        - recommendations
+        - alm
+      next: alco-approval
+    - id: alco-approval
+      label: ALCO Approval Gate
+      external_notify_url: http://host.docker.internal:13000/api/v1/atom/tasks/notify
+      description: >
+        Treasurer and ALCO approve the 5 hedge recommendations. Each proposal reviewed individually. Approved proposals
+        routed to execution teams (Murex/derivatives desk, funding desk, investment portfolio). Also reached as the
+        global error_handler node — in that case, _last_error is in ctx.
+      type: human_task
+      assignee_group: risk-management
+      task_template:
+        title: ALCO approval required — {{ ctx.input.scenario_profile }} ({{ ctx.input.run_date }})
+        description: >
+          ALCO Intelligence Brief ready. Scenario: {{ ctx.input.scenario_profile }}.
+          Breach status: {{ ctx.alm_suite.breach_flag | default('checking') }}.
+          Review the 5 AI hedge recommendations and accept or reject each individually.
+        actions:
+          - accept
+          - reject
+          - edit
+      sla_seconds: 172800
+      priority: critical
+      evidence:
+        - alco_recommendations
+        - alm_suite
+        - forecast_object
+      escalation_policy:
+        action: escalate
+        escalate_to_group: compliance
+      output_capture: final_approval
+      tags:
+        - treasury
+        - alco
+        - human-in-the-loop
+        - final-gate
+  audit:
+    log_to: minio://audit-logs/workflow/treasury-alm-irrbb
+    retention_days: 90
+  deployment:
+    runtime: temporal
+    task_queue: treasury-task-queue

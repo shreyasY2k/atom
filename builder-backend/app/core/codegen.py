@@ -221,6 +221,9 @@ _FASTAPI_OVERRIDE = textwrap.dedent("""
         ## DO NOT write: payload.get("text", payload) — payload is a dict, not a str.
         ...
         # After getting output_text from the agent response:
+        # IMPORTANT: get_text_content() can return None if the LLM only emitted tool calls
+        # with no final text. Guard against None before any string operation.
+        output_text = output_text or ""
         try:
             _clean = output_text.strip()
             if _clean.startswith("```json"):
@@ -229,15 +232,21 @@ _FASTAPI_OVERRIDE = textwrap.dedent("""
                 _clean = _clean[3:]
             if _clean.endswith("```"):
                 _clean = _clean[:-3]
-            return json.loads(_clean.strip())
+            _clean = _clean.strip()
+            if not _clean:
+                return {"raw_output": "", "confidence": 0.0, "recommendation": "REVIEW",
+                        "notes_for_reviewer": "Agent produced no text output (tool-call-only response)"}
+            return json.loads(_clean)
         except json.JSONDecodeError:
             import re as _re2
-            m = _re2.search(r"\{.*\}", output_text, _re2.DOTALL)
-            if m:
-                try:
-                    return json.loads(m.group())
-                except Exception:
-                    pass
+            # Try JSON array first (for agents that return recommendation lists)
+            for _pat in (r'\[.*\]', r'\{.*\}'):
+                m = _re2.search(_pat, output_text, _re2.DOTALL)
+                if m:
+                    try:
+                        return json.loads(m.group())
+                    except Exception:
+                        pass
             return {"raw_output": output_text, "confidence": 0.0,
                     "recommendation": "REVIEW",
                     "notes_for_reviewer": "Agent output was not valid JSON"}

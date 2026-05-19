@@ -111,12 +111,16 @@ async def start_run(name: str, payload: dict):
     asyncio.create_task(_persist_run_artifacts(run_id, name, now))
 
     # Start Temporal workflow
+    # Unwrap the input: request body is {"input": {...}, ...} but workflow expects
+    # the inner dict as its input. If payload has an "input" key, use that.
+    workflow_input = payload.get("input", payload) if isinstance(payload.get("input"), dict) else payload
+
     await start_workflow(
         workflow_id=run_id,
         workflow_cls=AtomWorkflowRunner,
         args={
             "spec": spec_dict,
-            "input": payload,
+            "input": workflow_input,
             "agent_endpoints": agent_endpoints,
             "agent_actor_ids": agent_actor_ids,
             "task_queue_url": TASK_QUEUE_URL,

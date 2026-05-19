@@ -5,8 +5,8 @@ metadata:
   domain: general
   version: 0.1.0
   description: Answers customer questions about KYC status and transaction risk using
-    real-time lookup tools.
-  owner: user:admin@atom.io
+    structured tools.
+  owner: user:[PII:EMAIL]
 spec:
   agents:
   - name: customer-qa-agent-agent
@@ -17,11 +17,8 @@ spec:
     reasoning_effort: medium
     max_iterations: 6
     tools:
-    - get_customer_profile
-    - get_kyc_profile
-    - screen_ofac_sanctions
-    - get_transaction_history
     - calculate_risk
+    - get_customer_profile
     memory:
       type: short_term
       cross_conversation:

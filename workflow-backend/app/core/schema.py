@@ -152,6 +152,11 @@ class WorkflowNode(BaseModel):
     evidence: Optional[list[str]] = None
     escalation_policy: Optional[EscalationPolicy] = None
     skip_if: Optional[SkipCondition] = None
+    # Optional URL to POST when the human_task is created (pause notification).
+    # Workflow sends {task_id, node_id, title, resolve_url, context} to this endpoint.
+    # Allows external systems (e.g., treasury approval UI) to receive task notifications
+    # and provide a callback to resume the workflow by resolving the task.
+    external_notify_url: Optional[str] = None
 
     @model_validator(mode="before")
     @classmethod

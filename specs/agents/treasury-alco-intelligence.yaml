@@ -1,0 +1,88 @@
+apiVersion: atom.platform/v1
+kind: AgentDeployment
+metadata:
+  name: treasury-alco-intelligence
+  domain: treasury-alm
+  version: 1.0.0
+  description: 'Treasury ALM IRRBB pipeline — Step 4: ALCO Intelligence & Recommendations.
+
+    Synthesises the complete IRR forecast and live ALM risk results (gap
+
+    analysis, NII simulation, EVE sensitivity, duration of equity) into
+
+    exactly 5 prioritised hedge recommendations. Each recommendation is
+
+    backed by 3-pillar evidence: behavioral patterns, macro signals, and
+
+    quantitative ALM analytics. Stores recommendations to the ALCO
+
+    recommendation store before returning. All recommendations require
+
+    human approval before execution.
+
+    '
+  owner: atom-platform-team
+spec:
+  agents:
+  - name: alco-intelligence-agent
+    role: standalone
+    agent_role_file: agent-roles/treasury/alco-intelligence-agent.role.md
+    reasoning_mode: guided
+    model: gemini-3.1-pro
+    temperature: 1.0
+    reasoning_effort: high
+    max_iterations: 10
+    tools:
+    - get_treasury_instruments
+    - get_historical_timeseries
+    - get_macro_factors
+    - get_behavioral_patterns
+    - run_irrbb_suite
+    - store_alco_recommendations
+    input_schema:
+      type: object
+      required:
+      - macro_signal
+      - sentiment_signal
+      - forecast
+      properties:
+        macro_signal:
+          type: object
+          description: 'MacroSignalObject from treasury-macro-signal agent.
+
+            '
+        sentiment_signal:
+          type: object
+          description: 'SentimentSignalObject from treasury-sentiment-nlp agent.
+
+            '
+        forecast:
+          type: object
+          description: 'ForecastObject from treasury-rate-forecast agent. Must include
+            scenarios array, weighted_signal_composite, confidence_score, and divergence_flag.
+
+            '
+        session_id:
+          type: string
+          description: 'Optional. Pipeline run session ID for audit trail correlation.
+
+            '
+    sample_prompts:
+    - Generate ALCO hedge recommendations from the completed IRR forecast
+    - Run ALCO intelligence engine — what are the top 5 hedge recommendations?
+    - Synthesise the full pipeline output into prioritised ALM actions for ALCO
+    - What hedges should we execute given the current rate forecast and portfolio
+      risk?
+    memory:
+      type: short_term
+      cross_conversation:
+        enabled: false
+  flow:
+    type: standalone
+  audit:
+    log_to: minio://audit-logs/agent/treasury-alco-intelligence
+    retention_days: 90
+  deployment:
+    runtime: agentscope
+    sandbox: base
+    replicas: 1

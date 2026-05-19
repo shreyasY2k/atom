@@ -889,3 +889,87 @@ Task 06: CLI polish (`atom agent scaffold`, `atom workflow init`)
 - [x] Builder back navigation works
 - [x] Builder edit mode pre-fills existing agent data
 - [x] Session injection false-positive fixed (injection + valid = valid gets through)
+
+---
+
+## Session 11 — Treasury ALM/IRRBB Migration to Atom
+**Date**: 2026-05-19  
+**Status**: IN PROGRESS 🔄
+
+### What was done
+
+Migrated the UVAB (Virtual Agentic Bank) ALM/IRRBB pipeline to Atom as a fully orchestrated Temporal workflow, replacing the existing hardcoded Lobster DSL with a proper 12-node Atom workflow spec. Added the missing macro-economic and historical context layers (both absent from the original UVAB implementation). Key deliverables:
+
+1. **SQL Migration 014** (`uvab/migrations/014_treasury_ai_poc_data.sql`) — Seeds 5 new tables from the Treasury AI PoC Excel database: `treasury_instruments` (50 rows), `treasury_macro_factors` (11 indicators), `treasury_regulatory_factors` (7 regulations), `treasury_behavioral_patterns` (BP-001 to BP-012), `atom_alco_recommendations` (output sink).
+
+2. **UVAB Dockerfiles** (`uvab/infra/Dockerfile.*`) — 6 Dockerfiles for build-from-source: gateway, agents, adapters, compute, workflow-engine, ui. All use Node 22 alpine multi-stage; compute uses python:3.11-slim.
+
+3. **UVAB docker-compose update** — All 6 app services changed from `image: ${REGISTRY_IMAGE}...` to `build:` directives. Added `atom-uvab` network. Added `ATOM_WORKFLOW_URL` env var. Added migration 014 mount.
+
+4. **Ed25519 auth** — No changes needed; signature field was already optional and unvalidated.
+
+5. **UVAB Gateway endpoints** (T6 + T12 combined in `uvab/services/gateway/src/app.ts`):
+   - `GET /api/v1/treasury/instruments` — serves treasury_instruments
+   - `GET /api/v1/treasury/timeseries` — serves treasury_historical_timeseries
+   - `GET /api/v1/treasury/macro-factors` — serves treasury_macro_factors
+   - `GET /api/v1/treasury/regulatory-factors` — serves treasury_regulatory_factors
+   - `GET /api/v1/treasury/behavioral-patterns` — serves treasury_behavioral_patterns
+   - `POST /api/v1/atom/workflow/results` — stores Atom recommendations
+   - `GET /api/v1/atom/workflow/results` — fetches latest recommendations
+   - `POST /api/atom/workflow/invoke` — proxies to Atom Temporal backend
+   - `GET /api/atom/workflow/status/:runId` — proxies to Atom status
+
+6. **Atom Tools Registry** (`atom/builder-backend/app/tools/registry.py`) — 10 new tools in sections `treasury-alm-compute` and `treasury-alm-data`:
+   - Compute: `run_gap_analysis`, `run_nii_simulation`, `run_eve_sensitivity`, `run_duration_equity`, `run_irrbb_suite` → calls `UVAB_COMPUTE_URL:3030`
+   - Data: `get_treasury_instruments`, `get_historical_timeseries`, `get_macro_factors`, `get_behavioral_patterns`, `store_alco_recommendations` → calls `UVAB_GATEWAY_URL:3000`
+   - Added to both `"banking-treasury"` and new `"treasury-alm"` domains
+
+7. **4 Agent Role Files** (`atom/agent-roles/treasury/`):
+   - `macro-signal-collector.role.md` — prescribed, reads macro factors, classifies regime, computes surprise index, produces MacroSignalObject
+   - `sentiment-nlp-agent.role.md` — guided, H/D momentum index, active behavioral pattern detection
+   - `rate-forecast-agent.role.md` — prescribed, Taylor Rule + H/D overlay, 4-scenario tree, 3-pillar WeightedSignalComposite
+   - `alco-intelligence-agent.role.md` — guided, synthesises all context, generates exactly 5 recommendations with 3-pillar evidence, calls `store_alco_recommendations` as final action
+
+8. **4 Agent YAML Specs** (`atom/specs/agents/`):
+   - `treasury-macro-signal.yaml`, `treasury-sentiment-nlp.yaml`, `treasury-rate-forecast.yaml`, `treasury-alco-intelligence.yaml`
+   - All: gemini-3.1-pro, temperature 1.0, audit → MinIO 90-day retention
+
+9. **Workflow Spec** (`atom/specs/workflows/treasury-alm-irrbb.yaml`) — 12-node sequential workflow:
+   - Nodes 1-3: IRR pipeline (macro-signals → NLP-sentiment → rate-forecast)
+   - Node 4: confidence-gate decision (>70% → governance, <70% → low-confidence-review)
+   - Nodes 5-6: human_task gates (low-confidence-review → governance-treasurer-review)
+   - Nodes 7-10: ALM HTTP nodes (gap-analysis → nii-simulation → eve-sensitivity → duration-equity) → UVAB compute :3030
+   - Node 11: alco-intelligence-brief agent → generates 5 recommendations
+   - Node 12: alco-approval human_task
+   - 3 triggers: manual, monthly cron, BALANCE_SHEET_CHANGE >5%
+   - 3 demo paths: base-easing-cycle, low-confidence-overlay, rate-shock-stress
+
+10. **UVAB Frontend** (`uvab/apps/ui/src/`):
+    - New Zustand store: `lib/stores/recommendations.ts` — polls `GET /api/v1/atom/workflow/results`, triggers `POST /api/atom/workflow/invoke`
+    - New component: `components/RecommendationCard.tsx` — priority badge, confidence bar, 3 collapsible evidence pillars (Historical/Macro/Analytical)
+    - New component: `components/RecommendationsPanel.tsx` — scenario selector, "Run AI Analysis" button, workflow status, 5-card grid
+    - Modified `app/page.tsx`: added "AI Recommendations" tab (4th tab), imports, WebSocket handler for `ATOM_RECOMMENDATIONS_READY` event
+
+### DoD checklist
+- [x] SQL migration 014 written with 50 instruments + 11 macro factors + 7 regulatory factors + 12 behavioral patterns
+- [x] All 6 UVAB Dockerfiles exist (gateway, agents, adapters, compute, workflow-engine, ui)
+- [x] docker-compose.yml uses build directives for all app services
+- [x] 9 new UVAB gateway endpoints exist in app.ts
+- [x] 10 new tools in Atom registry (treasury-alm domain)
+- [x] 4 agent role files written with output contracts and reasoning mode
+- [x] 4 agent YAML specs written
+- [x] treasury-alm-irrbb workflow spec (12 nodes)
+- [x] AI Recommendations tab in UVAB frontend with 3-pillar cards
+
+### Pending / Known issues
+- TypeScript IDE diagnostics show implicit-any warnings on new gateway routes — same pattern as existing routes, false positive, `tsc` build passes
+- The `treasury_historical_timeseries` table is created in migration 014 but data seeding for the 260 historical rows is not yet written (table structure is there, data seeding is a follow-up)
+- UVAB compute service needs the `treasury_instruments` data to be used as the balance sheet source (currently still reads from CBS adapters/deals table)
+- Atom Temporal workflow backend needs a registered `treasury-task-queue` worker to execute the workflow in production
+
+### What's next
+- Seed `treasury_historical_timeseries` table with historical data from Sheet 2
+- Register `treasury-task-queue` Temporal worker in Atom
+- Wire UVAB balance sheet extraction to use `treasury_instruments` table instead of CBS adapters
+- End-to-end test: trigger workflow from UVAB UI → Atom orchestrates → recommendations appear in AI Recommendations tab
+- Verify `docker compose up` brings all services healthy

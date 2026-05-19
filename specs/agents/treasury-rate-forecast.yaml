@@ -1,0 +1,69 @@
+apiVersion: atom.platform/v1
+kind: AgentDeployment
+metadata:
+  name: treasury-rate-forecast
+  domain: treasury-alm
+  version: 1.0.0
+  description: 'Treasury ALM IRRBB pipeline — Step 3: Rate Forecast Modelling.
+
+    Applies Taylor Rule logic overlaid with H/D sentiment to generate a
+
+    calibrated 4-scenario interest rate forecast (Base/Hike/Cut/Pause)
+
+    with probability weights. Applies the 3-pillar weighting framework to
+
+    produce a WeightedSignalComposite. Routes to governance if confidence
+
+    exceeds 0.70. Flags divergence if model deviates >30bps from OIS proxy.
+
+    '
+  owner: atom-platform-team
+spec:
+  agents:
+  - name: rate-forecast-agent
+    role: standalone
+    agent_role_file: agent-roles/treasury/rate-forecast-agent.role.md
+    reasoning_mode: prescribed
+    model: gemini-3.1-pro
+    temperature: 1.0
+    reasoning_effort: high
+    max_iterations: 6
+    tools:
+    - get_macro_factors
+    - get_behavioral_patterns
+    input_schema:
+      type: object
+      required:
+      - macro_signal
+      - sentiment_signal
+      properties:
+        macro_signal:
+          type: object
+          description: 'MacroSignalObject from treasury-macro-signal agent. Must include
+            regime, key_indicators, fed_funds_rate, ten_year_ust, sofr_rate, yield_curve_shape.
+
+            '
+        sentiment_signal:
+          type: object
+          description: 'SentimentSignalObject from treasury-sentiment-nlp agent. Must
+            include hd_index_7d, hd_index_30d, regime_flag, active_behavioral_patterns.
+
+            '
+    sample_prompts:
+    - Generate 4-scenario rate forecast for the ALM pipeline
+    - Run rate forecast model — what are the Base/Hike/Cut/Pause scenarios?
+    - Produce WeightedSignalComposite and confidence score for IRRBB
+    - What is the model's rate forecast given the current macro and sentiment signals?
+    memory:
+      type: short_term
+      cross_conversation:
+        enabled: false
+  flow:
+    type: standalone
+  audit:
+    log_to: minio://audit-logs/agent/treasury-rate-forecast
+    retention_days: 90
+  deployment:
+    runtime: agentscope
+    sandbox: base
+    replicas: 1

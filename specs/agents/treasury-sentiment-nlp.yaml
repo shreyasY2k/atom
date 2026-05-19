@@ -1,0 +1,62 @@
+apiVersion: atom.platform/v1
+kind: AgentDeployment
+metadata:
+  name: treasury-sentiment-nlp
+  domain: treasury-alm
+  version: 1.0.0
+  description: 'Treasury ALM IRRBB pipeline — Step 2: Sentiment & NLP Ingestion.
+
+    Converts a MacroSignalObject into a Hawkish/Dovish sentiment index.
+
+    Detects regime shifts in central bank communication signals and overlays
+
+    behavioral pattern data to produce a SentimentSignalObject for the
+
+    rate forecast modelling agent.
+
+    '
+  owner: atom-platform-team
+spec:
+  agents:
+  - name: sentiment-nlp-agent
+    role: standalone
+    agent_role_file: agent-roles/treasury/sentiment-nlp-agent.role.md
+    reasoning_mode: guided
+    model: gemini-3.1-pro
+    temperature: 1.0
+    reasoning_effort: medium
+    max_iterations: 4
+    tools:
+    - get_macro_factors
+    - get_behavioral_patterns
+    input_schema:
+      type: object
+      required:
+      - macro_signal
+      properties:
+        macro_signal:
+          type: object
+          description: 'MacroSignalObject produced by the treasury-macro-signal agent.
+            Must include regime, rate_direction, yield_curve_shape, inflation_trajectory,
+            and key_indicators.
+
+            '
+    sample_prompts:
+    - Compute H/D sentiment index from the latest MacroSignalObject
+    - Run sentiment analysis — is the macro environment hawkish or dovish?
+    - Generate SentimentSignalObject for the rate forecast pipeline
+    - What is the current hawkish/dovish bias based on macro signals and behavioral
+      patterns?
+    memory:
+      type: short_term
+      cross_conversation:
+        enabled: false
+  flow:
+    type: standalone
+  audit:
+    log_to: minio://audit-logs/agent/treasury-sentiment-nlp
+    retention_days: 90
+  deployment:
+    runtime: agentscope
+    sandbox: base
+    replicas: 1
