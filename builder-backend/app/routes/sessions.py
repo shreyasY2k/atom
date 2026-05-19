@@ -240,19 +240,43 @@ def send_message(
 
     # Build a history-enriched text so legacy agents (which only read `text`)
     # still see the full conversation context. New agents can use `messages[]`.
+    #
+    # Exclude guardrail-blocked turns from history — including them re-injects
+    # the original attack text into subsequent calls and causes false positives.
     if prior:
+        clean_prior = []
+        i = 0
+        while i < len(prior):
+            m = prior[i]
+            # Skip user messages whose NEXT message is a guardrail block
+            if m["role"] == "user" and i + 1 < len(prior):
+                nxt = prior[i + 1]
+                if nxt["role"] == "assistant" and "guardrail_violation" in nxt.get("content", ""):
+                    i += 2  # skip this user msg + the following blocked assistant msg
+                    continue
+            # Skip standalone guardrail assistant messages
+            if m["role"] == "assistant" and "guardrail_violation" in m.get("content", ""):
+                i += 1
+                continue
+            clean_prior.append(m)
+            i += 1
+
         history_lines = []
-        for m in prior[-12:]:  # last 12 turns to keep context bounded
+        for m in clean_prior[-12:]:  # last 12 clean turns
             role_label = "User" if m["role"] == "user" else "Assistant"
             content_preview = m["content"][:600]
             if len(m["content"]) > 600:
                 content_preview += "…"
             history_lines.append(f"{role_label}: {content_preview}")
-        history_block = "\n".join(history_lines)
-        if reme_context:
+        history_block = "\n".join(history_lines) if history_lines else ""
+        if history_block and reme_context:
             enriched_text = f"{reme_context}\n\n[Conversation so far]\n{history_block}\n\n[Current message]\n{body.text}"
-        else:
+        elif history_block:
             enriched_text = f"[Conversation so far]\n{history_block}\n\n[Current message]\n{body.text}"
+        elif reme_context:
+            enriched_text = f"{reme_context}\n\n[Current message]\n{body.text}"
+        else:
+            enriched_text = body.text
     elif reme_context:
         enriched_text = f"{reme_context}\n\n[Current message]\n{body.text}"
     else:

@@ -278,10 +278,19 @@ class AgentArmorGuardrail(CustomGuardrail):
             if m.get("role") == "user" and m.get("content") is not None
         ).strip()
 
-        # Strip the memory context prefix before scanning so stored injection
-        # attempts don't re-trigger on subsequent legitimate calls.
-        if "# Relevant prior context:" in user_text:
-            user_text = user_text.split("# Relevant prior context:")[0].strip()
+        # Strip trusted context prefixes before scanning.
+        # These blocks are added by the platform (session history, ReMe memory) —
+        # they are NOT direct user input and scanning them causes false positives
+        # when a prior blocked message appears in conversation history.
+        for prefix in ("# Relevant prior context:", "[Conversation so far]"):
+            if prefix in user_text:
+                # Keep only the text before the context block, OR after the
+                # [Current message] marker if the history comes first.
+                if "[Current message]" in user_text:
+                    user_text = user_text.split("[Current message]", 1)[1].strip()
+                else:
+                    user_text = user_text.split(prefix)[0].strip()
+                break
 
         text = user_text
         if not text:
