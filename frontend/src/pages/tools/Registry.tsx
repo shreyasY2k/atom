@@ -342,7 +342,7 @@ export default function ToolsRegistry() {
           </TableRow>
         </TableHead>
         <TableBody>
-              {tools.map(tool => (
+              {toolList.map(tool => (
                 <TableRow key={tool.tool_id} hover>
                   <TableCell>
                     <Box>
