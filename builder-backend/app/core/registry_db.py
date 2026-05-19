@@ -48,6 +48,8 @@ def _init():
         cur.execute("ALTER TABLE agents ADD COLUMN IF NOT EXISTS version_count INTEGER DEFAULT 0")
         cur.execute("ALTER TABLE agents ADD COLUMN IF NOT EXISTS skills JSONB DEFAULT '[]'")
         cur.execute("ALTER TABLE agents ADD COLUMN IF NOT EXISTS created_at TEXT")
+        cur.execute("ALTER TABLE agents ADD COLUMN IF NOT EXISTS domain TEXT DEFAULT ''")
+        cur.execute("ALTER TABLE agents ADD COLUMN IF NOT EXISTS subdomain TEXT DEFAULT ''")
 
         cur.execute("""
             CREATE TABLE IF NOT EXISTS tools (
@@ -82,6 +84,8 @@ def _init():
         cur.execute("ALTER TABLE tools ADD COLUMN IF NOT EXISTS mcp_tool_names JSONB DEFAULT '[]'")
         cur.execute("ALTER TABLE tools ADD COLUMN IF NOT EXISTS auth_config JSONB DEFAULT '{}'")
         cur.execute("ALTER TABLE tools ADD COLUMN IF NOT EXISTS auth_type TEXT DEFAULT 'none'")
+        cur.execute("ALTER TABLE tools ADD COLUMN IF NOT EXISTS domain TEXT DEFAULT ''")
+        cur.execute("ALTER TABLE tools ADD COLUMN IF NOT EXISTS subdomain TEXT DEFAULT ''")
 
 
 @contextmanager
@@ -105,6 +109,8 @@ def upsert(record: dict) -> None:
         "version_count": 0,
         "skills": [],
         "created_at": None,
+        "domain": "",
+        "subdomain": "",
         **record,
     }
     # Serialize skills to JSON string for psycopg2
@@ -115,11 +121,13 @@ def upsert(record: dict) -> None:
             INSERT INTO agents
               (name, version, service_account_id, virtual_key, owner,
                deployed_at, endpoint, container_id, spec_hash, code_hash, status,
-               agent_role_name, description, version_count, skills, created_at)
+               agent_role_name, description, version_count, skills, created_at,
+               domain, subdomain)
             VALUES
               (%(name)s, %(version)s, %(service_account_id)s, %(virtual_key)s, %(owner)s,
                %(deployed_at)s, %(endpoint)s, %(container_id)s, %(spec_hash)s, %(code_hash)s, %(status)s,
-               %(agent_role_name)s, %(description)s, %(version_count)s, %(skills)s::jsonb, %(created_at)s)
+               %(agent_role_name)s, %(description)s, %(version_count)s, %(skills)s::jsonb, %(created_at)s,
+               %(domain)s, %(subdomain)s)
             ON CONFLICT (name) DO UPDATE SET
               version=EXCLUDED.version,
               service_account_id=EXCLUDED.service_account_id,
@@ -134,7 +142,9 @@ def upsert(record: dict) -> None:
               description=COALESCE(EXCLUDED.description, agents.description),
               version_count=COALESCE(EXCLUDED.version_count, agents.version_count),
               skills=COALESCE(EXCLUDED.skills, agents.skills),
-              created_at=COALESCE(agents.created_at, EXCLUDED.created_at)
+              created_at=COALESCE(agents.created_at, EXCLUDED.created_at),
+              domain=CASE WHEN EXCLUDED.domain != '' THEN EXCLUDED.domain ELSE agents.domain END,
+              subdomain=CASE WHEN EXCLUDED.subdomain != '' THEN EXCLUDED.subdomain ELSE agents.subdomain END
         """, rec)
 
 
@@ -252,6 +262,8 @@ def upsert_tool(tool: dict) -> None:
         "created_by": tool.get("created_by"),
         "created_at": tool.get("created_at"),
         "updated_at": tool.get("updated_at"),
+        "domain": tool.get("domain", ""),
+        "subdomain": tool.get("subdomain", ""),
     }
     with _cursor() as cur:
         cur.execute("""
@@ -259,14 +271,14 @@ def upsert_tool(tool: dict) -> None:
               (tool_id, name, display_name, description, scope, owner_agent,
                tool_type, endpoint, method, code, mcp_server_url, mcp_transport, mcp_tool_names,
                auth_type, auth_config, input_schema, output_schema, tags,
-               created_by, created_at, updated_at)
+               created_by, created_at, updated_at, domain, subdomain)
             VALUES
               (%(tool_id)s, %(name)s, %(display_name)s, %(description)s, %(scope)s, %(owner_agent)s,
                %(tool_type)s, %(endpoint)s, %(method)s, %(code)s,
                %(mcp_server_url)s, %(mcp_transport)s, %(mcp_tool_names)s::jsonb,
                %(auth_type)s, %(auth_config)s::jsonb,
                %(input_schema)s::jsonb, %(output_schema)s::jsonb, %(tags)s::jsonb,
-               %(created_by)s, %(created_at)s, %(updated_at)s)
+               %(created_by)s, %(created_at)s, %(updated_at)s, %(domain)s, %(subdomain)s)
             ON CONFLICT (tool_id) DO UPDATE SET
               name=EXCLUDED.name,
               display_name=EXCLUDED.display_name,
@@ -322,25 +334,72 @@ def get_tool(tool_id: str) -> dict | None:
         return _row_to_tool(row) if row else None
 
 
-def list_tools(scope: str | None = None, owner_agent: str | None = None) -> list[dict]:
+def list_agents(domain: str | None = None, subdomain: str | None = None) -> list[dict]:
+    """Return agents, optionally filtered by domain and/or subdomain."""
     with _cursor() as cur:
-        if scope and owner_agent:
-            cur.execute(
-                "SELECT * FROM tools WHERE scope=%s AND owner_agent=%s ORDER BY created_at DESC",
-                (scope, owner_agent),
-            )
-        elif scope:
-            cur.execute(
-                "SELECT * FROM tools WHERE scope=%s ORDER BY created_at DESC",
-                (scope,),
-            )
-        elif owner_agent:
-            cur.execute(
-                "SELECT * FROM tools WHERE owner_agent=%s ORDER BY created_at DESC",
-                (owner_agent,),
-            )
-        else:
-            cur.execute("SELECT * FROM tools ORDER BY created_at DESC")
+        clauses, params = [], []
+        if domain:
+            clauses.append("domain=%s"); params.append(domain)
+        if subdomain:
+            clauses.append("subdomain=%s"); params.append(subdomain)
+        where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
+        cur.execute(f"SELECT * FROM agents {where} ORDER BY deployed_at DESC", params)
+        rows = []
+        for r in cur.fetchall():
+            d = dict(r)
+            if isinstance(d.get("skills"), str):
+                try: d["skills"] = json.loads(d["skills"])
+                except Exception: d["skills"] = []
+            elif d.get("skills") is None:
+                d["skills"] = []
+            rows.append(d)
+        return rows
+
+
+def get_domain_taxonomy() -> list[dict]:
+    """Return all known domain/subdomain pairs from agents and tools tables."""
+    with _cursor() as cur:
+        cur.execute("""
+            SELECT DISTINCT domain, subdomain
+            FROM (
+                SELECT domain, subdomain FROM agents WHERE domain != ''
+                UNION ALL
+                SELECT domain, subdomain FROM tools WHERE domain != ''
+            ) combined
+            WHERE domain != ''
+            ORDER BY domain, subdomain
+        """)
+        rows = [dict(r) for r in cur.fetchall()]
+
+    # Build structured domain → subdomains map
+    taxonomy: dict[str, set] = {}
+    for row in rows:
+        d = row["domain"]
+        sd = row.get("subdomain") or ""
+        if d not in taxonomy:
+            taxonomy[d] = set()
+        if sd:
+            taxonomy[d].add(sd)
+
+    return [
+        {"domain": d, "subdomains": sorted(list(sds))}
+        for d, sds in sorted(taxonomy.items())
+    ]
+
+
+def list_tools(scope: str | None = None, owner_agent: str | None = None, domain: str | None = None, subdomain: str | None = None) -> list[dict]:
+    with _cursor() as cur:
+        clauses, params = [], []
+        if scope:
+            clauses.append("scope=%s"); params.append(scope)
+        if owner_agent:
+            clauses.append("owner_agent=%s"); params.append(owner_agent)
+        if domain:
+            clauses.append("domain=%s"); params.append(domain)
+        if subdomain:
+            clauses.append("subdomain=%s"); params.append(subdomain)
+        where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
+        cur.execute(f"SELECT * FROM tools {where} ORDER BY domain, created_at DESC", params)
         return [_row_to_tool(r) for r in cur.fetchall()]
 
 
@@ -548,6 +607,26 @@ def get_guardrail_layer_stats(hours: int = 24) -> list[dict]:
             ORDER BY layer
         """, (hours,))
         return [dict(r) for r in cur.fetchall()]
+
+
+def _init_compliance():
+    with _cursor() as cur:
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS compliance_reports (
+                id           SERIAL PRIMARY KEY,
+                report_id    TEXT NOT NULL UNIQUE,
+                agent_name   TEXT NOT NULL,
+                generated_by TEXT NOT NULL,
+                period_start TIMESTAMPTZ,
+                period_end   TIMESTAMPTZ,
+                status       TEXT NOT NULL DEFAULT 'generating',
+                report_md    TEXT,
+                created_at   TIMESTAMPTZ DEFAULT NOW()
+            )
+        """)
+
+
+_init_compliance()
 
 
 def get_timeseries(hours: int = 24) -> dict:

@@ -115,8 +115,12 @@ def _tool_from_body(body: ToolBody, actor: str, existing: dict | None = None) ->
 # ---------------------------------------------------------------------------
 
 @router.get("")
-def list_global_tools():
-    return {"tools": registry_db.list_tools(scope="global")}
+def list_global_tools(
+    domain: str | None = None,
+    subdomain: str | None = None,
+):
+    """List global tools with optional domain/subdomain filters."""
+    return {"tools": registry_db.list_tools(scope="global", domain=domain, subdomain=subdomain)}
 
 
 # ---------------------------------------------------------------------------

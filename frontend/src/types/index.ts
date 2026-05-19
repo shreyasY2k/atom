@@ -16,6 +16,8 @@ export interface AgentRecord {
   description?: string
   skills?: { name: string; content: string }[]
   version_count?: number
+  domain?: string
+  subdomain?: string
 }
 
 export interface TraceMessage {

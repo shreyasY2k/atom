@@ -55,6 +55,8 @@ export interface ToolRecord {
   input_schema?: Record<string, unknown>
   output_schema?: Record<string, unknown>
   tags?: string[]
+  domain?: string
+  subdomain?: string
   created_by?: string
   created_at?: string
   updated_at?: string
@@ -119,8 +121,14 @@ export interface DeploymentRecord {
 
 export const builderApi = {
   // Agents
-  listAgents: (): Promise<{ agents: AgentRecord[] }> =>
-    fetch(`${BASE}/agents`, { headers: actor() }).then(json),
+  listAgents: (filters?: { domain?: string; subdomain?: string; status?: string }): Promise<{ agents: AgentRecord[] }> => {
+    const params = new URLSearchParams()
+    if (filters?.domain) params.set('domain', filters.domain)
+    if (filters?.subdomain) params.set('subdomain', filters.subdomain)
+    if (filters?.status) params.set('status', filters.status)
+    const qs = params.toString()
+    return fetch(`${BASE}/agents${qs ? '?' + qs : ''}`, { headers: actor() }).then(json)
+  },
 
   getAgent: (name: string): Promise<AgentRecord> =>
     fetch(`${BASE}/agents/${name}`, { headers: actor() }).then(json),
@@ -290,9 +298,32 @@ export const builderApi = {
   startEdit: (name: string): Promise<{ status: string; base_version: number }> =>
     fetch(`${BASE}/agents/${name}/edit`, { method: 'POST', headers: actor() }).then(json),
 
+  // Compliance reports
+  generateComplianceReport: (name: string, periodDays = 30, notes = ''): Promise<{ report_id: string; status: string }> =>
+    fetch(`${BASE}/agents/${name}/compliance-report`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...actor() },
+      body: JSON.stringify({ period_days: periodDays, notes }),
+    }).then(json),
+
+  getComplianceReport: (name: string, reportId: string): Promise<{ status: string; report_md?: string; created_at?: string }> =>
+    fetch(`${BASE}/agents/${name}/compliance-report/${reportId}`, { headers: actor() }).then(json),
+
+  listComplianceReports: (name: string): Promise<{ reports: { report_id: string; status: string; created_at: string; period_start: string; period_end: string }[] }> =>
+    fetch(`${BASE}/agents/${name}/compliance-reports`, { headers: actor() }).then(json),
+
+  // Domains taxonomy
+  listDomains: (): Promise<{ domains: { domain: string; subdomains: string[] }[] }> =>
+    fetch(`${BASE}/domains`, { headers: actor() }).then(json),
+
   // Tools registry
-  listGlobalTools: (): Promise<{ tools: ToolRecord[] }> =>
-    fetch(`${BASE}/tools`, { headers: actor() }).then(json),
+  listGlobalTools: (filters?: { domain?: string; subdomain?: string }): Promise<{ tools: ToolRecord[] }> => {
+    const params = new URLSearchParams()
+    if (filters?.domain) params.set('domain', filters.domain)
+    if (filters?.subdomain) params.set('subdomain', filters.subdomain)
+    const qs = params.toString()
+    return fetch(`${BASE}/tools${qs ? '?' + qs : ''}`, { headers: actor() }).then(json)
+  },
 
   createGlobalTool: (tool: Partial<ToolRecord>): Promise<ToolRecord> =>
     fetch(`${BASE}/tools`, {

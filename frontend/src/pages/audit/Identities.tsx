@@ -11,7 +11,7 @@ import type { AgentRecord } from '../../types'
 
 export default function Identities() {
   const qc = useQueryClient()
-  const { data, isLoading } = useQuery({ queryKey: ['agents'], queryFn: builderApi.listAgents })
+  const { data, isLoading } = useQuery({ queryKey: ['agents'], queryFn: () => builderApi.listAgents() })
   const agents: AgentRecord[] = data?.agents ?? []
 
   return (

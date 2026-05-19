@@ -4,7 +4,7 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from app.routes import specs, agents, registry, studio, auth, deployments, tools, sessions, files, command_center
+from app.routes import specs, agents, registry, studio, auth, deployments, tools, sessions, files, command_center, domains, compliance
 from app.core.observability import setup
 from app.core.seed import seed_tools
 
@@ -32,6 +32,8 @@ app.include_router(tools.router)
 app.include_router(sessions.router)
 app.include_router(files.router)
 app.include_router(command_center.router)
+app.include_router(domains.router)
+app.include_router(compliance.router)
 
 
 @app.get("/health")

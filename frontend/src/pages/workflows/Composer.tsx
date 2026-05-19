@@ -1180,7 +1180,7 @@ export default function Composer({ workflowName: propName }: { workflowName?: st
 
   // ── Agents ─────────────────────────────────────────────────────────────────
 
-  const { data: agentsData } = useQuery({ queryKey: ['agents'], queryFn: builderApi.listAgents })
+  const { data: agentsData } = useQuery({ queryKey: ['agents'], queryFn: () => builderApi.listAgents() })
   const agents = (agentsData?.agents ?? []).map((a) => ({
     name: a.name,
     service_account_id: a.service_account_id,

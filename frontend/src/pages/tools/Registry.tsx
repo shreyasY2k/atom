@@ -2,7 +2,8 @@ import React, { useState, useEffect, useCallback } from 'react'
 import {
   Box, Typography, Button, Paper, Chip, IconButton,
   CircularProgress, Alert, Stack, Dialog, DialogTitle,
-  DialogContent, DialogActions, TextField,
+  DialogContent, DialogActions, TextField, Accordion,
+  AccordionSummary, AccordionDetails, InputAdornment,
   Table, TableBody, TableCell,
   TableContainer, TableHead, TableRow, Tooltip,
 } from '@mui/material'
@@ -11,6 +12,8 @@ import EditIcon from '@mui/icons-material/Edit'
 import DeleteIcon from '@mui/icons-material/Delete'
 import ExtensionIcon from '@mui/icons-material/Extension'
 import PlayArrowIcon from '@mui/icons-material/PlayArrow'
+import ExpandMoreIcon from '@mui/icons-material/ExpandMore'
+import SearchIcon from '@mui/icons-material/Search'
 import { builderApi, ToolRecord } from '../../api/builder'
 import ToolFormDialog from '../../components/ToolFormDialog'
 
@@ -237,6 +240,8 @@ export default function ToolsRegistry() {
   const [tools, setTools] = useState<ToolRecord[]>([])
   const [loading, setLoading] = useState(true)
   const [loadError, setLoadError] = useState('')
+  const [search, setSearch] = useState('')
+  const [domainFilter, setDomainFilter] = useState('')
 
   const [formOpen, setFormOpen] = useState(false)
   const [editingTool, setEditingTool] = useState<ToolRecord | null>(null)
@@ -262,6 +267,26 @@ export default function ToolsRegistry() {
   useEffect(() => {
     fetchTools()
   }, [fetchTools])
+
+  // Group tools by domain for display
+  const filteredTools = tools.filter(t => {
+    const matchSearch = !search || t.name.toLowerCase().includes(search.toLowerCase()) || (t.description || '').toLowerCase().includes(search.toLowerCase())
+    const matchDomain = !domainFilter || t.domain === domainFilter
+    return matchSearch && matchDomain
+  })
+
+  const domains = [...new Set(tools.map(t => t.domain).filter(Boolean))] as string[]
+  const toolsByDomain: Record<string, ToolRecord[]> = {}
+  const untagged: ToolRecord[] = []
+  for (const t of filteredTools) {
+    if (t.domain) {
+      toolsByDomain[t.domain] = toolsByDomain[t.domain] || []
+      toolsByDomain[t.domain].push(t)
+    } else {
+      untagged.push(t)
+    }
+  }
+  if (untagged.length > 0) toolsByDomain['untagged'] = untagged
 
   const handleOpenCreate = () => {
     setEditingTool(null)
@@ -303,48 +328,20 @@ export default function ToolsRegistry() {
     }
   }
 
-  return (
-    <Box sx={{ p: 3, height: '100%', overflowY: 'auto' }}>
-      {/* Header */}
-      <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mb: 3 }}>
-        <Box>
-          <Typography variant="h6" fontWeight={700}>Tools Registry</Typography>
-          <Typography variant="body2" color="text.secondary">
-            Global tools available to all agents on the platform.
-          </Typography>
-        </Box>
-        <Button variant="contained" startIcon={<AddIcon />} onClick={handleOpenCreate}>
-          Create Tool
-        </Button>
-      </Box>
-
-      {/* Load error */}
-      {loadError && (
-        <Alert severity="error" sx={{ mb: 2, fontSize: '0.75rem' }}>{loadError}</Alert>
-      )}
-
-      {/* Loading */}
-      {loading ? (
-        <Box sx={{ display: 'flex', justifyContent: 'center', py: 8 }}>
-          <CircularProgress />
-        </Box>
-      ) : tools.length === 0 ? (
-        <EmptyState onCreateClick={handleOpenCreate} />
-      ) : (
-        <TableContainer component={Paper} variant="outlined">
-          <Table size="small">
-            <TableHead>
-              <TableRow sx={{ '& th': { fontWeight: 700, bgcolor: 'background.default', fontSize: '0.78rem' } }}>
-                <TableCell>Name</TableCell>
-                <TableCell>Description</TableCell>
-                <TableCell>Type</TableCell>
-                <TableCell>Endpoint / URL</TableCell>
-                <TableCell>Method</TableCell>
-                <TableCell>Tags</TableCell>
-                <TableCell align="right">Actions</TableCell>
-              </TableRow>
-            </TableHead>
-            <TableBody>
+  const ToolTable = ({ toolList }: { toolList: ToolRecord[] }) => (
+    <TableContainer>
+      <Table size="small">
+        <TableHead>
+          <TableRow sx={{ '& th': { fontWeight: 700, bgcolor: 'background.default', fontSize: '0.75rem' } }}>
+            <TableCell>Name</TableCell>
+            <TableCell>Description</TableCell>
+            <TableCell>Type</TableCell>
+            <TableCell>Domain / Sub</TableCell>
+            <TableCell>Tags</TableCell>
+            <TableCell align="right">Actions</TableCell>
+          </TableRow>
+        </TableHead>
+        <TableBody>
               {tools.map(tool => (
                 <TableRow key={tool.tool_id} hover>
                   <TableCell>
@@ -368,28 +365,18 @@ export default function ToolsRegistry() {
                     <TypeChip toolType={tool.tool_type} />
                   </TableCell>
                   <TableCell>
-                    <Typography
-                      variant="caption"
-                      fontFamily="monospace"
-                      sx={{ color: 'text.secondary', wordBreak: 'break-all' }}
-                    >
-                      {tool.tool_type === 'http'
-                        ? (tool.endpoint ?? '—')
-                        : tool.tool_type === 'mcp'
-                        ? (tool.mcp_server_url ?? '—')
-                        : '—'}
-                    </Typography>
-                  </TableCell>
-                  <TableCell>
-                    {tool.tool_type === 'http' ? <MethodBadge method={tool.method} /> : (
-                      <Typography variant="caption" color="text.disabled">—</Typography>
-                    )}
+                    {tool.domain ? (
+                      <Box>
+                        <Chip label={tool.domain} size="small" color="primary" variant="outlined" sx={{ fontSize: '0.62rem', height: 16, mr: 0.5 }} />
+                        {tool.subdomain && <Chip label={tool.subdomain} size="small" variant="outlined" sx={{ fontSize: '0.62rem', height: 16 }} />}
+                      </Box>
+                    ) : <Typography variant="caption" color="text.disabled">—</Typography>}
                   </TableCell>
                   <TableCell>
                     <Box sx={{ display: 'flex', gap: 0.5, flexWrap: 'wrap' }}>
                       {(tool.tags ?? []).length > 0
                         ? tool.tags!.map(tag => (
-                            <Chip key={tag} label={tag} size="small" variant="outlined" sx={{ fontSize: '0.65rem', height: 18 }} />
+                            <Chip key={tag} label={tag} size="small" variant="outlined" sx={{ fontSize: '0.62rem', height: 16 }} />
                           ))
                         : <Typography variant="caption" color="text.disabled">—</Typography>
                       }
@@ -416,30 +403,78 @@ export default function ToolsRegistry() {
                   </TableCell>
                 </TableRow>
               ))}
-            </TableBody>
-          </Table>
-        </TableContainer>
+        </TableBody>
+      </Table>
+    </TableContainer>
+  )
+
+  return (
+    <Box sx={{ p: 3, height: '100%', overflowY: 'auto' }}>
+      {/* Header */}
+      <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mb: 2.5 }}>
+        <Box>
+          <Typography variant="h6" fontWeight={700}>Tools Registry</Typography>
+          <Typography variant="body2" color="text.secondary">
+            {tools.length} global tools · grouped by domain
+          </Typography>
+        </Box>
+        <Button variant="contained" startIcon={<AddIcon />} onClick={handleOpenCreate}>
+          Create Tool
+        </Button>
+      </Box>
+
+      {/* Filters */}
+      <Box sx={{ display: 'flex', gap: 1.5, mb: 2.5, flexWrap: 'wrap' }}>
+        <TextField
+          size="small" placeholder="Search tools…" value={search} onChange={e => setSearch(e.target.value)}
+          sx={{ minWidth: 200 }}
+          InputProps={{ startAdornment: <InputAdornment position="start"><SearchIcon fontSize="small" /></InputAdornment> }}
+        />
+        {domains.length > 0 && (
+          <Box sx={{ display: 'flex', gap: 0.75, flexWrap: 'wrap', alignItems: 'center' }}>
+            <Chip label="All" size="small" variant={!domainFilter ? 'filled' : 'outlined'} color={!domainFilter ? 'primary' : 'default'} onClick={() => setDomainFilter('')} />
+            {domains.map(d => (
+              <Chip key={d} label={d} size="small" variant={domainFilter === d ? 'filled' : 'outlined'} color={domainFilter === d ? 'primary' : 'default'} onClick={() => setDomainFilter(domainFilter === d ? '' : d)} />
+            ))}
+          </Box>
+        )}
+      </Box>
+
+      {/* Load error */}
+      {loadError && <Alert severity="error" sx={{ mb: 2, fontSize: '0.75rem' }}>{loadError}</Alert>}
+
+      {loading ? (
+        <Box sx={{ display: 'flex', justifyContent: 'center', py: 8 }}><CircularProgress /></Box>
+      ) : tools.length === 0 ? (
+        <EmptyState onCreateClick={handleOpenCreate} />
+      ) : filteredTools.length === 0 ? (
+        <Typography variant="body2" color="text.secondary">No tools match your filters.</Typography>
+      ) : (
+        <Stack spacing={1.5}>
+          {Object.entries(toolsByDomain).sort(([a], [b]) => a.localeCompare(b)).map(([domain, domainTools]) => (
+            <Accordion key={domain} defaultExpanded variant="outlined" sx={{ borderRadius: '8px !important', '&:before': { display: 'none' } }}>
+              <AccordionSummary expandIcon={<ExpandMoreIcon />}>
+                <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5 }}>
+                  <Chip label={domain} size="small" color={domain === 'untagged' ? 'default' : 'primary'} variant="outlined" sx={{ fontWeight: 700, fontSize: '0.72rem' }} />
+                  <Typography variant="body2" color="text.secondary">{domainTools.length} tool{domainTools.length !== 1 ? 's' : ''}</Typography>
+                  <Box sx={{ display: 'flex', gap: 0.5 }}>
+                    {[...new Set(domainTools.map(t => t.subdomain).filter(Boolean))].map(sd => (
+                      <Chip key={sd} label={sd} size="small" variant="outlined" sx={{ fontSize: '0.62rem', height: 16 }} />
+                    ))}
+                  </Box>
+                </Box>
+              </AccordionSummary>
+              <AccordionDetails sx={{ p: 0 }}>
+                <ToolTable toolList={domainTools} />
+              </AccordionDetails>
+            </Accordion>
+          ))}
+        </Stack>
       )}
 
-      <ToolFormDialog
-        open={formOpen}
-        onClose={handleFormClose}
-        onSave={handleFormSave}
-        initialData={editingTool}
-        title={editingTool ? 'Edit Tool' : 'Create Global Tool'}
-      />
-
-      <DeleteDialog
-        tool={deletingTool}
-        onClose={() => setDeletingTool(null)}
-        onConfirm={handleDeleteConfirm}
-        deleting={deleteInProgress}
-      />
-
-      <TestToolDialog
-        tool={testingTool}
-        onClose={() => setTestingTool(null)}
-      />
+      <ToolFormDialog open={formOpen} onClose={handleFormClose} onSave={handleFormSave} initialData={editingTool} title={editingTool ? 'Edit Tool' : 'Create Global Tool'} />
+      <DeleteDialog tool={deletingTool} onClose={() => setDeletingTool(null)} onConfirm={handleDeleteConfirm} deleting={deleteInProgress} />
+      <TestToolDialog tool={testingTool} onClose={() => setTestingTool(null)} />
     </Box>
   )
 }

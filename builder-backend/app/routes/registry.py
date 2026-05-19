@@ -33,8 +33,15 @@ def _backfill_role_name(agents: list[dict]) -> list[dict]:
 
 
 @router.get("")
-def list_agents():
-    agents = _backfill_role_name(registry_db.list_all())
+def list_agents(
+    domain: str | None = None,
+    subdomain: str | None = None,
+    status: str | None = None,
+):
+    """List agents with optional domain/subdomain/status filters."""
+    agents = _backfill_role_name(registry_db.list_agents(domain=domain, subdomain=subdomain))
+    if status:
+        agents = [a for a in agents if a.get("status") == status]
     return {"agents": agents}
 
 

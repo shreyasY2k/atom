@@ -4,7 +4,7 @@ import {
   Box, Typography, TextField, Button, Paper, Chip, IconButton,
   CircularProgress, Alert, Divider, Stack, Tooltip, Dialog,
   DialogTitle, DialogContent, DialogActions, Tabs, Tab,
-  LinearProgress, Switch, FormControlLabel,
+  LinearProgress, Switch, FormControlLabel, Autocomplete,
 } from '@mui/material'
 import CheckCircleIcon from '@mui/icons-material/CheckCircle'
 import ErrorIcon from '@mui/icons-material/Error'
@@ -119,13 +119,18 @@ function BackButton({ currentStep, onBack }: { currentStep: StepId; onBack: () =
 
 // ── Step 1: Basic Info ────────────────────────────────────────────────────────
 
-function StepBasics({ agentName, setAgentName, description, setDescription, provisioning, provisionError, onContinue, identity, editMode }: {
+function StepBasics({ agentName, setAgentName, description, setDescription, domain, setDomain, subdomain, setSubdomain, provisioning, provisionError, onContinue, identity, editMode, domainOptions }: {
   agentName: string; setAgentName: (v: string) => void; description: string; setDescription: (v: string) => void
+  domain: string; setDomain: (v: string) => void; subdomain: string; setSubdomain: (v: string) => void
   provisioning: boolean; provisionError: string; onContinue: () => void; identity: string; editMode: boolean
+  domainOptions: { domain: string; subdomains: string[] }[]
 }) {
   const nameValid = /^[a-z][a-z0-9-]{1,38}[a-z0-9]$/.test(agentName)
   const nameError = agentName && !nameValid ? 'Lowercase letters, numbers, hyphens only. 3–40 chars.' : ''
   const canContinue = nameValid && description.trim().length > 0 && !provisioning
+
+  const selectedDomainEntry = domainOptions.find(d => d.domain === domain)
+  const subdomainOptions = selectedDomainEntry?.subdomains ?? []
 
   return (
     <Box>
@@ -158,6 +163,34 @@ function StepBasics({ agentName, setAgentName, description, setDescription, prov
           helperText={`${description.length}/500`}
           disabled={provisioning}
         />
+
+        {/* Domain / Subdomain */}
+        <Box sx={{ display: 'flex', gap: 2 }}>
+          <Autocomplete
+            freeSolo
+            options={domainOptions.map(d => d.domain)}
+            value={domain}
+            onInputChange={(_, v) => { setDomain(v); setSubdomain('') }}
+            renderInput={params => (
+              <TextField {...params} label="Domain" placeholder="e.g. banking" size="small" fullWidth
+                helperText="Broad category this agent operates in" />
+            )}
+            sx={{ flex: 1 }}
+          />
+          <Autocomplete
+            freeSolo
+            options={subdomainOptions}
+            value={subdomain}
+            onInputChange={(_, v) => setSubdomain(v)}
+            disabled={!domain}
+            renderInput={params => (
+              <TextField {...params} label="Subdomain" placeholder="e.g. kyc" size="small" fullWidth
+                helperText="Specific function within the domain" />
+            )}
+            sx={{ flex: 1 }}
+          />
+        </Box>
+
         <Box>
           <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 0.75 }}>Owner (auto-assigned)</Typography>
           <Chip label={identity || 'user:builder@atom.io'} size="small" sx={{ fontFamily: 'monospace', fontSize: '0.72rem' }} />
@@ -615,8 +648,11 @@ export default function Builder() {
   // Step 1
   const [agentName, setAgentName] = useState(editAgentName)
   const [description, setDescription] = useState('')
+  const [domain, setDomain] = useState('')
+  const [subdomain, setSubdomain] = useState('')
   const [provisioning, setProvisioning] = useState(false)
   const [provisionError, setProvisionError] = useState('')
+  const [domainOptions, setDomainOptions] = useState<{ domain: string; subdomains: string[] }[]>([])
 
   // Step 2
   const [agentTools, setAgentTools] = useState<ToolRecord[]>([])
@@ -639,6 +675,11 @@ export default function Builder() {
   const [deployed, setDeployed] = useState(false)
   const [guardrailEnabled, setGuardrailEnabled] = useState(true)
 
+  // Load domain taxonomy on mount
+  useEffect(() => {
+    builderApi.listDomains().then(d => setDomainOptions(d.domains)).catch(() => {})
+  }, [])
+
   // Load existing agent data in edit mode
   useEffect(() => {
     if (!editMode) return
@@ -654,6 +695,8 @@ export default function Builder() {
         ])
         setAgentName(agentData.name)
         setDescription(agentData.description || '')
+        setDomain(agentData.domain || '')
+        setSubdomain(agentData.subdomain || '')
         setAgentTools(toolsData.tools)
         setGlobalTools(globalToolsData.tools)
         setAgentSkills(skillsData.skills)
@@ -781,7 +824,7 @@ export default function Builder() {
       <Box sx={{ flex: 1, overflowY: 'auto', p: { xs: 2, sm: 3, md: 4 } }}>
         <Paper elevation={0} sx={{ maxWidth: 800, mx: 'auto', p: { xs: 2, sm: 3, md: 4 }, border: 1, borderColor: 'divider', borderRadius: 2 }}>
           {currentStep === 'basics' && (
-            <StepBasics agentName={agentName} setAgentName={setAgentName} description={description} setDescription={setDescription} provisioning={provisioning} provisionError={provisionError} onContinue={handleProvision} identity={identity} editMode={editMode} />
+            <StepBasics agentName={agentName} setAgentName={setAgentName} description={description} setDescription={setDescription} domain={domain} setDomain={setDomain} subdomain={subdomain} setSubdomain={setSubdomain} provisioning={provisioning} provisionError={provisionError} onContinue={handleProvision} identity={identity} editMode={editMode} domainOptions={domainOptions} />
           )}
           {currentStep === 'tools' && (
             <StepTools agentName={agentName} agentTools={agentTools} globalTools={globalTools} agentSkills={agentSkills} loadingTools={loadingTools} toolsError={toolsError} onAssociateTool={handleAssociateTool} onCreateAgentTool={handleCreateAgentTool} onRemoveAgentTool={handleRemoveAgentTool} onAddSkill={handleAddSkill} onDeleteSkill={handleDeleteSkill} onBack={goBack} onContinue={() => completeStep('tools', 'generate')} />

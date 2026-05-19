@@ -9,6 +9,8 @@ import {
 import ArrowBackIcon from '@mui/icons-material/ArrowBack'
 import SmartToyIcon from '@mui/icons-material/SmartToy'
 import HistoryIcon from '@mui/icons-material/History'
+import ArticleIcon from '@mui/icons-material/Article'
+import ComplianceReport from './ComplianceReport'
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore'
 import ExpandLessIcon from '@mui/icons-material/ExpandLess'
 import CheckCircleOutlineIcon from '@mui/icons-material/CheckCircleOutline'
@@ -1032,7 +1034,7 @@ function ApiDocsTab({ name, deployed }: { name: string; deployed: boolean }) {
 export default function AgentDetail() {
   const { name = '' } = useParams<{ name: string }>()
   const navigate = useNavigate()
-  const [tab, setTab] = useState<'overview' | 'deployments' | 'sessions' | 'apidocs'>('overview')
+  const [tab, setTab] = useState<'overview' | 'deployments' | 'sessions' | 'apidocs' | 'compliance'>('overview')
 
   const { data: agent, isLoading, error } = useQuery({
     queryKey: ['agent', name],
@@ -1058,6 +1060,8 @@ export default function AgentDetail() {
           icon={<HistoryIcon sx={{ fontSize: 14 }} />} iconPosition="end" />
         <Tab value="sessions" label="Sessions" />
         <Tab value="apidocs" label="API Docs" />
+        <Tab value="compliance" label="Compliance"
+          icon={<ArticleIcon sx={{ fontSize: 14 }} />} iconPosition="end" />
       </Tabs>
 
       {isLoading && <CircularProgress size={20} />}
@@ -1069,6 +1073,7 @@ export default function AgentDetail() {
       {tab === 'apidocs' && (
         <ApiDocsTab name={name} deployed={agent?.status === 'deployed'} />
       )}
+      {tab === 'compliance' && <ComplianceReport agentName={name} />}
     </Box>
   )
 }

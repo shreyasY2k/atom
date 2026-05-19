@@ -20,6 +20,31 @@ def _stable_id(name: str) -> str:
 
 
 # ---------------------------------------------------------------------------
+# Domain / subdomain taxonomy used for tagging tools and agents.
+# ---------------------------------------------------------------------------
+
+# Maps tool_name → (domain, subdomain) for all seeded tools.
+_TOOL_DOMAIN: dict[str, tuple[str, str]] = {
+    "calculate_risk":          ("general",  "risk"),
+    "get_customer_profile":    ("banking",  "kyc"),
+    "get_kyc_documents":       ("banking",  "kyc"),
+    "get_external_screening":  ("banking",  "kyc"),
+    "get_kyc_profile":         ("payments", "compliance"),
+    "screen_ofac_sanctions":   ("payments", "compliance"),
+    "get_transaction_history": ("banking",  "fraud"),
+    "get_fraud_signals":       ("banking",  "fraud"),
+    "get_customer_positions":  ("banking",  "securities"),
+    "get_security_master":     ("banking",  "securities"),
+    "check_position_lots":     ("banking",  "securities"),
+    "get_overnight_positions": ("banking",  "treasury"),
+    "get_market_data":         ("banking",  "treasury"),
+    "compute_lcr":             ("banking",  "treasury"),
+    "get_trailing_metrics":    ("banking",  "treasury"),
+    "validate_hqla_composition": ("banking", "treasury"),
+}
+
+
+# ---------------------------------------------------------------------------
 # Tool definitions — names MUST match tools/registry.py function names exactly
 # so get_tool_by_name(name) can resolve them in generated agent code.
 # ---------------------------------------------------------------------------
@@ -274,8 +299,21 @@ def seed_tools() -> None:
 
     inserted = 0
     for tool in _DEMO_TOOLS:
-        if tool["name"] in existing_names:
+        name = tool["name"]
+        if name in existing_names:
+            # Update domain/subdomain even on existing tools
+            domain, subdomain = _TOOL_DOMAIN.get(name, ("", ""))
+            if domain:
+                try:
+                    with registry_db._cursor() as cur:
+                        cur.execute(
+                            "UPDATE tools SET domain=%s, subdomain=%s WHERE name=%s",
+                            (domain, subdomain, name),
+                        )
+                except Exception:
+                    pass
             continue
+        domain, subdomain = _TOOL_DOMAIN.get(name, ("", ""))
         registry_db.upsert_tool({
             **tool,
             "created_at": now,
@@ -287,6 +325,8 @@ def seed_tools() -> None:
             "mcp_transport": "sse",
             "mcp_tool_names": [],
             "owner_agent": None,
+            "domain": domain,
+            "subdomain": subdomain,
         })
         print(f"[seed] registered tool: {tool['name']}")
         inserted += 1

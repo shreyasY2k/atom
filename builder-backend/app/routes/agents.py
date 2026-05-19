@@ -182,12 +182,24 @@ def _do_deploy_agent(name: str, actor: str) -> dict:
     except Exception as e:
         raise HTTPException(502, f"Identity issuance failed: {e}")
 
+    # Extract domain/subdomain from spec metadata.
+    # domain field from spec: e.g. "banking-kyc" → domain="banking", subdomain="kyc"
+    raw_domain = getattr(spec.metadata, "domain", "") or ""
+    if "-" in raw_domain and raw_domain.count("-") == 1:
+        _dom, _sub = raw_domain.split("-", 1)
+    else:
+        _dom, _sub = raw_domain, ""
+    # Allow explicit subdomain override from spec_dict metadata
+    _sub = spec_dict.get("metadata", {}).get("subdomain", _sub)
+
     registry_db.upsert({
         "name": name, "version": spec.metadata.version,
         "service_account_id": svc_id, "virtual_key": vkey,
         "owner": actor, "deployed_at": datetime.now(timezone.utc).isoformat(),
         "endpoint": None, "container_id": None,
         "spec_hash": spec_hash, "code_hash": chash, "status": "deploying",
+        "domain": _dom,
+        "subdomain": _sub,
     })
 
     from app.core.container import STUDIO_URL
