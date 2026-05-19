@@ -18,9 +18,9 @@ You are compiling a YAML spec into a single Python file. The deployed agent will
 ## Hard rules — never violate
 
 1. **Use AgentScope's `OpenAIChatModel`** with `client_args` pointing at `LITELLM_BASE_URL` from env (resolves to `http://gate:8083/v1` — GATE LLM proxy — never hardcode). Never `import google.generativeai`. Never set Gemini keys in code.
-2. **Temperature is 1.0** for every Gemini 3 model. Pass it explicitly.
+2. **Temperature comes from the spec** (valid range 0.0–2.0). Pass it explicitly in `generate_kwargs`.
 3. **`reasoning_effort` is set per spec** ("low", "medium", or "high"). LiteLLM maps this to Gemini's `thinking_level`.
-4. **Import every tool from `tools.registry`.** Never define new tool functions in the generated file.
+4. **Tools are either injected inline or loaded from `tools.registry`.** If the prompt includes an `## INJECTED TOOL IMPLEMENTATIONS` section, copy those function bodies verbatim and register them by direct reference. For any remaining tool names, use `get_tool_by_name` from `tools.registry`. Never invent tool function bodies that were not provided.
 5. **Use `ReActAgent`** without subclassing.
 6. **Multi-agent flow uses `MsgHub`** for maker-checker.
 7. **Output is exactly one Python file.**
@@ -86,7 +86,7 @@ def make_model(model_alias: str, reasoning_effort: str = "medium") -> OpenAIChat
         api_key=LITELLM_API_KEY,
         client_args={"base_url": f"{LITELLM_BASE_URL}/v1"},
         generate_kwargs={
-            "temperature": 1.0,
+            "temperature": <<agent.temperature>>,  # from spec, 0.0–2.0
             "extra_body": {
                 "reasoning_effort": reasoning_effort,
                 # Tag every request with our identity for audit
@@ -137,9 +137,11 @@ AGENT_INPUT_SCHEMA = <<agent.input_schema or {}>>
 # ── TOOL-USING PATH: if agent.tools is non-empty ───────────────────────────────
 # << Else: >>
 
-from tools.registry import get_tool_by_name  # REQUIRED — no domain guessing needed
+from tools.registry import get_tool_by_name  # REQUIRED even if only inline tools are used
+import httpx as _httpx  # REQUIRED for inline http tools
 
 import json as _json
+from agentscope.tool import Toolkit
 from agentscope.tool._toolkit import ToolResponse
 
 def _as_tool_response(fn):
@@ -149,6 +151,14 @@ def _as_tool_response(fn):
         result = fn(*args, **kwargs)
         return ToolResponse(content=[{"type": "text", "text": _json.dumps(result, default=str)}])
     return wrapper
+
+# << If the prompt contained an INJECTED TOOL IMPLEMENTATIONS section: >>
+# Copy the provided function bodies VERBATIM here (after the httpx import).
+# Example for an inline http tool:
+#   def get_risk_assessment(customer_id: str, amount_usd: float = 0.0) -> dict:
+#       """Screen a customer against OFAC sanctions."""
+#       return _httpx.post("http://ofac-svc:8096/screen", json={"customer_id": customer_id, "amount_usd": amount_usd}, timeout=10).json()
+# << end if >>
 
 # System prompt: prescribed vs guided
 # << If agent.reasoning_mode == "prescribed": >>
@@ -164,12 +174,14 @@ def _as_tool_response(fn):
 # Input schema for free-text extraction
 AGENT_INPUT_SCHEMA = <<agent.input_schema or {}>>
 
-# Load tools by name — use EXACTLY the names from agent.tools in the spec
 toolkit = Toolkit()
-for _tool_name in <<agent.tools>>:
-    _fn = get_tool_by_name(_tool_name)
-    if _fn:
-        toolkit.register_tool_function(_as_tool_response(_fn))
+# << For each INJECTED inline tool (provided verbatim above): register by direct reference >>
+# toolkit.register_tool_function(_as_tool_response(get_risk_assessment))
+# << For each remaining tool name (not injected inline): load from registry >>
+# for _tool_name in [<<non-injected tool names>>]:
+#     _fn = get_tool_by_name(_tool_name)
+#     if _fn:
+#         toolkit.register_tool_function(_as_tool_response(_fn))
 # << For each skill in agent.agentscope_skills: >>
 # toolkit.register_tool_function(_as_tool_response(_web_search_fn))
 # << end for >>
@@ -318,9 +330,9 @@ if __name__ == "__main__":
 - Contains `from agentscope` (not direct provider imports)
 - Contains `LITELLM_BASE_URL` literal
 - Contains `SERVICE_ACCOUNT_ID` env read
-- Contains `from tools.registry import resolve_tools`
+- Contains `from tools.registry import get_tool_by_name` (required even when all tools are inline)
 - Contains `from memory.reme_client import ReMeClient`
-- Contains `temperature=1.0` somewhere
+- Contains a numeric temperature value (e.g. `"temperature": 1.0`) in generate_kwargs
 - Contains `metadata` with `actor_type` and `actor_id` for audit tagging
 - Contains `AgentApp(`
 - Contains `if __name__ == "__main__":`
