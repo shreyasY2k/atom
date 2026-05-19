@@ -31,7 +31,7 @@ _REQUIRED_PATTERNS = [
     (r"LITELLM_BASE_URL", "must read LITELLM_BASE_URL from env"),
     (r"SERVICE_ACCOUNT_ID", "must read SERVICE_ACCOUNT_ID from env"),
     (r"from tools\.registry import (resolve_tools|get_tool_by_name)", "must import get_tool_by_name (or resolve_tools) from tools.registry"),
-    (r"temperature=1\.0", "must set temperature=1.0"),
+    (r'["\']?temperature["\']?\s*[=:]\s*[0-9]', "must set temperature in generate_kwargs"),
     (r'"actor_type"', "must include actor_type in metadata"),
     (r'"actor_id"', "must include actor_id in metadata"),
     (r'"user".*SERVICE_ACCOUNT_ID|SERVICE_ACCOUNT_ID.*"user"', 'must pass "user": SERVICE_ACCOUNT_ID to satisfy enforce_user_param'),
@@ -132,7 +132,7 @@ _FASTAPI_OVERRIDE = textwrap.dedent("""
 
     ```python
     generate_kwargs={
-        "temperature": 1.0,
+        "temperature": <temperature from spec, e.g. 1.0>,
         "user": SERVICE_ACCOUNT_ID,
         "extra_body": {
             "reasoning_effort": reasoning_effort,
@@ -534,16 +534,98 @@ def _fix_generated_patterns(code: str) -> str:
     return code
 
 
-def _lint(code: str, spec: AgentSpec | None = None) -> list[str]:
+# ---------------------------------------------------------------------------
+# Inline tool code generation (Option B: DB tools injected at codegen time)
+# ---------------------------------------------------------------------------
+
+_REGISTRY_NAMES: set[str] | None = None
+
+
+def _get_registry_names() -> set[str]:
+    """Names of tools present in the hardcoded DOMAIN_TOOLS registry."""
+    global _REGISTRY_NAMES
+    if _REGISTRY_NAMES is None:
+        try:
+            from tools.registry import _GLOBAL_REGISTRY  # noqa: PLC0415
+            _REGISTRY_NAMES = set(_GLOBAL_REGISTRY.keys())
+        except Exception:
+            _REGISTRY_NAMES = set()
+    return _REGISTRY_NAMES
+
+
+def _json_type_to_python(t: str) -> str:
+    return {"string": "str", "number": "float", "integer": "int",
+            "boolean": "bool", "array": "list", "object": "dict"}.get(t, "str")
+
+
+def _generate_inline_tool(tool: dict) -> str:
+    """Return a Python function definition string for a DB tool record.
+
+    Returns '' if the tool cannot be expressed as a self-contained function
+    (e.g. mcp type, or http with no endpoint).
+    """
+    name = tool.get("name", "")
+    if not name:
+        return ""
+    desc = (tool.get("description") or f"Tool: {name}").replace('"""', "'''")
+    tool_type = tool.get("tool_type", "http")
+
+    if tool_type == "python":
+        code = (tool.get("code") or "").strip()
+        return code  # caller supplied the full function body
+
+    if tool_type == "http":
+        endpoint = (tool.get("endpoint") or "").strip()
+        if not endpoint:
+            return ""
+        method = (tool.get("method") or "POST").upper()
+        schema = tool.get("input_schema") or {}
+        props = schema.get("properties", {})
+        required_set = set(schema.get("required", []))
+
+        param_parts: list[str] = []
+        for pname, pdef in props.items():
+            ptype = _json_type_to_python(pdef.get("type", "string"))
+            if pname in required_set:
+                param_parts.append(f"{pname}: {ptype}")
+            else:
+                default = {"str": '""', "float": "0.0", "int": "0", "bool": "False"}.get(ptype, "None")
+                param_parts.append(f"{pname}: {ptype} = {default}")
+
+        param_names = [p.split(":")[0].strip() for p in param_parts]
+        kwargs_str = "{" + ", ".join(f'"{p}": {p}' for p in param_names) + "}" if param_names else ""
+
+        if method == "GET":
+            call = (f'    return _httpx.get("{endpoint}", params={kwargs_str}, timeout=10).json()'
+                    if param_names else f'    return _httpx.get("{endpoint}", timeout=10).json()')
+        else:
+            call = (f'    return _httpx.post("{endpoint}", json={kwargs_str}, timeout=10).json()'
+                    if param_names else f'    return _httpx.post("{endpoint}", timeout=10).json()')
+
+        return "\n".join([
+            f"def {name}({', '.join(param_parts)}) -> dict:",
+            f'    """{desc}"""',
+            call,
+        ])
+
+    return ""
+
+
+def _lint(code: str, spec: AgentSpec | None = None, has_registry_tools: bool = True) -> list[str]:
     errors = []
     has_tools = bool(spec and any(ag.tools for ag in spec.spec.agents)) if spec else True
 
+    _TOOL_IMPORT_PATTERN = r"from tools\.registry import (resolve_tools|get_tool_by_name)"
+
     for pattern, msg in _REQUIRED_PATTERNS:
-        # Skip tool-related checks for tool-free agents — no hallucination forced.
+        # Skip tool-related checks for tool-free agents.
         if not has_tools and pattern in (
-            r"from tools\.registry import resolve_tools",
+            _TOOL_IMPORT_PATTERN,
             r'_as_tool_response|ToolResponse',
         ):
+            continue
+        # Skip registry-import check when all tools are injected inline.
+        if not has_registry_tools and pattern == _TOOL_IMPORT_PATTERN:
             continue
         if not re.search(pattern, code):
             errors.append(f"MISSING: {msg}")
@@ -554,7 +636,7 @@ def _lint(code: str, spec: AgentSpec | None = None) -> list[str]:
     return errors
 
 
-def compile_agent(name: str, spec: AgentSpec, spec_dict: dict) -> str:
+def compile_agent(name: str, spec: AgentSpec, spec_dict: dict, db_tools: list[dict] | None = None) -> str:
     """
     Generate agent.py from spec using Gemini via LiteLLM.
     Returns the validated Python source code.
@@ -562,6 +644,26 @@ def compile_agent(name: str, spec: AgentSpec, spec_dict: dict) -> str:
     """
     spec_yaml = yaml.dump(spec_dict, sort_keys=False, allow_unicode=True)
     system_prompt = _load_skill_md() + "\n\n" + _FASTAPI_OVERRIDE
+
+    # Partition tools: inline (generated from DB record) vs registry (get_tool_by_name).
+    # Tools that have an endpoint/code in the DB get a pre-generated function body
+    # injected directly into the prompt — the agent never needs to look them up.
+    db_tool_map = {t["name"]: t for t in (db_tools or [])}
+    spec_tool_names = [t for ag in spec.spec.agents for t in (ag.tools or [])]
+
+    inline_tools: list[tuple[str, str]] = []   # (name, generated_function_code)
+    registry_tool_names: list[str] = []
+
+    for tool_name in spec_tool_names:
+        db_rec = db_tool_map.get(tool_name)
+        if db_rec:
+            snippet = _generate_inline_tool(db_rec)
+            if snippet:
+                inline_tools.append((tool_name, snippet))
+                continue
+        registry_tool_names.append(tool_name)
+
+    has_registry_tools = bool(registry_tool_names)
 
     # Collect role files (new canonical) or legacy skill files
     skill_blocks = []
@@ -576,6 +678,39 @@ def compile_agent(name: str, spec: AgentSpec, spec_dict: dict) -> str:
         + ("\n\n".join(skill_blocks) if skill_blocks else "")
     )
 
+    if inline_tools:
+        fn_bodies = "\n\n".join(code for _, code in inline_tools)
+        direct_regs = "\n".join(
+            f"toolkit.register_tool_function(_as_tool_response({n}))"
+            for n, _ in inline_tools
+        )
+        registry_note = (
+            "Always include `from tools.registry import get_tool_by_name` at the top "
+            "even when no registry lookups are needed."
+            if not has_registry_tools else ""
+        )
+        user_message += textwrap.dedent(f"""
+
+            ## INJECTED TOOL IMPLEMENTATIONS
+
+            These tool functions were generated from the registry database.
+            Copy them VERBATIM into agent.py (after `import httpx as _httpx`, before the
+            toolkit setup block). Register them by direct function reference — do NOT
+            call `get_tool_by_name` for these names. {registry_note}
+
+            ```python
+            import httpx as _httpx
+
+            {fn_bodies}
+            ```
+
+            In the toolkit setup block, register these inline tools directly:
+
+            ```python
+            {direct_regs}
+            ```
+        """)
+
     messages = [
         {"role": "system", "content": system_prompt},
         {"role": "user", "content": user_message},
@@ -585,7 +720,7 @@ def compile_agent(name: str, spec: AgentSpec, spec_dict: dict) -> str:
     for attempt in range(2):
         if attempt == 1 and broken_code:
             # Second pass: targeted fix — pass broken code back with error description
-            lint_errors = _lint(broken_code, spec)
+            lint_errors = _lint(broken_code, spec, has_registry_tools=has_registry_tools)
             feedback = "Your previous output had issues. Fix ONLY the problems below, keep everything else identical:\n"
             try:
                 ast.parse(broken_code)
@@ -626,7 +761,7 @@ def compile_agent(name: str, spec: AgentSpec, spec_dict: dict) -> str:
             raise ValueError(f"Generated code has syntax error: {e}") from e
 
         # Lint check — pass spec so tool-related rules skip for tool-free agents
-        errors = _lint(code, spec)
+        errors = _lint(code, spec, has_registry_tools=has_registry_tools)
         if errors:
             broken_code = code
             if attempt == 0:

@@ -53,9 +53,9 @@ class AgentConfig(BaseModel):
 
     @field_validator("temperature")
     @classmethod
-    def must_be_one(cls, v: float) -> float:
-        if v != 1.0:
-            raise ValueError("temperature must be 1.0 for Gemini 3 (invariant)")
+    def valid_temperature(cls, v: float) -> float:
+        if not (0.0 <= v <= 2.0):
+            raise ValueError("temperature must be between 0.0 and 2.0")
         return v
 
     @field_validator("agentscope_skills")

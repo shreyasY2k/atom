@@ -116,9 +116,10 @@ def compile_agent(name: str, body: SaveAndDeployBody = SaveAndDeployBody(), requ
         _save_spec_files(name, body.spec_yaml, body.skill_content)
     spec, spec_dict = _load_spec(name)
     actor = request.headers.get("X-Atom-Actor", spec.metadata.owner)
+    db_tools = registry_db.get_agent_tools(name)
 
     try:
-        code = codegen.compile_agent(name, spec, spec_dict)
+        code = codegen.compile_agent(name, spec, spec_dict, db_tools=db_tools)
     except ValueError as e:
         raise HTTPException(422, str(e))
     except Exception as e:
@@ -160,8 +161,9 @@ def _do_deploy_agent(name: str, actor: str) -> dict:
     except Exception:
         pass
 
+    db_tools = registry_db.get_agent_tools(name)
     try:
-        code = codegen.compile_agent(name, spec, spec_dict)
+        code = codegen.compile_agent(name, spec, spec_dict, db_tools=db_tools)
     except (ValueError, Exception) as e:
         raise HTTPException(502, f"Code generation failed: {e}")
 
