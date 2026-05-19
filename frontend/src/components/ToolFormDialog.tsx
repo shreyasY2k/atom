@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react'
 import {
   Box,
   Button,
+  Checkbox,
   Chip,
   CircularProgress,
   Dialog,
@@ -21,9 +22,12 @@ import {
   TextField,
   ToggleButton,
   ToggleButtonGroup,
+  Tooltip,
   Typography,
   Alert,
 } from '@mui/material'
+import AddIcon from '@mui/icons-material/Add'
+import DeleteOutlineIcon from '@mui/icons-material/DeleteOutline'
 import VisibilityIcon from '@mui/icons-material/Visibility'
 import VisibilityOffIcon from '@mui/icons-material/VisibilityOff'
 import HttpIcon from '@mui/icons-material/Http'
@@ -32,6 +36,12 @@ import ExtensionIcon from '@mui/icons-material/Extension'
 import type { ToolRecord, AuthConfig } from '../api/builder'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
+
+interface ParamRow {
+  name: string
+  type: 'string' | 'number' | 'integer' | 'boolean'
+  required: boolean
+}
 
 export interface ToolFormDialogProps {
   open: boolean
@@ -68,6 +78,9 @@ interface FormState {
   mcp_tool_names: string[]
   mcpToolInput: string
 
+  // Input parameters (maps to input_schema)
+  params: ParamRow[]
+
   // Auth
   auth_type: AuthType
   // api_key
@@ -99,6 +112,7 @@ const EMPTY_FORM: FormState = {
   endpoint: '',
   method: 'POST',
   code: '',
+  params: [],
   mcp_server_url: '',
   mcp_transport: 'sse',
   mcp_tool_names: [],
@@ -138,6 +152,20 @@ function formToRecord(form: FormState, isEdit: boolean, scope: ToolRecord['scope
 
   if (form.tool_type === 'python') {
     base.code = form.code.trim() || null
+  }
+
+  // Build input_schema from the params rows for http and python tools
+  if (form.tool_type !== 'mcp' && form.params.length > 0) {
+    const properties: Record<string, { type: string }> = {}
+    const required: string[] = []
+    for (const p of form.params) {
+      if (!p.name.trim()) continue
+      properties[p.name.trim()] = { type: p.type }
+      if (p.required) required.push(p.name.trim())
+    }
+    base.input_schema = { type: 'object', properties, ...(required.length > 0 ? { required } : {}) }
+  } else if (form.tool_type !== 'mcp') {
+    base.input_schema = {}
   }
 
   if (form.tool_type === 'mcp') {
@@ -200,6 +228,16 @@ function recordToForm(tool: ToolRecord): FormState {
     endpoint: tool.endpoint ?? '',
     method: tool.method ?? 'POST',
     code: tool.code ?? '',
+    params: (() => {
+      const props = (tool.input_schema as Record<string, unknown> | undefined)?.properties as Record<string, { type?: string }> | undefined
+      if (!props) return []
+      const reqSet = new Set<string>(((tool.input_schema as Record<string, unknown>)?.required as string[]) ?? [])
+      return Object.entries(props).map(([pname, pdef]) => ({
+        name: pname,
+        type: (pdef?.type ?? 'string') as ParamRow['type'],
+        required: reqSet.has(pname),
+      }))
+    })(),
     mcp_server_url: tool.mcp_server_url ?? '',
     mcp_transport: tool.mcp_transport ?? 'sse',
     mcp_tool_names: tool.mcp_tool_names ?? [],
@@ -351,6 +389,22 @@ export default function ToolFormDialog({
     setForm(f => ({ ...f, mcp_tool_names: f.mcp_tool_names.filter(t => t !== tool) }))
   }
 
+  // ── Param management ──
+
+  const addParam = () =>
+    setForm(f => ({ ...f, params: [...f.params, { name: '', type: 'string', required: false }] }))
+
+  const updateParam = (idx: number, patch: Partial<ParamRow>) =>
+    setForm(f => ({ ...f, params: f.params.map((p, i) => i === idx ? { ...p, ...patch } : p) }))
+
+  const removeParam = (idx: number) =>
+    setForm(f => ({ ...f, params: f.params.filter((_, i) => i !== idx) }))
+
+  // Path params detected from {name} in the endpoint URL (read-only, always required)
+  const pathParams = new Set<string>(
+    (form.endpoint.match(/\{(\w+)\}/g) ?? []).map(s => s.slice(1, -1))
+  )
+
   // ── Validation ──
 
   const nameError = form.name && !nameIsValid(form.name)
@@ -489,7 +543,8 @@ export default function ToolFormDialog({
                     value={form.endpoint}
                     onChange={setStr('endpoint')}
                     fullWidth
-                    placeholder="https://api.example.com/endpoint"
+                    placeholder="https://api.example.com/resource/{id}"
+                    helperText="Use {param} for path variables, e.g. /customers/{customer_id}"
                     inputProps={{ spellCheck: false }}
                   />
                   <FormControl fullWidth>
@@ -499,11 +554,95 @@ export default function ToolFormDialog({
                       label="Method"
                       onChange={e => setForm(f => ({ ...f, method: e.target.value }))}
                     >
-                      {['GET', 'POST', 'PUT', 'DELETE', 'PATCH'].map(m => (
+                      {['GET', 'POST', 'PUT', 'PATCH', 'DELETE'].map(m => (
                         <MenuItem key={m} value={m}>{m}</MenuItem>
                       ))}
                     </Select>
                   </FormControl>
+
+                  {/* ── Input Parameters ── */}
+                  <Box>
+                    <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mb: 1 }}>
+                      <Typography variant="caption" sx={{ fontWeight: 600, color: 'text.secondary', textTransform: 'uppercase', letterSpacing: 1 }}>
+                        Input Parameters
+                      </Typography>
+                      <Button size="small" startIcon={<AddIcon />} onClick={addParam} sx={{ textTransform: 'none', fontSize: '0.75rem' }}>
+                        Add
+                      </Button>
+                    </Box>
+
+                    {pathParams.size > 0 && (
+                      <Box sx={{ mb: 1 }}>
+                        {[...pathParams].map(pp => (
+                          <Chip
+                            key={pp}
+                            label={`{${pp}} — path`}
+                            size="small"
+                            color="primary"
+                            variant="outlined"
+                            sx={{ mr: 0.5, mb: 0.5, fontFamily: 'monospace', fontSize: '0.7rem' }}
+                          />
+                        ))}
+                        <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 0.25 }}>
+                          Path params are auto-detected from the URL and always required.
+                        </Typography>
+                      </Box>
+                    )}
+
+                    {form.params.length === 0 && pathParams.size === 0 && (
+                      <Typography variant="caption" color="text.secondary">
+                        No parameters defined. {['GET', 'DELETE'].includes(form.method) ? 'Query' : 'Body'} params will be sent as {['GET', 'DELETE'].includes(form.method) ? 'URL query string' : 'JSON request body'}.
+                      </Typography>
+                    )}
+
+                    <Stack spacing={1}>
+                      {form.params.map((p, idx) => (
+                        <Box key={idx} sx={{ display: 'flex', gap: 1, alignItems: 'center' }}>
+                          <TextField
+                            size="small"
+                            placeholder="param_name"
+                            value={p.name}
+                            onChange={e => updateParam(idx, { name: e.target.value })}
+                            sx={{ flex: 2, '& input': { fontFamily: 'monospace', fontSize: '0.82rem' } }}
+                            inputProps={{ spellCheck: false }}
+                          />
+                          <FormControl size="small" sx={{ flex: 1 }}>
+                            <Select
+                              value={p.type}
+                              onChange={e => updateParam(idx, { type: e.target.value as ParamRow['type'] })}
+                            >
+                              <MenuItem value="string">string</MenuItem>
+                              <MenuItem value="number">number</MenuItem>
+                              <MenuItem value="integer">integer</MenuItem>
+                              <MenuItem value="boolean">boolean</MenuItem>
+                            </Select>
+                          </FormControl>
+                          <Tooltip title="Required">
+                            <Checkbox
+                              size="small"
+                              checked={p.required}
+                              onChange={e => updateParam(idx, { required: e.target.checked })}
+                              sx={{ p: 0.5 }}
+                            />
+                          </Tooltip>
+                          <Chip
+                            label={['GET', 'DELETE'].includes(form.method) ? 'query' : 'body'}
+                            size="small"
+                            sx={{ fontSize: '0.65rem', height: 20, minWidth: 44 }}
+                          />
+                          <IconButton size="small" onClick={() => removeParam(idx)} sx={{ color: 'text.disabled' }}>
+                            <DeleteOutlineIcon fontSize="small" />
+                          </IconButton>
+                        </Box>
+                      ))}
+                    </Stack>
+
+                    {form.params.length > 0 && (
+                      <Typography variant="caption" color="text.secondary" sx={{ mt: 0.5, display: 'block' }}>
+                        Required <Checkbox size="small" disabled sx={{ p: 0, mr: 0.25, verticalAlign: 'middle' }} checked /> · {['GET', 'DELETE'].includes(form.method) ? 'All params sent as URL query string' : 'All params sent as JSON request body'}
+                      </Typography>
+                    )}
+                  </Box>
                 </Stack>
               )}
 
@@ -516,18 +655,16 @@ export default function ToolFormDialog({
                     fullWidth
                     multiline
                     minRows={10}
-                    placeholder={'def run(input: dict) -> dict:\n    # your code here\n    return {}'}
+                    placeholder={'def my_tool(param1: str, param2: float = 0.0) -> dict:\n    """What this tool does.\"\"\"\n    # your code here\n    return {}'}
                     inputProps={{
                       style: { fontFamily: 'monospace', fontSize: '0.82rem', lineHeight: 1.6 },
                       spellCheck: false,
                     }}
                   />
                   <Typography variant="caption" color="text.secondary">
-                    Define a <Box component="code" sx={{ fontFamily: 'monospace', fontSize: '0.8rem' }}>run(input: dict) -&gt; dict</Box> function.
-                    Available: <Box component="code" sx={{ fontFamily: 'monospace', fontSize: '0.8rem' }}>json</Box>,{' '}
-                    <Box component="code" sx={{ fontFamily: 'monospace', fontSize: '0.8rem' }}>re</Box>,{' '}
-                    <Box component="code" sx={{ fontFamily: 'monospace', fontSize: '0.8rem' }}>math</Box>,{' '}
-                    <Box component="code" sx={{ fontFamily: 'monospace', fontSize: '0.8rem' }}>datetime</Box>.
+                    Define a typed function with the tool name (e.g.{' '}
+                    <Box component="code" sx={{ fontFamily: 'monospace', fontSize: '0.8rem' }}>def compute_interest(principal: float, rate: float) -&gt; dict</Box>).
+                    The function body is injected verbatim into the agent at compile time.
                   </Typography>
                 </Stack>
               )}

@@ -583,24 +583,36 @@ def _generate_inline_tool(tool: dict) -> str:
         props = schema.get("properties", {})
         required_set = set(schema.get("required", []))
 
+        # Path params are names that appear as {name} in the endpoint URL.
+        # They are required by definition and go into the URL via an f-string.
+        path_params = set(re.findall(r'\{(\w+)\}', endpoint))
+
+        # POST, PUT, PATCH send non-path params as JSON body.
+        # GET, DELETE, HEAD send them as query string params.
+        uses_body = method in ("POST", "PUT", "PATCH")
+
         param_parts: list[str] = []
         for pname, pdef in props.items():
             ptype = _json_type_to_python(pdef.get("type", "string"))
-            if pname in required_set:
+            if pname in required_set or pname in path_params:
                 param_parts.append(f"{pname}: {ptype}")
             else:
                 default = {"str": '""', "float": "0.0", "int": "0", "bool": "False"}.get(ptype, "None")
                 param_parts.append(f"{pname}: {ptype} = {default}")
 
         param_names = [p.split(":")[0].strip() for p in param_parts]
-        kwargs_str = "{" + ", ".join(f'"{p}": {p}' for p in param_names) + "}" if param_names else ""
+        non_path = [p for p in param_names if p not in path_params]
 
-        if method == "GET":
-            call = (f'    return _httpx.get("{endpoint}", params={kwargs_str}, timeout=10).json()'
-                    if param_names else f'    return _httpx.get("{endpoint}", timeout=10).json()')
+        # Use f-string for the URL only when path params are present.
+        url_expr = ('f"' + endpoint + '"') if path_params else ('"' + endpoint + '"')
+
+        method_fn = method.lower()  # httpx mirrors HTTP verbs: get/post/put/patch/delete
+        if non_path:
+            kwargs_str = "{" + ", ".join(f'"{p}": {p}' for p in non_path) + "}"
+            param_kw = "json" if uses_body else "params"
+            call = f"    return _httpx.{method_fn}({url_expr}, {param_kw}={kwargs_str}, timeout=10).json()"
         else:
-            call = (f'    return _httpx.post("{endpoint}", json={kwargs_str}, timeout=10).json()'
-                    if param_names else f'    return _httpx.post("{endpoint}", timeout=10).json()')
+            call = f"    return _httpx.{method_fn}({url_expr}, timeout=10).json()"
 
         return "\n".join([
             f"def {name}({', '.join(param_parts)}) -> dict:",
