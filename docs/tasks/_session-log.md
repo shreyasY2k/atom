@@ -837,3 +837,55 @@ Task 06: CLI polish (`atom agent scaffold`, `atom workflow init`)
 - [x] Sidebar: "SECURITY > Command Center" nav item added
 - [x] `LITELLM_BASE_URL=http://gate:8083` in docker-compose for builder/workflow backends
 - [ ] Live end-to-end test with deployed agent (requires `docker compose up`)
+
+## Session 10 — Domain/Subdomain Framework, Compliance Reports, Builder Fixes
+**Date**: 2026-05-19
+**Status**: COMPLETE ✅
+
+### What was done
+
+**Domain/Subdomain framework**
+- `domain TEXT` and `subdomain TEXT` columns on `agents` and `tools` tables
+- Deploy flow auto-parses spec `metadata.domain` (e.g. `banking-kyc` → domain=`banking`, subdomain=`kyc`)
+- `seed.py` tags all 13 tools with domain/subdomain via `_TOOL_DOMAIN` map
+- `GET /domains` — merged taxonomy (curated defaults + live DB data)
+- `GET /agents?domain=X&subdomain=Y` and `GET /tools?domain=X&subdomain=Y`
+- Agent List: chip-based domain + status filters (replaced broken `TextField select`)
+- Tool Registry: domain accordion grouping + filter chips + search (fixed `tools.map` → `toolList.map` bug that made filter appear broken)
+- Builder Step 1: Autocomplete domain/subdomain fields from `/domains`
+
+**Compliance Report**
+- `POST /agents/{name}/compliance-report` — async generation (background thread)
+- `GET /agents/{name}/compliance-report/{id}` — poll status
+- `GET /agents/{name}/compliance-reports` — list history
+- Gemini 3.1 Pro generates 9-section formal report from `llm_call_events` + `guardrail_events` + `agents` table
+- `compliance_reports` table in platform-db (status: generating → complete/failed)
+- Agent Detail: new **Compliance** tab with generate button, period selector, inline Markdown render, download
+
+**Builder wizard improvements**
+- Back button on every step (Tools ← Generate ← Deploy)
+- Edit mode: `/agents/build?edit=<name>` pre-loads existing spec/role/tools/domain
+- "Edit Agent" button on Agent Detail → starts edit draft
+- "Custom Context" tab (renamed from Skills) with explanation banner
+- Skills content (not just names) now injected into generation prompt
+- Monaco editors show ✎ Editable badge
+- `GET /agents/{name}/draft` endpoint for edit flow
+
+**Guardrail false-positive fixes (sessions)**
+- `sessions.py`: session history excludes injection-blocked turns from `[Conversation so far]`
+- `agentarmor_guardrail.py`: strips `[Conversation so far]` and `[Current message]` markers before L1 scan
+- `persist_memory`: skips storage when output contains `guardrail_violation`
+- `blocked_by` regex fixed from greedy `blocked_by.*?'value'` to precise `'blocked_by': 'value'`
+
+### DoD checklist
+- [x] `agents` and `tools` tables have domain/subdomain columns
+- [x] Deploy auto-extracts domain/subdomain from spec
+- [x] GET /domains returns taxonomy
+- [x] GET /agents?domain=X filters correctly
+- [x] GET /tools?domain=X filters correctly (verified banking=10, general=1, payments=2)
+- [x] Agent List chip filters work (domain + status)
+- [x] Tool Registry accordion grouping works (filter uses toolList, not outer tools)
+- [x] Compliance report generates and renders
+- [x] Builder back navigation works
+- [x] Builder edit mode pre-fills existing agent data
+- [x] Session injection false-positive fixed (injection + valid = valid gets through)

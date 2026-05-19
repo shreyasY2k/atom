@@ -10,16 +10,20 @@
 2. [Prerequisites](#prerequisites)
 3. [Starting from Scratch](#starting-from-scratch)
 4. [Creating an Agent (UI)](#creating-an-agent-ui)
-5. [Creating an Agent (CLI)](#creating-an-agent-cli)
-6. [Creating and Testing Tools](#creating-and-testing-tools)
-7. [Domain Tool Registry](#domain-tool-registry)
-8. [Sessions and Memory](#sessions-and-memory)
-9. [Invoking Agents via API](#invoking-agents-via-api)
-10. [HMAC Audit Log Verification](#hmac-audit-log-verification)
-11. [Guardrails (AgentArmor)](#guardrails-agentarmor)
-12. [Architecture Overview](#architecture-overview)
-13. [Service Ports](#service-ports)
-14. [Troubleshooting](#troubleshooting)
+5. [Editing a Deployed Agent](#editing-a-deployed-agent)
+6. [Creating an Agent (CLI)](#creating-an-agent-cli)
+7. [Domain / Subdomain Framework](#domain--subdomain-framework)
+8. [Creating and Testing Tools](#creating-and-testing-tools)
+9. [Domain Tool Registry](#domain-tool-registry)
+10. [Sessions and Memory](#sessions-and-memory)
+11. [Invoking Agents via API](#invoking-agents-via-api)
+12. [Compliance Reports](#compliance-reports)
+13. [HMAC Audit Log Verification](#hmac-audit-log-verification)
+14. [Security Command Center](#security-command-center)
+15. [Guardrails (10-Layer Defence-in-Depth)](#guardrails-10-layer-defence-in-depth)
+16. [Architecture Overview](#architecture-overview)
+17. [Service Ports](#service-ports)
+18. [Troubleshooting](#troubleshooting)
 
 ---
 
@@ -99,42 +103,69 @@ The wizard has 4 steps:
 Fill in:
 - **Agent Name**: `customer-qa-agent` *(lowercase, hyphens only, 3-40 chars)*
 - **Description**: `Answers customer questions about KYC status and transaction risk`
+- **Domain**: `general` *(autocomplete from known taxonomy — see [Domain / Subdomain Framework](#domain--subdomain-framework))*
+- **Subdomain**: `qa` *(optional — narrows the domain further)*
 
-Click **Create Agent** — this immediately provisions a LiteLLM virtual key and creates a DB record. The agent has an identity before deployment.
+Click **Continue** — this immediately provisions a LiteLLM virtual key and creates a DB record. The agent has an identity before deployment. Domain and subdomain are stored in the `agents` table and control filter visibility in the Agent Registry.
 
-### Step 2 — Tools & Skills
+> **Back navigation**: every step has a Back button. Clicking a completed step in the left sidebar also jumps directly to it.
 
-**Associate global tools** (select from the Tool Registry):
-- `kyc-lookup` — HTTP tool calling the KYC mock service (pre-registered on startup)
-- `calculate-risk` — Python tool that computes risk scores (pre-registered on startup)
+### Step 2 — Tools & Custom Context
 
-**Add an agent-specific skill:**
-- Name: `qa-reasoning`
-- Content: domain-specific reasoning instructions
+**Associate global tools** (select from the Tool Registry — domain-grouped):
+- `get_customer_profile` — fetches KYC profile from kyc-svc
+- `calculate_risk` — pure-Python risk score (no service call)
+
+Tool names shown here are the **exact function names** used in generated agent code. See [Domain Tool Registry](#domain-tool-registry) for the full catalogue.
+
+**Custom Context** (optional): domain knowledge injected into the generation prompt.
+- Name: `compliance-rules`
+- Content: domain-specific rules, output format requirements, or terminology
+
+> **Custom Context ≠ skills**: it is baked into the generated role file at generation time, not stored separately after deployment.
 
 ### Step 3 — Generate
 
-Describe the agent's behavior:
+Describe the agent's behavior in natural language:
 
 ```
 When a customer asks about their account status:
-1. Call kyc-lookup with their customer_id to verify KYC status.
-2. Call calculate-risk with the transaction amount and country code.
-3. Return a summary: KYC status, risk band (LOW/MEDIUM/HIGH), and a recommendation
-   (APPROVE, REVIEW, or ESCALATE). Explain your reasoning clearly.
+1. Extract the customer_id, transaction amount, and country code from the input.
+2. Call get_customer_profile with the customer_id to verify KYC status.
+3. Call calculate_risk with the amount and country code to get the risk band.
+4. Return a JSON summary: customer_name, kyc_status, risk_band, verdict
+   (APPROVE / REVIEW / ESCALATE), and a case note explaining your reasoning.
 ```
 
-Click **Generate** — Gemini Flash generates the agent-role markdown and spec YAML, saved to MinIO as a draft.
+Click **Generate** — Gemini 3.1 Pro generates the agent-role markdown and spec YAML, saved to MinIO as a draft. The editor is editable — change anything before proceeding.
+
+Click **Regenerate** to produce a new version at any time. Your edits are preserved until you explicitly click Regenerate.
 
 ### Step 4 — Deploy
 
-Before deploying, you can configure the **AgentArmor Guardrails** toggle (default: ON). When enabled, every LLM request and response for this agent is scanned by AgentArmor. Toggle it off only for trusted, controlled environments.
+Review the generated spec and role markdown in the Monaco editors (both are editable — look for the ✎ **Editable** badge in the file header).
 
-Review the generated spec and role markdown. Click:
+**AgentArmor Guardrails toggle** (default: ON): activates all 10 security layers for this agent. Keep ON in production.
+
+Click:
 - **Deploy directly** — deploys immediately (admin/approver role)
 - **Submit for approval** — creates a pending record for an approver
 
 The agent container is built and started on the Docker network. Status transitions: `provisioned → draft → deploying → deployed`.
+
+---
+
+## Editing a Deployed Agent
+
+To modify a deployed agent's spec, role, or tools:
+
+1. Go to **Agents → Registry**, click the agent name, open the **Overview** tab
+2. Click **Edit Agent** — this copies the latest versioned spec/role to a draft and navigates to the Builder wizard
+3. The Builder opens at the **Generate** step (or **Deploy** if a draft exists) with all existing data pre-filled
+4. Edit as needed: update tools in step 2, regenerate in step 3, or go straight to deploy in step 4
+5. Deploy — a new version is created; the previous version remains immutable in MinIO
+
+> Editing does **not** interrupt the currently running container. The new version replaces it only after deploy.
 
 ---
 
@@ -231,6 +262,59 @@ curl -X POST http://localhost:8080/agents/balance-checker/invoke \
 
 ```bash
 atom agent list
+```
+
+---
+
+## Domain / Subdomain Framework
+
+Every agent and tool belongs to a **domain** and optionally a **subdomain**. These tags control how things are grouped and filtered throughout the platform.
+
+### Taxonomy
+
+| Domain | Subdomains | Description |
+|--------|-----------|-------------|
+| `banking` | `kyc`, `fraud`, `treasury`, `securities` | Core banking operations |
+| `payments` | `risk`, `compliance` | Payment processing and OFAC screening |
+| `insurance` | `claims`, `ocr` | Claims processing and document extraction |
+| `general` | `qa`, `risk` | Cross-domain and general-purpose agents |
+
+The taxonomy is open — add any domain/subdomain value you need. Known values are surfaced as autocomplete options.
+
+### Where domain/subdomain are used
+
+**Agents** — domain is extracted from `metadata.domain` in the spec YAML at deploy time. `banking-kyc` → `domain=banking, subdomain=kyc`. The Builder step 1 has autocomplete fields.
+
+**Tools** — seeded tools are tagged with domain/subdomain in `seed.py` via the `_TOOL_DOMAIN` map. Custom tools can be tagged when creating them.
+
+### Filtering in the UI
+
+**Agent Registry** (`/agents`):
+- Click a domain chip to show only agents in that domain
+- Click a status chip (Deployed / Deploying / Undeployed) to filter by status
+- Use the search box for name/description search
+- Multiple filters combine (AND)
+
+**Tool Registry** (`/tools`):
+- Tools are grouped into collapsible accordions by domain
+- Domain filter chips at the top collapse the view to one domain
+- Search narrows within any selected domain
+
+### Filtering via API
+
+```bash
+# Agents
+curl "http://localhost:8080/agents?domain=banking"
+curl "http://localhost:8080/agents?domain=banking&subdomain=kyc"
+curl "http://localhost:8080/agents?status=deployed"
+curl "http://localhost:8080/agents?domain=banking&status=deployed"
+
+# Tools
+curl "http://localhost:8080/tools?domain=banking"
+curl "http://localhost:8080/tools?domain=banking&subdomain=kyc"
+
+# Domain taxonomy (what's known in the DB)
+curl "http://localhost:8080/domains"
 ```
 
 ---
@@ -623,6 +707,52 @@ All requests must carry `X-Atom-Actor: <actor_type>:<actor_id>`:
 
 ---
 
+## Compliance Reports
+
+Each deployed agent has a **Compliance Report** tab in the Agent Detail page that generates a formal compliance assessment from the agent's audit trail.
+
+### Generate from the UI
+
+1. Open an agent detail page → **Compliance** tab
+2. Select the period (7 / 30 / 90 days)
+3. Click **Generate Report** — runs in the background (15–30s)
+4. The report renders inline as formatted Markdown
+5. Download as `.md` via the download button
+
+### Report sections
+
+| # | Section | Data source |
+|---|---------|-------------|
+| 1 | Executive Summary | LLM synthesis |
+| 2 | Agent Identity & Deployment | `agents` table |
+| 3 | Activity Summary | `llm_call_events` |
+| 4 | Security Posture | `guardrail_events` |
+| 5 | Data Handling Assessment | L2-PII events |
+| 6 | Audit Trail Integrity | MinIO HMAC events |
+| 7 | Risk Assessment | LLM synthesis |
+| 8 | Recommendations | LLM synthesis |
+| 9 | Compliance Declaration | LLM synthesis |
+
+### Generate via API
+
+```bash
+BASE=http://localhost:8080
+H="X-Atom-Actor: user:admin@atom.io"
+
+# Kick off generation (returns report_id immediately)
+curl -X POST $BASE/agents/customer-qa-agent/compliance-report \
+  -H "$H" -H "Content-Type: application/json" \
+  -d '{"period_days": 30}'
+
+# Poll status (generating → complete or failed)
+curl $BASE/agents/customer-qa-agent/compliance-report/report-XXXX -H "$H"
+
+# List all reports for an agent
+curl $BASE/agents/customer-qa-agent/compliance-reports -H "$H"
+```
+
+---
+
 ## HMAC Audit Log Verification
 
 Every audit event written by the platform carries `"_hmac": "hmac-sha256:{hex}"`. The signature covers the canonical (sorted-key) JSON using HMAC-SHA256 with key `AUDIT_HMAC_KEY`.
@@ -825,42 +955,48 @@ docker compose logs agentarmor --tail 20
                         |  React + Vite    |
                         +--------+---------+
                                  | HTTP
-                        +--------v---------+
-                        |    GATE (Go)     |  :8080 (builder) :8082 (workflow)
-                        |  HMAC audit wrap |
-                        |  Direct invoke   |---> platform-db (pgx)
-                        +-----+--------+---+
-                              |        |  proxy (non-invoke routes)
-               +--------------v--+  +--v--------------------+
-               | builder-backend |  | workflow-backend       |
-               | (FastAPI)       |  | (FastAPI + Temporal)   |
-               +--+-----------+--+  +-----------------------+
-                  |           |
-        +---------v--+  +-----v--------+
-        |  LiteLLM   |  |  platform-db |
-        |  :4000     |<-+  (PostgreSQL)|
-        | Gemini-only|  +--------------+
-        +-----+------+
-              |  pre/post-call guardrail side-channel
-        +-----v----------+
-        |  AgentArmor    |  :8400
-        |  8-layer scan  |
-        | (built source) |
-        +----------------+
-
-        Storage : MinIO (audit-logs, specs, agent-artifacts)
-        Memory  : ReMe :8002 (long-term, cross-session)
-        Runtime : AgentScope containers on agentnet
-        Engine  : Temporal :7233
+                      +----------v-----------+
+                      |       GATE (Go)       |
+                      | :8080 builder surface |
+                      | :8082 workflow surface|
+                      | :8083 LLM proxy  ←────────── every agent LLM call
+                      | HMAC audit wrap       |       (mandatory chokepoint)
+                      | Direct invoke    ─────────→  platform-db (pgx)
+                      +----+----------+-------+
+                           |          | proxy
+          +----------------v-+   +----v-------------------+
+          | builder-backend  |   | workflow-backend        |
+          | (FastAPI)        |   | (FastAPI + Temporal)    |
+          | /domains         |   +------------------------+
+          | /compliance      |
+          | /command-center  |
+          +----+----------+--+
+               |          |
+     +---------v--+  +-----v--------+
+     |  LiteLLM   |  |  platform-db |
+     |  :4000     |<-+  (PostgreSQL)|
+     | Gemini-only|  | agents       |
+     +-----+------+  | llm_call_evt |
+           |         | guardrail_evt|
+     (pre/post-call) | compliance   |
+     +-----v-------+ +--------------+
+     |  AgentArmor |
+     |  :8400      |   Storage : MinIO (audit-logs, specs, agent-artifacts)
+     | L1-closed   |   Memory  : ReMe :8002 (long-term, cross-session)
+     | L2 PII mask |   Runtime : AgentScope containers on agentnet
+     | L3-L6 scans |   Engine  : Temporal :7233
+     | L9-L10 out  |
+     +-------------+
 ```
 
 **Key invariants:**
-1. Every LLM call goes through LiteLLM (`http://litellm:4000`)
-2. Every LLM request and response is scanned by AgentArmor guardrails (pre-call + post-call)
-3. Every agent has a non-human service-account identity (LiteLLM virtual key) issued at creation time
-4. Agent invocation: GATE queries platform-db → calls container directly (no builder-backend on hot path)
-5. All platform audit events are HMAC-SHA256 signed (sorted-key canonical JSON)
-6. Audit logs stored in MinIO with 90-day COMPLIANCE object lock
+1. **Every LLM call goes through GATE:8083** (mandatory audit chokepoint) before reaching LiteLLM
+2. Every LLM call goes through LiteLLM (`http://litellm:4000`) — Gemini only
+3. Every LLM request is scanned by 10-layer guardrails (L1 fail-closed, L2-L10 fail-open)
+4. Every agent has a non-human service-account identity (LiteLLM virtual key) issued at creation time
+5. Agent invocation: GATE:8080 queries platform-db → calls container directly (no builder-backend on hot path)
+6. All platform audit events are HMAC-SHA256 signed (sorted-key canonical JSON)
+7. Audit logs stored in MinIO with 90-day COMPLIANCE object lock
 
 ---
 
@@ -870,16 +1006,17 @@ docker compose logs agentarmor --tail 20
 
 | Service | Port | Purpose |
 |---------|------|---------|
-| Frontend | 5173 | React UI |
-| GATE (builder) | 8080 | Agent builder surface + audit proxy |
-| GATE (workflow) | 8082 | Workflow surface + audit proxy |
-| LiteLLM | 4000 | LLM gateway (Gemini only) |
-| AgentArmor | 8400 | Pre/post-call guardrail (prompt injection, PII, exfiltration) |
+| Frontend | 5173 | React UI — Agent Builder, Workflow Composer, Command Center |
+| GATE (builder) | 8080 | Agent builder surface + HMAC audit proxy |
+| GATE (workflow) | 8082 | Workflow surface + HMAC audit proxy |
+| **GATE (LLM proxy)** | **8083** | **Mandatory LLM call chokepoint — all agents use this** |
+| LiteLLM | 4000 | LLM gateway (Gemini only). Health: `GET /health/liveliness` |
+| AgentArmor | 8400 | 10-layer guardrail (prompt injection, PII, planning risk, exfiltration) |
 | MinIO API | 9000 | Object storage |
 | MinIO UI | 9002 | MinIO web console |
 | Temporal UI | 8233 | Workflow engine UI |
 | Grafana | 3001 | Observability dashboards |
-| ReMe | 8002 | Long-term memory service |
+| ReMe | 8002 | Long-term memory service (embeddings via LiteLLM) |
 | Studio | 3000 | AgentScope Studio |
 
 **Mock services** (synthetic data — see [Domain Tool Registry](#domain-tool-registry) for test IDs)
@@ -905,17 +1042,37 @@ docker compose logs agentarmor --tail 20
 
 ### LLM calls return 400 with `error: guardrail_violation`
 
-AgentArmor blocked the request. The response body contains `phase`, `threat_level`, `blocked_by`, and a `layers` array showing which layer fired. Common causes:
+A guardrail blocked the request. The response body contains `phase`, `threat_level`, `blocked_by`, and `layers`.
 
-- **`planning_validator` deny** — the action's risk score exceeded the threshold (default 7). Legitimate agent invocations should not trigger this; it fires on shell-exec-style or high-risk actions.
-- **`ingestion` deny** — prompt injection detected in user input. Sanitise the input or adjust `layers.ingestion.scan_prompt_injection` in `agentarmor/config.yaml`.
-- **`output` deny** — model response contained PII or credentials. Review the agent's role file to avoid generating sensitive content in outputs.
+| `blocked_by` | Cause | Fix |
+|---|---|---|
+| `L1-LocalHeuristic` | Prompt injection / jailbreak / destructive command in user input | Expected — it's a deliberate attack. If it's a false positive, check if the user message contains injection-like wording |
+| `L2-PII` | — | L2 never blocks; it redacts and continues |
+| `agentarmor-ingestion` | Semantic injection detected by AgentArmor API | Check `agentarmor/config.yaml`, lower `risk_level` from `medium` to `low` |
+| `planning_validator` | Agent's planned action risk score ≥ 7 | Adjust role file to avoid high-risk action plans |
 
-To temporarily lower strictness during development:
+**L1 false positive in sessions** — if a session has a prior injection message in its history, subsequent valid messages in the same session may be blocked because the history includes the injection text. Fix: start a new session. The platform now strips injection-blocked messages from conversation history automatically.
+
+### Valid request blocked after sending an injection in the same session
+
+The session history included prior attack text. From session 09+, injection-blocked turns are stripped from the `[Conversation so far]` block before it's sent to the agent. If you see this on an older deployment:
+- Start a new chat session
+- Or clear the session with `DELETE /agents/{name}/sessions/{session_id}`
+
+### LiteLLM `/health` returns 401
+
+Expected — `/health` requires the master key. Use `/health/liveliness` for unauthenticated liveness checks:
 ```bash
-# Raise the planning risk threshold (0-10, higher = more permissive)
-# Edit agentarmor/config.yaml → layers.planning.risk_score_threshold: 9
-docker compose restart agentarmor
+curl http://localhost:4000/health/liveliness   # returns "I'm alive!"
+```
+The 401 errors you see in logs are from the LiteLLM admin UI tab polling `/health` from the browser without auth. They do not affect platform operation.
+
+### ReMe embedding calls fail with "no api key"
+
+ReMe uses `OPENAI_API_KEY=${LITELLM_MASTER_KEY}` to call LiteLLM for embeddings. If you see this, check:
+```bash
+docker compose exec reme env | grep OPENAI_API_KEY
+# Should show the master key. If empty, rebuild: docker compose up -d reme
 ```
 
 ### LiteLLM starts but logs `agentarmor: pre-call scan error`
@@ -972,27 +1129,56 @@ Tool sandbox has restricted imports. Only stdlib available: `json`, `re`, `math`
 BASE=http://localhost:8080
 H="X-Atom-Actor: user:builder@atom.io"
 
-# Agents
-curl $BASE/agents                                                    # list
-curl -X POST $BASE/agents -H "$H" -d '{"name":"x","description":"y"}'  # provision
-curl -X POST $BASE/agents/NAME/generate -H "$H" -d '{"behavior":"..."}'  # generate spec
-curl -X POST $BASE/agents/NAME/deploy -H "$H" -d '{}'               # deploy
-curl -X POST $BASE/agents/NAME/invoke -H "$H" -d '{"text":"..."}'   # invoke (stateless)
-curl $BASE/agents/NAME/swagger                                        # OpenAPI spec
+# Health checks
+curl http://localhost:8080/gate/health          # GATE builder
+curl http://localhost:8082/gate/health          # GATE workflow
+curl http://localhost:8083/gate/health          # GATE LLM proxy (MANDATORY for all agent LLM calls)
+curl http://localhost:4000/health/liveliness    # LiteLLM (no auth required)
 
-# Tools
-curl $BASE/tools                                                     # list global tools
-curl -X POST $BASE/tools -H "$H" -d '{...}'                          # create tool
-curl -X POST $BASE/tools/ID/execute -H "$H" -d '{"input":{...}}'    # test tool
-curl -X POST $BASE/tools/ID/validate-code -H "$H"                    # syntax check (python)
+# Agents — list, provision, generate, deploy, invoke
+curl "$BASE/agents"                                                    # list all
+curl "$BASE/agents?domain=banking"                                     # filter by domain
+curl "$BASE/agents?domain=banking&subdomain=kyc"                       # filter by subdomain
+curl "$BASE/agents?status=deployed"                                    # filter by status
+curl -X POST $BASE/agents -H "$H" -d '{"name":"x","description":"y"}' # provision
+curl -X POST $BASE/agents/NAME/generate -H "$H" -d '{"behavior":"..."}' # generate spec
+curl -X POST $BASE/agents/NAME/deploy-direct -H "$H" -d '{}'          # deploy (bypass approval)
+curl -X POST $BASE/agents/NAME/deploy-request -H "$H" -d '{}'         # submit for approval
+curl -X POST $BASE/agents/NAME/edit -H "$H"                            # copy versioned→draft for editing
+curl $BASE/agents/NAME/draft -H "$H"                                   # get current draft spec+role
+curl -X POST $BASE/agents/NAME/invoke -H "$H" -d '{"text":"..."}'     # invoke (stateless)
+curl $BASE/agents/NAME/swagger                                         # OpenAPI spec
+
+# Domain taxonomy
+curl $BASE/domains                                                     # all known domains+subdomains
+
+# Tools — list, filter, create, test
+curl "$BASE/tools"                                                     # list all global tools
+curl "$BASE/tools?domain=banking"                                      # filter by domain
+curl "$BASE/tools?domain=banking&subdomain=kyc"                        # filter by subdomain
+curl -X POST $BASE/tools -H "$H" -d '{...}'                            # create tool
+curl -X POST $BASE/tools/ID/execute -H "$H" -d '{"input":{...}}'      # test tool
+curl -X POST $BASE/tools/ID/validate-code -H "$H"                     # syntax check (python)
 
 # Sessions
 curl -X POST $BASE/agents/NAME/sessions -H "$H" -d '{"workspace_id":"ENTITY"}'
 curl -X POST $BASE/agents/NAME/sessions/ID/messages -H "$H" -d '{"text":"..."}'
-curl $BASE/agents/NAME/sessions/ID                                   # get with messages
-curl -X DELETE $BASE/agents/NAME/sessions/ID -H "$H"                # end + write to ReMe
+curl $BASE/agents/NAME/sessions/ID                                     # get with messages
+curl -X DELETE $BASE/agents/NAME/sessions/ID -H "$H"                  # end + write to ReMe
+
+# Compliance reports
+curl -X POST $BASE/agents/NAME/compliance-report -H "$H" -d '{"period_days":30}'  # generate
+curl $BASE/agents/NAME/compliance-report/REPORT_ID -H "$H"            # poll status + get markdown
+curl $BASE/agents/NAME/compliance-reports -H "$H"                     # list all reports
+
+# Security Command Center
+curl $BASE/command-center/overview                                     # platform-wide stats
+curl $BASE/command-center/layers                                       # 10-layer security status
+curl $BASE/command-center/agents                                       # per-agent stats
+curl $BASE/command-center/timeseries                                   # hourly time-series data
+curl $BASE/command-center/events                                       # recent guardrail events
 
 # HMAC verification
-python scripts/verify_audit_hmac.py                                  # verify all
-python scripts/verify_audit_hmac.py --prefix gate/ --fail-fast      # gate events only
+python scripts/verify_audit_hmac.py                                    # verify all
+python scripts/verify_audit_hmac.py --prefix gate/ --fail-fast        # gate events only
 ```
