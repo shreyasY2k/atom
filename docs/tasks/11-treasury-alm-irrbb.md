@@ -151,31 +151,331 @@ Root cause: when an agent makes multiple tool calls and the LLM returns only too
 
 ---
 
-## Codegen Agent Prompts
+## Agent Prompts, Tools, and Specs (Verbatim)
 
-### macro-signal-collector.role.md
+This section documents every agent's exact system prompt, tool selection policy, and YAML spec so the setup can be reproduced on a fresh environment. These are the **actual deployed prompts** — not summaries.
 
-**System prompt injected**: See `agent-roles/treasury/macro-signal-collector.role.md`
+---
 
-Key constraints: prescribed reasoning, 6-step process, calls `get_macro_factors()` first, classifies regime from Fed Funds + 10Y UST direction, returns `MacroSignalObject` JSON only.
+### Agent 1: `treasury-macro-signal`
 
-### sentiment-nlp-agent.role.md
+**Workflow position**: Node 1 (collect-macro-signals)  
+**Pipeline role**: IRR Agent 1 — Macro Signal Collection  
+**Container**: `agent-treasury-macro-signal-1-0-0:8100`
 
-**System prompt injected**: See `agent-roles/treasury/sentiment-nlp-agent.role.md`
+#### Spec (`specs/agents/treasury-macro-signal.yaml`)
 
-Key constraints: guided reasoning, takes MacroSignalObject as input, calls `get_behavioral_patterns()`, produces H/D index (-1.0 to +1.0), `SentimentSignalObject` JSON only.
+```yaml
+apiVersion: atom.platform/v1
+kind: AgentDeployment
+metadata:
+  name: treasury-macro-signal
+  domain: treasury-alm
+  version: 1.0.0
+  description: >
+    Treasury ALM IRRBB pipeline — Step 1: Macro Signal Collection.
+    Collects, normalises, and interprets macro-economic indicators and regulatory
+    factors. Classifies the rate regime, computes a macro surprise index, identifies
+    key rate drivers, and produces a structured MacroSignalObject.
+  owner: atom-platform-team
+spec:
+  agents:
+  - name: macro-signal-collector
+    role: standalone
+    agent_role_file: agent-roles/treasury/macro-signal-collector.role.md
+    reasoning_mode: prescribed
+    model: gemini-3.1-pro
+    temperature: 1.0
+    reasoning_effort: medium
+    max_iterations: 4
+    tools:
+    - get_macro_factors
+    - get_treasury_instruments
+  flow:
+    type: standalone
+  audit:
+    log_to: minio://audit-logs/agent/treasury-macro-signal
+    retention_days: 90
+  deployment:
+    runtime: agentscope
+    sandbox: base
+    replicas: 1
+```
 
-### rate-forecast-agent.role.md
+#### Tools selected
 
-**System prompt injected**: See `agent-roles/treasury/rate-forecast-agent.role.md`
+| Tool | Endpoint | Why selected |
+|---|---|---|
+| `get_macro_factors` | `GET http://host.docker.internal:13000/api/v1/treasury/macro-factors` | Reads 11 macro indicators (Fed Funds, 10Y UST, SOFR, CPI, GDP, VIX, etc.) with AI weights and impact signals |
+| `get_treasury_instruments` | `GET http://host.docker.internal:13000/api/v1/treasury/instruments` | Reads portfolio to identify which instruments are most sensitive to rate moves |
 
-Key constraints: prescribed, 9-step process, Taylor Rule calibration, overlays H/D sentiment, exactly 4 scenarios (Base/Hike/Cut/Pause) summing to probability 1.0, 3-pillar composite score, flags divergence if >30bps from market OIS.
+#### System prompt (`agent-roles/treasury/macro-signal-collector.role.md`)
 
-### alco-intelligence-agent.role.md
+> You are the Treasury Research Analyst responsible for the first step of the IRR forecasting pipeline. You collect, normalise, and interpret macro-economic indicators and regulatory factors to produce a structured `MacroSignalObject` that drives the rest of the pipeline.
+>
+> **Reasoning Mode: prescribed**. Follow these 6 steps strictly in order:
+> 1. Call `get_macro_factors()` — retrieve all macro indicators with weights
+> 2. Classify rate regime: EASING if Fed Funds "Decreasing" AND 2Y-10Y spread "Improving"; TIGHTENING if Fed Funds "Increasing"; FLAT otherwise
+> 3. Compute surprise index for each indicator (|current - prior| / typical_range). Flag if >1.5σ equivalent
+> 4. Identify top 3 indicators by AI weight
+> 5. Check alert flags on High/Very High sensitivity indicators
+> 6. Return `MacroSignalObject` JSON only — no prose
 
-**System prompt injected**: See `agent-roles/treasury/alco-intelligence-agent.role.md`
+**Output contract**: `{regime, surprise_index, key_indicators[], rate_direction, fed_funds_rate, ten_year_ust, sofr_rate, yield_curve_shape, inflation_trajectory, confidence, alert_flags[], regulatory_watch[], model_run_id}`
 
-Key constraints: guided, MUST call all 4 data tools, MUST produce exactly 5 recommendations (P1–P5), each with `historical_insight` (specific BP-XXX), `macro_factor` (specific named indicator), `analytical_factor` (specific ALM metric), MUST call `store_alco_recommendations()` as final action, FINAL RESPONSE MUST BE JSON ARRAY ONLY (no prose, no markdown).
+**Verification checklist** (agent checks before responding):
+- Did I call `get_macro_factors()` before any analysis?
+- Did I classify regime from Fed Funds direction, not inference?
+- Did I compute surprise index for each available indicator?
+- Did I identify top 3 by AI weight from returned data?
+- Is output exactly MacroSignalObject structure?
+
+---
+
+### Agent 2: `treasury-sentiment-nlp`
+
+**Workflow position**: Node 2 (ingest-nlp-sentiment)  
+**Pipeline role**: IRR Agent 2 — Sentiment & NLP Ingestion  
+**Container**: `agent-treasury-sentiment-nlp-1-0-0:8100`
+
+#### Spec (`specs/agents/treasury-sentiment-nlp.yaml`)
+
+```yaml
+apiVersion: atom.platform/v1
+kind: AgentDeployment
+metadata:
+  name: treasury-sentiment-nlp
+  domain: treasury-alm
+  version: 1.0.0
+  description: >
+    Treasury ALM IRRBB pipeline — Step 2: Sentiment & NLP Ingestion.
+    Converts a MacroSignalObject into a Hawkish/Dovish sentiment index.
+    Detects regime shifts and overlays behavioral pattern data.
+  owner: atom-platform-team
+spec:
+  agents:
+  - name: sentiment-nlp-agent
+    role: standalone
+    agent_role_file: agent-roles/treasury/sentiment-nlp-agent.role.md
+    reasoning_mode: guided
+    model: gemini-3.1-pro
+    temperature: 1.0
+    reasoning_effort: medium
+    max_iterations: 4
+    tools:
+    - get_macro_factors
+    - get_behavioral_patterns
+  flow:
+    type: standalone
+  audit:
+    log_to: minio://audit-logs/agent/treasury-sentiment-nlp
+    retention_days: 90
+  deployment:
+    runtime: agentscope
+    sandbox: base
+    replicas: 1
+```
+
+#### Tools selected
+
+| Tool | Endpoint | Why selected |
+|---|---|---|
+| `get_macro_factors` | `GET .../api/v1/treasury/macro-factors` | Gets current indicator values to anchor sentiment scoring |
+| `get_behavioral_patterns` | `GET .../api/v1/treasury/behavioral-patterns` | Gets BP-001–BP-012 patterns to identify which behavioral dynamics are active in current regime |
+
+#### System prompt (`agent-roles/treasury/sentiment-nlp-agent.role.md`)
+
+> You are the Quant/NLP Data Engineer responsible for converting macro signals into a Hawkish/Dovish (H/D) sentiment index.
+>
+> **Reasoning Mode: guided**. Use your judgment to weigh signals. The H/D index should reflect net directional pressure:
+> - H/D index: positive = hawkish, negative = dovish. Range: -1.0 to +1.0
+> - EASING regime → start with negative bias (-0.3 to -0.7 depending on magnitude)
+> - TIGHTENING regime → start with positive bias (+0.3 to +0.7)
+> - Adjust based on: yield curve shape, inflation trajectory, active behavioral patterns
+> - Divergence score = disagreement between 7d and 30d signals
+> - Document reasoning chain in `narrative_signals`
+
+**Output contract**: `{hd_index_7d, hd_index_30d, regime_flag, uncertainty_flag, divergence_score, active_behavioral_patterns[], narrative_signals[], sentiment_confidence}`
+
+---
+
+### Agent 3: `treasury-rate-forecast`
+
+**Workflow position**: Node 3 (rate-forecast-modelling)  
+**Pipeline role**: IRR Agent 3 — Rate Forecast Modelling  
+**Container**: `agent-treasury-rate-forecast-1-0-0:8100`
+
+#### Spec (`specs/agents/treasury-rate-forecast.yaml`)
+
+```yaml
+apiVersion: atom.platform/v1
+kind: AgentDeployment
+metadata:
+  name: treasury-rate-forecast
+  domain: treasury-alm
+  version: 1.0.0
+  description: >
+    Treasury ALM IRRBB pipeline — Step 3: Rate Forecast Modelling.
+    Applies Taylor Rule + H/D sentiment to generate 4-scenario rate forecast.
+    Routes to governance if confidence > 0.70.
+  owner: atom-platform-team
+spec:
+  agents:
+  - name: rate-forecast-agent
+    role: standalone
+    agent_role_file: agent-roles/treasury/rate-forecast-agent.role.md
+    reasoning_mode: prescribed
+    model: gemini-3.1-pro
+    temperature: 1.0
+    reasoning_effort: high
+    max_iterations: 6
+    tools:
+    - get_macro_factors
+    - get_behavioral_patterns
+  flow:
+    type: standalone
+  audit:
+    log_to: minio://audit-logs/agent/treasury-rate-forecast
+    retention_days: 90
+  deployment:
+    runtime: agentscope
+    sandbox: base
+    replicas: 1
+```
+
+#### Tools selected
+
+| Tool | Why selected |
+|---|---|
+| `get_macro_factors` | Gets current rates for Taylor Rule calibration (Fed Funds, SOFR, 10Y UST as OIS proxy for divergence check) |
+| `get_behavioral_patterns` | Checks if any active patterns (e.g. BP-008 yield curve inversion, BP-003 deposit beta shift) modify scenario probabilities |
+
+#### System prompt (`agent-roles/treasury/rate-forecast-agent.role.md`)
+
+> You are the ALM Quant/Economist responsible for generating a calibrated 4-scenario interest rate forecast.
+>
+> **Reasoning Mode: prescribed**. 9-step process:
+> 1. Call `get_macro_factors()` for Taylor Rule calibration
+> 2. Apply Taylor Rule: assess if current FF is above/below neutral
+> 3. Overlay H/D sentiment to adjust scenario probabilities
+> 4. Call `get_behavioral_patterns()` for any probability-modifying patterns
+> 5. Generate exactly 4 scenarios (Base/Hike/Cut/Pause) — probabilities MUST sum to 1.0
+> 6. Compute 3-pillar composite: Pillar1 (DB signals, 25%), Pillar2 (Macro, 30%), Pillar3 (Regulatory, 25%)
+> 7. Set confidence_score = composite_score × accuracy factor
+> 8. Check divergence (>30bps from SOFR as OIS proxy)
+> 9. Return ForecastObject
+
+**Three-Pillar weighting** (from AI Model Architecture data):
+- Pillar 1 DB signals: DB-S02 Duration Gap (Critical 25%), DB-S04 DV01 limit (Critical 20%), DB-S01 Concentration (High 20%)
+- Pillar 2 Macro: ME-S01 Rate Regime (Critical 30%), ME-S02 Yield Curve (High 20%), ME-S05 Liquidity (High 15%)
+- Pillar 3 Regulatory: QR-S01 Capital Headroom (Critical 35%), QR-S03 ALCO Compliance (Critical 25%), QR-S02 Model Risk (High 20%)
+
+**Output contract**: `{scenarios[4], base_sofr, base_10y_ust, weighted_signal_composite{pillar1_score, pillar2_score, pillar3_score, composite_score, dominant_driver}, confidence_score, divergence_flag, divergence_bps, model_run_id}`
+
+---
+
+### Agent 4: `treasury-alco-intelligence`
+
+**Workflow position**: Node 8 (alco-intelligence-brief)  
+**Pipeline role**: ALM Agents 5+6 — ALCO Intelligence & Recommendations  
+**Container**: `agent-treasury-alco-intelligence-1-0-0:8100`
+
+#### Spec (`specs/agents/treasury-alco-intelligence.yaml`)
+
+```yaml
+apiVersion: atom.platform/v1
+kind: AgentDeployment
+metadata:
+  name: treasury-alco-intelligence
+  domain: treasury-alm
+  version: 1.0.0
+  description: >
+    Treasury ALM IRRBB pipeline — Step 4: ALCO Intelligence & Recommendations.
+    Synthesises IRR forecast + live ALM results into exactly 5 hedge
+    recommendations with 3-pillar evidence (historical, macro, analytical).
+    Stores recommendations before returning.
+  owner: atom-platform-team
+spec:
+  agents:
+  - name: alco-intelligence-agent
+    role: standalone
+    agent_role_file: agent-roles/treasury/alco-intelligence-agent.role.md
+    reasoning_mode: guided
+    model: gemini-3.1-pro
+    temperature: 1.0
+    reasoning_effort: high
+    max_iterations: 10
+    tools:
+    - get_treasury_instruments
+    - get_historical_timeseries
+    - get_macro_factors
+    - get_behavioral_patterns
+    - run_irrbb_suite
+    - store_alco_recommendations
+  flow:
+    type: standalone
+  audit:
+    log_to: minio://audit-logs/agent/treasury-alco-intelligence
+    retention_days: 90
+  deployment:
+    runtime: agentscope
+    sandbox: base
+    replicas: 1
+```
+
+#### Tools selected
+
+| Tool | Endpoint | Why selected |
+|---|---|---|
+| `get_treasury_instruments` | `GET .../api/v1/treasury/instruments` | Gets the 50-instrument portfolio so recommendations cite real CFG-XXXX IDs |
+| `get_historical_timeseries` | `GET .../api/v1/treasury/timeseries` | Gets 20 quarters × 4 scenarios of historical data per instrument |
+| `get_macro_factors` | `GET .../api/v1/treasury/macro-factors` | Gets current macro environment for macro_factor pillar |
+| `get_behavioral_patterns` | `GET .../api/v1/treasury/behavioral-patterns` | Gets BP-001–BP-012 patterns for historical_insight pillar |
+| `run_irrbb_suite` | `POST http://host.docker.internal:3030/alm/irrbb-suite` | Gets FRESH ALM numbers (gap, NII, EVE, duration) for analytical_factor pillar |
+| `store_alco_recommendations` | `POST http://host.docker.internal:13000/api/v1/atom/workflow/results` | Stores the 5 recommendations in VAB gateway DB so frontend can display them |
+
+#### System prompt (`agent-roles/treasury/alco-intelligence-agent.role.md`)
+
+**Critical rules** (must all be satisfied):
+1. ALWAYS produce EXACTLY 5 recommendations
+2. Each cites a real BP-XXX pattern from `get_behavioral_patterns()` response
+3. Each cites a real CFG-XXXX instrument from `get_treasury_instruments()` response
+4. Call `run_irrbb_suite()` for fresh ALM numbers
+5. `store_alco_recommendations()` MUST be the final tool call before responding
+6. Recommendations prioritised P1–P5 by regulatory urgency (EVE > NII > Duration > DV01 > Concentration)
+
+**3-Pillar evidence structure** (mandatory for each recommendation):
+- `historical_insight`: "BP-XXX: [Pattern Name] — [historical instances, magnitude, confidence score from ML model]"
+- `macro_factor`: "[Named indicator] at [current value], [direction], [AI weight]% weight — [why this drives this recommendation]"
+- `analytical_factor`: "[Gap/NII/EVE/Duration] = [value], [vs threshold], [breach status] — [portfolio impact]"
+
+**Output contract** (6 required fields per recommendation):
+`{priority, instrument, action, historical_insight, macro_factor, analytical_factor, estimated_pl_impact, risk_reduction_pct, confidence_score, action_owner, timeline, status: "PENDING_APPROVAL"}`
+
+**⚠ MANDATORY FINAL RESPONSE FORMAT**: The ENTIRE response after tool calls must be a single valid JSON array starting with `[` and ending with `]`. No prose, no markdown, no code fences. Must be parseable by `json.loads()`.
+
+This JSON enforcement is critical — the agent has a known tendency to return markdown narrative. The role file ends with explicit instruction to output ONLY the JSON array. This was patched multiple times during development; if the agent returns markdown again, redeploy with the role file in `agent-roles/treasury/alco-intelligence-agent.role.md` (currently 114 lines including JSON enforcement).
+
+---
+
+### How the agents were created
+
+All 4 agents were created through the Atom Builder API (`POST /agents/{name}/deploy`) with the spec YAML and role file content passed as `skill_content`. The codegen (Gemini 3.1 Pro) generates the `agent.py` from the spec. Key codegen constraints applied:
+
+1. `output_text = output_text or ""` guard (prevents NoneType.strip() crash when LLM returns tool-only responses)
+2. JSON array extraction tries `\[.*\]` before `\{.*\}` (handles recommendation list format)
+3. Role file is loaded at runtime from `/app/agent-roles/treasury/*.role.md` inside the container
+
+Re-registration command:
+```bash
+python3 scripts/register_treasury_workflow.py
+```
+
+This script:
+1. Creates all 10 tools via `POST /tools` (5 compute + 5 data)
+2. Deploys all 4 agents via `POST /agents/{name}/deploy` with spec + role content
+3. Associates tools with agents via `POST /agents/{name}/tools/associate`
+4. Registers the workflow via `POST /workflows/treasury-alm-irrbb/register`
 
 ---
 
