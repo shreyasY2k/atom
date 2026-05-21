@@ -121,17 +121,26 @@ def build_and_run(
     # Clean up any existing container with this name
     _stop_container(dc, cname)
 
-    # Prepare build context
-    build_path.mkdir(parents=True, exist_ok=True)
-    (build_path / "agent.py").write_text(agent_code)
-    (build_path / "Dockerfile").write_text(_agent_dockerfile(name, version))
-    (build_path / "requirements-agent.txt").write_text(_agent_requirements())
-    _copy_support_files(build_path)
-
-    image_tag = f"agent-{name}:{version}"
-
-    # Build image
-    dc.images.build(path=str(build_path), tag=image_tag, rm=True)
+    if os.environ.get("AGENT_BUILD_MODE") == "gitlab":
+        # Build via GitLab CI pipeline; pull the resulting image into this daemon.
+        from app.core.gitlab_builder import build_agent_image, pull_agent_image
+        image_tag = build_agent_image(
+            name=name,
+            version=version,
+            agent_code=agent_code,
+            requirements=_agent_requirements(),
+            agent_port=AGENT_PORT,
+        )
+        pull_agent_image(image_tag)
+    else:
+        # Local build path — requires Docker daemon with build capability.
+        build_path.mkdir(parents=True, exist_ok=True)
+        (build_path / "agent.py").write_text(agent_code)
+        (build_path / "Dockerfile").write_text(_agent_dockerfile(name, version))
+        (build_path / "requirements-agent.txt").write_text(_agent_requirements())
+        _copy_support_files(build_path)
+        image_tag = f"agent-{name}:{version}"
+        dc.images.build(path=str(build_path), tag=image_tag, rm=True)
 
     # Run container
     container = dc.containers.run(

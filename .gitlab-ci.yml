@@ -1,0 +1,212 @@
+# Atom Agent Platform — GitLab CI/CD
+#
+# Two build categories:
+#   STATIC  — source-built images rebuilt when their files change (git push)
+#   AGENT   — per-agent images built on demand via pipeline trigger API
+#
+# No registry URLs, hostnames, or project IDs are hardcoded.
+# All coordinates come from GitLab-provided variables (CI_REGISTRY,
+# CI_REGISTRY_IMAGE, CI_REGISTRY_USER, CI_REGISTRY_PASSWORD) or from
+# project-level CI/CD variables you configure in Settings → CI/CD → Variables:
+#
+#   GITLAB_TRIGGER_TOKEN   pipeline trigger token (for builder-backend to fire agent builds)
+#
+# Usage — trigger an agent build from builder-backend:
+#   POST /api/v4/projects/:id/trigger/pipeline
+#   token=<GITLAB_TRIGGER_TOKEN>  ref=<branch>
+#   variables[BUILD_TYPE]=agent
+#   variables[AGENT_NAME]=<name>
+#   variables[AGENT_VERSION]=<version>
+
+stages:
+  - build-static
+  - build-agent
+
+# ── Shared Kaniko setup ────────────────────────────────────────────────────────
+# Kaniko builds images inside CI without a Docker daemon (no privileged mode).
+# Auth is written to /kaniko/.docker/config.json before each job.
+
+.kaniko:
+  &kaniko
+  image:
+    name: gcr.io/kaniko-project/executor:v1.23.0-debug
+    entrypoint: [""]
+  before_script:
+    - mkdir -p /kaniko/.docker
+    - AUTH=$(printf '%s:%s' "${CI_REGISTRY_USER}" "${CI_REGISTRY_PASSWORD}" | base64 | tr -d '\n')
+    - echo "{\"auths\":{\"${CI_REGISTRY}\":{\"auth\":\"${AUTH}\"}}}" > /kaniko/.docker/config.json
+
+# ── Static containers ──────────────────────────────────────────────────────────
+# Each job runs only when its source files change, and only on non-triggered
+# pipelines (i.e. normal git pushes / MR pipelines).
+
+build-gate:
+  <<: *kaniko
+  stage: build-static
+  rules:
+    - if: '$CI_PIPELINE_SOURCE != "trigger"'
+      changes: ["gate/**/*"]
+  script:
+    - /kaniko/executor
+      --context="${CI_PROJECT_DIR}/gate"
+      --dockerfile="${CI_PROJECT_DIR}/gate/Dockerfile"
+      --destination="${CI_REGISTRY_IMAGE}/gate:${CI_COMMIT_SHORT_SHA}"
+      --destination="${CI_REGISTRY_IMAGE}/gate:latest"
+
+build-builder-backend:
+  <<: *kaniko
+  stage: build-static
+  rules:
+    - if: '$CI_PIPELINE_SOURCE != "trigger"'
+      changes:
+        - builder-backend/**/*
+        - packages/**/*
+  script:
+    - /kaniko/executor
+      --context="${CI_PROJECT_DIR}"
+      --dockerfile="${CI_PROJECT_DIR}/builder-backend/Dockerfile"
+      --destination="${CI_REGISTRY_IMAGE}/builder-backend:${CI_COMMIT_SHORT_SHA}"
+      --destination="${CI_REGISTRY_IMAGE}/builder-backend:latest"
+
+build-workflow-backend:
+  <<: *kaniko
+  stage: build-static
+  rules:
+    - if: '$CI_PIPELINE_SOURCE != "trigger"'
+      changes: ["workflow-backend/**/*"]
+  script:
+    - /kaniko/executor
+      --context="${CI_PROJECT_DIR}/workflow-backend"
+      --dockerfile="${CI_PROJECT_DIR}/workflow-backend/Dockerfile"
+      --destination="${CI_REGISTRY_IMAGE}/workflow-backend:${CI_COMMIT_SHORT_SHA}"
+      --destination="${CI_REGISTRY_IMAGE}/workflow-backend:latest"
+
+build-frontend:
+  <<: *kaniko
+  stage: build-static
+  rules:
+    - if: '$CI_PIPELINE_SOURCE != "trigger"'
+      changes: ["frontend/**/*"]
+  script:
+    - /kaniko/executor
+      --context="${CI_PROJECT_DIR}/frontend"
+      --dockerfile="${CI_PROJECT_DIR}/frontend/Dockerfile"
+      --destination="${CI_REGISTRY_IMAGE}/frontend:${CI_COMMIT_SHORT_SHA}"
+      --destination="${CI_REGISTRY_IMAGE}/frontend:latest"
+
+build-agentscope-runtime-sandbox:
+  <<: *kaniko
+  stage: build-static
+  rules:
+    - if: '$CI_PIPELINE_SOURCE != "trigger"'
+      changes: ["dockerfiles/agentscope-runtime-sandbox/**/*"]
+  script:
+    - /kaniko/executor
+      --context="${CI_PROJECT_DIR}"
+      --dockerfile="${CI_PROJECT_DIR}/dockerfiles/agentscope-runtime-sandbox/Dockerfile"
+      --destination="${CI_REGISTRY_IMAGE}/agentscope-runtime-sandbox:${CI_COMMIT_SHORT_SHA}"
+      --destination="${CI_REGISTRY_IMAGE}/agentscope-runtime-sandbox:latest"
+
+build-agentscope-studio:
+  <<: *kaniko
+  stage: build-static
+  rules:
+    - if: '$CI_PIPELINE_SOURCE != "trigger"'
+      changes: ["dockerfiles/agentscope-studio/**/*"]
+  script:
+    - /kaniko/executor
+      --context="${CI_PROJECT_DIR}"
+      --dockerfile="${CI_PROJECT_DIR}/dockerfiles/agentscope-studio/Dockerfile"
+      --destination="${CI_REGISTRY_IMAGE}/agentscope-studio:${CI_COMMIT_SHORT_SHA}"
+      --destination="${CI_REGISTRY_IMAGE}/agentscope-studio:latest"
+
+build-reme:
+  <<: *kaniko
+  stage: build-static
+  rules:
+    - if: '$CI_PIPELINE_SOURCE != "trigger"'
+      changes: ["dockerfiles/reme/**/*"]
+  script:
+    - /kaniko/executor
+      --context="${CI_PROJECT_DIR}"
+      --dockerfile="${CI_PROJECT_DIR}/dockerfiles/reme/Dockerfile"
+      --destination="${CI_REGISTRY_IMAGE}/reme:${CI_COMMIT_SHORT_SHA}"
+      --destination="${CI_REGISTRY_IMAGE}/reme:latest"
+
+build-agentarmor:
+  <<: *kaniko
+  stage: build-static
+  rules:
+    - if: '$CI_PIPELINE_SOURCE != "trigger"'
+      changes: ["dockerfiles/agentarmor/**/*"]
+  script:
+    - /kaniko/executor
+      --context="${CI_PROJECT_DIR}/dockerfiles/agentarmor"
+      --dockerfile="${CI_PROJECT_DIR}/dockerfiles/agentarmor/Dockerfile"
+      --destination="${CI_REGISTRY_IMAGE}/agentarmor:${CI_COMMIT_SHORT_SHA}"
+      --destination="${CI_REGISTRY_IMAGE}/agentarmor:latest"
+
+# ── Mock services (matrix) ────────────────────────────────────────────────────
+# All mocks share the same Dockerfile pattern: context = mocks/<name>/
+# Add or remove names from the list as mock services change.
+
+build-mocks:
+  <<: *kaniko
+  stage: build-static
+  rules:
+    - if: '$CI_PIPELINE_SOURCE != "trigger"'
+      changes: ["mocks/**/*"]
+  parallel:
+    matrix:
+      - MOCK_NAME:
+          - fnol_svc
+          - fraud_svc
+          - incoming_queue
+          - kyc_svc
+          - lcr_engine
+          - market_data
+          - ocr_svc
+          - ofac_svc
+          - securities_ops
+          - swift_gw
+          - task_queue
+          - treasury_dw
+  script:
+    - /kaniko/executor
+      --context="${CI_PROJECT_DIR}/mocks/${MOCK_NAME}"
+      --dockerfile="${CI_PROJECT_DIR}/mocks/${MOCK_NAME}/Dockerfile"
+      --destination="${CI_REGISTRY_IMAGE}/mock-${MOCK_NAME}:${CI_COMMIT_SHORT_SHA}"
+      --destination="${CI_REGISTRY_IMAGE}/mock-${MOCK_NAME}:latest"
+
+# ── Agent containers (on-demand, triggered by builder-backend) ────────────────
+#
+# The builder-backend calls the GitLab trigger API after committing the agent
+# build context (agent.py + Dockerfile + requirements) to:
+#   agent-builds/<AGENT_NAME>-<AGENT_VERSION>/
+#
+# The Dockerfile in that path uses ARG RUNTIME_IMAGE so the base image is
+# injected at build time without hardcoding a registry URL.
+#
+# Kaniko uses the full project dir as context so the Dockerfile can COPY shared
+# files (tools/, memory/, agent-roles/, packages/) from the repo root.
+
+build-agent:
+  <<: *kaniko
+  stage: build-agent
+  rules:
+    - if: >
+        $CI_PIPELINE_SOURCE == "trigger" &&
+        $BUILD_TYPE == "agent" &&
+        $AGENT_NAME != null &&
+        $AGENT_VERSION != null
+  script:
+    - RUNTIME_IMAGE="${CI_REGISTRY_IMAGE}/agentscope-runtime-sandbox:latest"
+    - CONTEXT_DOCKERFILE="${CI_PROJECT_DIR}/agent-builds/${AGENT_NAME}-${AGENT_VERSION}/Dockerfile"
+    - /kaniko/executor
+      --context="${CI_PROJECT_DIR}"
+      --dockerfile="${CONTEXT_DOCKERFILE}"
+      --build-arg "RUNTIME_IMAGE=${RUNTIME_IMAGE}"
+      --destination="${CI_REGISTRY_IMAGE}/agents/${AGENT_NAME}:${AGENT_VERSION}"
+      --destination="${CI_REGISTRY_IMAGE}/agents/${AGENT_NAME}:latest"
+      --cache=true
+      --cache-repo="${CI_REGISTRY_IMAGE}/cache"
