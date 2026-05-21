@@ -307,6 +307,7 @@ spec:
         alm_eve_breach: ctx.alm_suite.eve_sensitivity.regulatory_breach_flag
         alm_duration_breach: ctx.alm_suite.duration_of_equity.breach_flag
         scenario_profile: ctx.input.scenario_profile
+        hedge_strategy: ctx.input.hedge_strategy
       output_capture: alco_recommendations
       timeout_seconds: 300
       retry:
