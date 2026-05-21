@@ -37,13 +37,26 @@ stages:
     - echo "{\"auths\":{\"${CI_REGISTRY}\":{\"auth\":\"${AUTH}\"}}}" > /kaniko/.docker/config.json
 
 # ── Static containers ──────────────────────────────────────────────────────────
-# Each job runs only when its source files change, and only on non-triggered
-# pipelines (i.e. normal git pushes / MR pipelines).
+# Normal operation: each job fires only when its source files change (git push).
+#
+# Fresh repo / force rebuild: trigger a pipeline via the UI or API with the
+# variable BUILD_ALL=true — this bypasses the changes filter and rebuilds
+# every static image.  Required on first setup so agentscope-runtime-sandbox
+# exists in the registry before any agent build can run.
+#
+#   GitLab UI  → CI/CD → Run pipeline → add variable BUILD_ALL = true
+#   API        → POST /api/v4/projects/:id/pipeline
+#                  { "ref": "production", "variables": [{"key":"BUILD_ALL","value":"true"}] }
+#
+# Note: BUILD_ALL pipelines are NOT triggered by the builder-backend trigger
+# token — they use the project access token or the UI.  The trigger token is
+# reserved exclusively for agent builds (BUILD_TYPE=agent).
 
 build-gate:
   <<: *kaniko
   stage: build-static
   rules:
+    - if: '$BUILD_ALL == "true"'
     - if: '$CI_PIPELINE_SOURCE != "trigger"'
       changes: ["gate/**/*"]
   script:
@@ -57,6 +70,7 @@ build-builder-backend:
   <<: *kaniko
   stage: build-static
   rules:
+    - if: '$BUILD_ALL == "true"'
     - if: '$CI_PIPELINE_SOURCE != "trigger"'
       changes:
         - builder-backend/**/*
@@ -72,6 +86,7 @@ build-workflow-backend:
   <<: *kaniko
   stage: build-static
   rules:
+    - if: '$BUILD_ALL == "true"'
     - if: '$CI_PIPELINE_SOURCE != "trigger"'
       changes: ["workflow-backend/**/*"]
   script:
@@ -85,6 +100,7 @@ build-frontend:
   <<: *kaniko
   stage: build-static
   rules:
+    - if: '$BUILD_ALL == "true"'
     - if: '$CI_PIPELINE_SOURCE != "trigger"'
       changes: ["frontend/**/*"]
   script:
@@ -98,6 +114,7 @@ build-agentscope-runtime-sandbox:
   <<: *kaniko
   stage: build-static
   rules:
+    - if: '$BUILD_ALL == "true"'
     - if: '$CI_PIPELINE_SOURCE != "trigger"'
       changes: ["dockerfiles/agentscope-runtime-sandbox/**/*"]
   script:
@@ -111,6 +128,7 @@ build-agentscope-studio:
   <<: *kaniko
   stage: build-static
   rules:
+    - if: '$BUILD_ALL == "true"'
     - if: '$CI_PIPELINE_SOURCE != "trigger"'
       changes: ["dockerfiles/agentscope-studio/**/*"]
   script:
@@ -124,6 +142,7 @@ build-reme:
   <<: *kaniko
   stage: build-static
   rules:
+    - if: '$BUILD_ALL == "true"'
     - if: '$CI_PIPELINE_SOURCE != "trigger"'
       changes: ["dockerfiles/reme/**/*"]
   script:
@@ -137,6 +156,7 @@ build-agentarmor:
   <<: *kaniko
   stage: build-static
   rules:
+    - if: '$BUILD_ALL == "true"'
     - if: '$CI_PIPELINE_SOURCE != "trigger"'
       changes: ["dockerfiles/agentarmor/**/*"]
   script:
@@ -154,6 +174,7 @@ build-mocks:
   <<: *kaniko
   stage: build-static
   rules:
+    - if: '$BUILD_ALL == "true"'
     - if: '$CI_PIPELINE_SOURCE != "trigger"'
       changes: ["mocks/**/*"]
   parallel:
