@@ -1,8 +1,8 @@
 # Session 11 — Treasury ALM/IRRBB Workflow on Atom
 
-**Date**: 2026-05-19  
+**Date**: 2026-05-19 → 2026-05-21 (ongoing)  
 **Branch**: production  
-**Commit**: `4d27f92`  
+**Commits**: `4d27f92` (initial), `a9bba0b` (hedge strategy + external_notify_url cleanup)  
 **Status**: ✅ COMPLETE (all core tasks done; see open items at bottom)
 
 ---
@@ -96,7 +96,7 @@ All use: `gemini-3.1-pro`, `temperature: 1.0`, `reasoning_effort: high` (ALCO), 
 | `agent-roles/treasury/macro-signal-collector.role.md` | Prescribed role: reads macro DB → MacroSignalObject |
 | `agent-roles/treasury/sentiment-nlp-agent.role.md` | Guided role: H/D scoring → SentimentSignalObject |
 | `agent-roles/treasury/rate-forecast-agent.role.md` | Prescribed role: Taylor Rule → ForecastObject + confidence_score |
-| `agent-roles/treasury/alco-intelligence-agent.role.md` | Guided role: synthesises all → exactly 5 recommendations, JSON only |
+| `agent-roles/treasury/alco-intelligence-agent.role.md` | Guided role: synthesises all → exactly 5 recommendations, JSON only. Added Hedge Strategy section (aggressive/balanced/conservative/defensive personas). |
 | `scripts/register_treasury_workflow.py` | Re-runnable: creates tools, deploys agents, registers workflow |
 | `builder-backend/app/core/codegen.py` | Fix: `output_text = output_text or ""` (None-safe); JSON array extraction |
 | `workflow-backend/app/worker/runner.py` | Fixes: env. template resolution, default() filter, external_notify_url, ctx._run_id, input unwrap |
@@ -104,26 +104,30 @@ All use: `gemini-3.1-pro`, `temperature: 1.0`, `reasoning_effort: high` (ALCO), 
 | `workflow-backend/app/worker/activities.py` | Feature: external_notify_url on human_task creates → real-time VAB UI updates |
 | `workflow-backend/app/core/schema.py` | Feature: WorkflowNode.external_notify_url optional field |
 | `workflow-backend/app/main.py` | Feature: dual Temporal workers (ats-task-queue + treasury-task-queue) |
-| `docker-compose.yml` | Feature: UVAB_GATEWAY_URL + UVAB_COMPUTE_URL env vars for builder/workflow backends |
+| `docker-compose.yml` | Removed UVAB_GATEWAY_URL — external_notify_url in workflow spec is the sole source. UVAB_COMPUTE_URL kept (tools call compute directly). |
+| `workflow-backend/app/worker/runner.py` | Removed UVAB_GATEWAY_URL env fallback — external_notify_url from node spec only. |
 | `docs/vab-demo-runbook.md` | Complete demo runbook — pre-cleanup, 3 profiles, 5 shocks, walkthrough, troubleshooting |
 | `docs/tasks/11-treasury-alm-irrbb.md` | This file |
 
-### VAB repo (commit separately)
+### VAB repo (committed `486e197` on `main`)
 
 | File | Purpose |
 |---|---|
 | `migrations/014_treasury_ai_poc_data.sql` | Seed treasury data tables from Excel |
 | `migrations/015_bank_profiles.sql` | 3 bank profiles (community, regional, large) |
-| `infra/Dockerfile.{gateway,agents,compute,workflow-engine,adapters,ui}` | Build from source |
 | `infra/docker-compose.yml` | Build directives, atom-uvab network, ATOM_WORKFLOW_URL |
-| `services/gateway/src/app.ts` | 9 new endpoints + bank_profile + scenario shock support |
-| `apps/ui/src/app/page.tsx` | Full UI redesign: 4 tabs, Atom workflow wiring, Kanban, real-time events |
-| `apps/ui/src/components/RecommendationCard.tsx` | 3-pillar evidence cards with VAB CSS variables |
-| `apps/ui/src/components/AtomTaskPanel.tsx` | Per-recommendation individual approve/reject |
-| `apps/ui/src/components/AtomTaskPanel.tsx` | Filter by currentRunId; clears on resolve |
-| `apps/ui/src/app/api/atom/` | Next.js server-side proxy routes (no CORS) |
-| `apps/ui/src/lib/stores/recommendations.ts` | Zustand store for ALCO recs; uses relative URLs |
-| `apps/ui/src/lib/stores/alm.ts` | loadAlmData(bankProfile, scenarioProfile) signature |
+| `services/gateway/src/app.ts` | All gateway endpoints: ALM, Atom proxy, hedge execute/reset, task management, SSE relay |
+| `services/gateway/tsconfig.json` | Added DOM lib for native fetch types |
+| `apps/ui/src/app/page.tsx` | Full UI: 4 tabs, Atom workflow, Kanban, real-time WS events, hedge approval, reset button |
+| `apps/ui/src/app/alm/page.tsx` | ALM/IRRBB page — reads from Zustand only, no independent data fetches |
+| `apps/ui/src/components/RecommendationCard.tsx` | 3-pillar evidence cards with inline approve/reject |
+| `apps/ui/src/components/AtomTaskPanel.tsx` | WS-driven task display; resolvedTaskIds ref; run-scoped poll |
+| `apps/ui/src/lib/stores/workflow.ts` | NEW — Zustand store for atomRunId/wfStates/wfTimes (survives SPA navigation) |
+| `apps/ui/src/lib/stores/recommendations.ts` | Zustand store for ALCO recs; no independent fetches |
+| `apps/ui/src/app/api/atom/tasks/clear/route.ts` | NEW — DELETE all pending tasks (called on new run) |
+| `apps/ui/src/app/api/hedges/execute/route.ts` | NEW — POST hedge decisions, persist to DB, resolve Atom ALCO task |
+| `apps/ui/src/app/api/hedges/reset/route.ts` | NEW — DELETE hedge positions from treasury_instruments |
+| `docs/demo-runbook-alco-intelligence.md` | NEW — full demo runbook with concepts, script, Q&A, audience-specific talking points |
 
 ---
 
@@ -137,11 +141,30 @@ All use: `gemini-3.1-pro`, `temperature: 1.0`, `reasoning_effort: high` (ALCO), 
 
 Per user requirement: tools are in the Atom platform DB, not hardcoded. The `scripts/register_treasury_workflow.py` script creates them via `POST /tools`. Registry.py remains unchanged.
 
-### 3. `external_notify_url` is node-level, not global env var
+### 3. `external_notify_url` is node-level only — no env var fallback
 
-Each human_task node specifies where to notify. This allows different workflows to notify different external systems. The treasury workflow notifies `http://host.docker.internal:13000/api/v1/atom/tasks/notify`.
+Each human_task node specifies where to notify in the workflow spec YAML. Different workflows can notify different external systems without any environment coupling.
 
-### 4. Template resolution fix (`{{ ctx.input.scenario_profile }}`)
+The treasury workflow notifies `http://host.docker.internal:13000/api/v1/atom/tasks/notify` on all three human gates (low-confidence-review, governance-treasurer-review, alco-approval).
+
+`UVAB_GATEWAY_URL` was removed from `docker-compose.yml` and from the runner's env fallback (`runner.py` line 431). The runner now reads `node.get("external_notify_url", "")` only — spec is the sole source of truth. This prevents accidental env-var coupling between Atom and UVAB in multi-tenant or multi-workflow setups.
+
+### 4. Hedge strategy as workflow input — not hardcoded in agent
+
+The ALCO agent receives `hedge_strategy` as an explicit input via `input_mapping` in the workflow spec:
+```yaml
+hedge_strategy: ctx.input.hedge_strategy
+```
+
+The UVAB UI passes `hedge_strategy` in the invoke body (default: `balanced`). The agent role file defines four personas:
+- **aggressive** — large pay-fixed IRS (5–10Y), full DV01 limit, prioritise EVE protection
+- **balanced** — mix of IRS + caps (3–5Y), 60–70% limit utilisation, balance NII vs EVE
+- **conservative** — caps and floors only (1–3Y), <50% limit, preserve optionality
+- **defensive** — long-dated swaps (7–10Y) + futures, duration extension, protect EVE over NII
+
+The agent cites the strategy explicitly in `analytical_factor` of each recommendation. This is auditable — reviewers can see which strategy drove which proposals.
+
+### 5. Template resolution fix (`{{ ctx.input.scenario_profile }}`)
 
 Root cause: the workflow was started with `{"input": {"run_date": ..., "scenario_profile": ...}}` as the payload. The `runs.py` route stored `payload` (the entire body) as `args["input"]`, causing double-nesting: `ctx["input"] = {"input": {"run_date": ...}}`. Fixed by `payload.get("input", payload)`.
 
@@ -443,6 +466,7 @@ spec:
 4. Call `run_irrbb_suite()` for fresh ALM numbers
 5. `store_alco_recommendations()` MUST be the final tool call before responding
 6. Recommendations prioritised P1–P5 by regulatory urgency (EVE > NII > Duration > DV01 > Concentration)
+7. Shape proposals to match `hedge_strategy` input (aggressive/balanced/conservative/defensive) — cite strategy explicitly in `analytical_factor`
 
 **3-Pillar evidence structure** (mandatory for each recommendation):
 - `historical_insight`: "BP-XXX: [Pattern Name] — [historical instances, magnitude, confidence score from ML model]"
@@ -498,13 +522,13 @@ curl http://localhost:8080/tools | python3 -c "import json,sys; tools=json.load(
 
 | Item | Priority | Notes |
 |---|---|---|
-| Historical timeseries — full 260 rows from Excel Sheet 2 | Medium | Table created, schema correct, only 40 rows seeded (10 instruments × 4 scenarios). Sheet 2 has 260 rows. |
-| Bank profiles — additional historical data per profile | Medium | CMB-* and LGB-* profiles seeded with minimal historical data. Richer historical data would improve recommendation quality. |
-| Wire UVAB balance sheet extraction to scenario shocks in real-time charts | Low | Charts update on scenario change but use VAB's scenario-inject path, not the Atom workflow. |
-| ALCO agent — force JSON via Gemini `response_mime_type` | Medium | Currently relies on role file instructions. Setting `response_mime_type: "application/json"` in the LLM call would be more reliable. |
-| Workflow Kanban — MinIO-based polling currently empty | Low | MinIO audit events take time to appear. Event-driven Kanban via WebSocket works, but node-level timestamps only show after completion. |
-| Atom Composer — render treasury workflow in drag-drop canvas | Low | The spec is valid and registered. The Composer should be able to render it. Not tested. |
-| ALCO recommendations — scenario delta comparison | Medium | Show how P1–P5 change between base vs +200bps scenarios side-by-side. |
+| Historical timeseries — full 260 rows from Excel Sheet 2 | Medium | Table created, schema correct, only 40 rows seeded. Sheet 2 has 260 rows; richer data improves proposal quality. |
+| Bank profiles — additional historical data per profile | Medium | CMB-* and LGB-* profiles seeded minimally. |
+| ALCO agent — force JSON via Gemini `response_mime_type` | Medium | Currently relies on role file instructions. `response_mime_type: "application/json"` would be more reliable. |
+| Atom Composer — render treasury workflow in drag-drop canvas | Low | Spec is registered and valid; Composer render not tested. |
+| ALCO recommendations — scenario delta comparison | Medium | Show how P1–P5 proposals change between base vs +200bps scenarios side-by-side in UI. |
+| Workflow completion signal to UI | Low | After ALCO approval, `workflow_completed` SSE event should advance kanban step 8 to done. Currently relies on the hedge submit call; if submit fails, step stays "waiting". |
+| hedge_executions table cleanup | Low | `TRUNCATE TABLE hedge_executions` on reset removes audit history. Consider a soft-delete or archive approach for production. |
 
 ---
 
@@ -522,12 +546,17 @@ curl http://localhost:8080/tools | python3 -c "import json,sys; tools=json.load(
 - [x] Per-recommendation individual approve/reject in ALCO approval gate
 - [x] Templates resolve correctly in task titles (ctx.input.scenario_profile → "base")
 - [x] ALCO agent returns JSON (enforced via role file instructions + codegen fix)
-- [x] Kanban advances on WebSocket ATOM_HUMAN_TASK_PENDING events
-- [x] `atomRunId` persists in localStorage across tab switches and page refresh
-- [x] Stale tasks filtered by currentRunId — no phantom approvals
+- [x] Kanban advances in real-time via SSE relay → ATOM_NODE_PROGRESS WebSocket events (gateway subscribes to Atom's SSE stream and relays per-node events)
+- [x] `atomRunId` in Zustand store (survives SPA navigation; no localStorage stale-ID bugs)
+- [x] Approval Gate driven by WS event (pendingHumanTask in page.tsx) — task shows immediately, not poll-dependent
+- [x] AtomTaskPanel: resolvedTaskIds ref prevents re-appearance; DELETE before try/catch (always runs); run-scoped poll ignores tasks from other runs
+- [x] Gateway task deduplication: on new task notify, all previous tasks for same workflow_run_id are evicted (one active human gate at a time)
+- [x] Hedge strategy selector (aggressive/balanced/conservative/defensive) wired through invoke → workflow spec → ALCO agent role
+- [x] ALCO approval submits hedge decisions to DB + resolves Atom task via corrected resolve_url (localhost→host.docker.internal rewrite in gateway)
+- [x] Balance sheet reset endpoint: removes hedge positions from treasury_instruments, triggers ALM recompute
+- [x] /alm page reads from Zustand only — no stale DB fetches that corrupt kanban state
+- [x] UVAB_GATEWAY_URL removed from docker-compose.yml and runner.py fallback — external_notify_url in workflow spec is sole source
 - [x] Codegen None-safe guard deployed — all future agents safe from NoneType.strip() crash
-- [x] Demo runbook written (`docs/vab-demo-runbook.md`)
-- [x] Session log updated (`docs/tasks/_session-log.md`)
-- [x] Code committed to `production` branch (`4d27f92`)
-- [ ] VAB repo committed separately (per user request)
-- [ ] End-to-end test from fresh Atom setup (register_treasury_workflow.py → full run → 5 recs)
+- [x] Demo runbook written (`docs/demo-runbook-alco-intelligence.md`)
+- [x] Code committed: Atom `production` (`a9bba0b`), UVAB `main` (`486e197`)
+- [ ] End-to-end test from fresh Atom setup (register_treasury_workflow.py → full run → 5 recs → hedge approval → workflow_completed)

@@ -430,9 +430,10 @@ services:
       - SWIFT_GW_URL=http://swift-gw:8097
       - SECURITIES_OPS_URL=http://securities-ops:8099
       - FRAUD_SVC_URL=http://fraud-svc:8102
-      # UVAB treasury services (host.docker.internal = host on macOS/Docker Desktop)
-      - UVAB_GATEWAY_URL=http://host.docker.internal:13000
+      # UVAB compute service (used by tools that call the compute layer directly)
       - UVAB_COMPUTE_URL=http://host.docker.internal:3030
+      # Note: UVAB gateway notify URL is set per-node in workflow specs via external_notify_url
+      # — not an env var, so each workflow controls its own external callbacks
       - STUDIO_URL=http://studio:3000
       - WORKFLOW_BACKEND_URL=http://workflow-backend:8082
       - OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4318
@@ -472,9 +473,9 @@ services:
       - OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4318
       - DATABASE_URL=postgresql://atom:atom@platform-db:5432/atom
       - AUDIT_HMAC_KEY=${AUDIT_HMAC_KEY:-atom-audit-hmac-key-change-in-prod}
-      # VAB Treasury services (host.docker.internal = host on macOS/Docker Desktop)
-      - UVAB_GATEWAY_URL=http://host.docker.internal:13000
+      # UVAB compute service (tools that call the compute layer directly)
       - UVAB_COMPUTE_URL=http://host.docker.internal:3030
+      # Note: UVAB gateway notify URL is set per-node in workflow specs via external_notify_url
     volumes:
       - ./specs:/app/specs
       - ./skills:/app/skills:ro

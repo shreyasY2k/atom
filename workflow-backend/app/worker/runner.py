@@ -426,9 +426,9 @@ class AtomWorkflowRunner:
                 "evidence": node.get("evidence"),
                 "escalation_policy": node.get("escalation_policy"),
                 "context": ctx,
-                # external_notify_url: defined on the node spec (configurable per workflow/node),
-                # falls back to env var for backwards compat.  Empty string → no notification.
-                "external_notify_url": node.get("external_notify_url") or os.environ.get("UVAB_GATEWAY_URL", ""),
+                # external_notify_url comes from the node spec only — no env var fallback.
+                # Each workflow declares its own callback URLs in the YAML.
+                "external_notify_url": node.get("external_notify_url", ""),
             },
             # SLA + escalation time + buffer
             start_to_close_timeout=timedelta(seconds=sla * 2 + 120),
