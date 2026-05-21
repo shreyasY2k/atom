@@ -121,14 +121,15 @@ TOOLS = [
         "method": "POST",
         "input_schema": {
             "type": "object",
-            "required": ["balance_sheet", "base_nii", "tier1_capital"],
+            "required": ["balance_sheet", "base_nii", "tier1_capital", "base_yield_curve", "yield_rate"],
             "properties": {
                 "balance_sheet": {"type": "object", "description": "{assets: [...], liabilities: [...]}"},
                 "base_nii": {"type": "number"},
                 "tier1_capital": {"type": "number"},
                 "asset_cash_flows": {"type": "array"},
                 "liability_cash_flows": {"type": "array"},
-                "base_yield_curve": {"type": "object"},
+                "base_yield_curve": {"type": "object", "description": "Base zero-rate yield curve (keys: time-in-years as strings, values: rates)"},
+                "yield_rate": {"type": "number", "description": "Flat annual yield rate for duration of equity (decimal, e.g. 0.05)"},
             }
         },
         "tags": ["treasury", "alm", "irrbb"],
