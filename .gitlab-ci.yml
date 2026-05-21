@@ -44,7 +44,7 @@ build-gate:
   <<: *kaniko
   stage: build-static
   rules:
-    - if: '$CI_PIPELINE_SOURCE == "push" && $CI_COMMIT_BRANCH == "production"'
+    - if: '$CI_PIPELINE_SOURCE != "trigger"'
       changes: ["gate/**/*"]
   script:
     - /kaniko/executor
@@ -57,7 +57,7 @@ build-builder-backend:
   <<: *kaniko
   stage: build-static
   rules:
-    - if: '$CI_PIPELINE_SOURCE == "push" && $CI_COMMIT_BRANCH == "production"'
+    - if: '$CI_PIPELINE_SOURCE != "trigger"'
       changes:
         - builder-backend/**/*
         - packages/**/*
@@ -72,7 +72,7 @@ build-workflow-backend:
   <<: *kaniko
   stage: build-static
   rules:
-    - if: '$CI_PIPELINE_SOURCE == "push" && $CI_COMMIT_BRANCH == "production"'
+    - if: '$CI_PIPELINE_SOURCE != "trigger"'
       changes: ["workflow-backend/**/*"]
   script:
     - /kaniko/executor
@@ -85,7 +85,7 @@ build-frontend:
   <<: *kaniko
   stage: build-static
   rules:
-    - if: '$CI_PIPELINE_SOURCE == "push" && $CI_COMMIT_BRANCH == "production"'
+    - if: '$CI_PIPELINE_SOURCE != "trigger"'
       changes: ["frontend/**/*"]
   script:
     - /kaniko/executor
@@ -98,7 +98,7 @@ build-agentscope-runtime-sandbox:
   <<: *kaniko
   stage: build-static
   rules:
-    - if: '$CI_PIPELINE_SOURCE == "push" && $CI_COMMIT_BRANCH == "production"'
+    - if: '$CI_PIPELINE_SOURCE != "trigger"'
       changes: ["dockerfiles/agentscope-runtime-sandbox/**/*"]
   script:
     - /kaniko/executor
@@ -111,7 +111,7 @@ build-agentscope-studio:
   <<: *kaniko
   stage: build-static
   rules:
-    - if: '$CI_PIPELINE_SOURCE == "push" && $CI_COMMIT_BRANCH == "production"'
+    - if: '$CI_PIPELINE_SOURCE != "trigger"'
       changes: ["dockerfiles/agentscope-studio/**/*"]
   script:
     - /kaniko/executor
@@ -124,7 +124,7 @@ build-reme:
   <<: *kaniko
   stage: build-static
   rules:
-    - if: '$CI_PIPELINE_SOURCE == "push" && $CI_COMMIT_BRANCH == "production"'
+    - if: '$CI_PIPELINE_SOURCE != "trigger"'
       changes: ["dockerfiles/reme/**/*"]
   script:
     - /kaniko/executor
@@ -137,7 +137,7 @@ build-agentarmor:
   <<: *kaniko
   stage: build-static
   rules:
-    - if: '$CI_PIPELINE_SOURCE == "push" && $CI_COMMIT_BRANCH == "production"'
+    - if: '$CI_PIPELINE_SOURCE != "trigger"'
       changes: ["dockerfiles/agentarmor/**/*"]
   script:
     - /kaniko/executor
@@ -154,7 +154,7 @@ build-mocks:
   <<: *kaniko
   stage: build-static
   rules:
-    - if: '$CI_PIPELINE_SOURCE == "push" && $CI_COMMIT_BRANCH == "production"'
+    - if: '$CI_PIPELINE_SOURCE != "trigger"'
       changes: ["mocks/**/*"]
   parallel:
     matrix:

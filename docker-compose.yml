@@ -439,6 +439,18 @@ services:
       - OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4318
       - DATABASE_URL=postgresql://atom:atom@platform-db:5432/atom
       - AUDIT_HMAC_KEY=${AUDIT_HMAC_KEY:-atom-audit-hmac-key-change-in-prod}
+      # GitLab CI agent builds — set AGENT_BUILD_MODE=gitlab to offload docker
+      # build to GitLab CI instead of building locally.
+      - AGENT_BUILD_MODE=${AGENT_BUILD_MODE:-}
+      - GITLAB_URL=${GITLAB_URL:-}
+      - GITLAB_PROJECT_ID=${GITLAB_PROJECT_ID:-}
+      - GITLAB_ACCESS_TOKEN=${GITLAB_ACCESS_TOKEN:-}
+      - GITLAB_TRIGGER_TOKEN=${GITLAB_TRIGGER_TOKEN:-}
+      - GITLAB_CI_BRANCH=${GITLAB_CI_BRANCH:-production}
+      - GITLAB_BUILD_TIMEOUT=${GITLAB_BUILD_TIMEOUT:-600}
+      - ATOM_REGISTRY_IMAGE=${ATOM_REGISTRY_IMAGE:-}
+      - GITLAB_REGISTRY_USER=${GITLAB_REGISTRY_USER:-}
+      - GITLAB_REGISTRY_PASSWORD=${GITLAB_REGISTRY_PASSWORD:-}
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
       - ./skills:/app/skills
