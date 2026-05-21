@@ -22,7 +22,7 @@ HEADERS = {"X-Atom-Actor": "user:treasury-setup@atom.io", "Content-Type": "appli
 
 # UVAB endpoints — use host.docker.internal so agent containers can reach UVAB on host
 UVAB_COMPUTE = "http://host.docker.internal:3030"
-UVAB_GATEWAY = "http://host.docker.internal:3000"
+UVAB_GATEWAY = "http://host.docker.internal:13000"
 
 
 def ok(resp, label):
@@ -221,9 +221,6 @@ for tool in TOOLS:
         print(f"    Response: {resp.text[:200]}")
 
 
-# ── Step 2: Validate agent specs ──────────────────────────────────────────────
-print("\n=== Step 2: Validating agent specs ===")
-
 import yaml
 from pathlib import Path
 
@@ -233,6 +230,67 @@ AGENT_SPECS = [
     "treasury-rate-forecast",
     "treasury-alco-intelligence",
 ]
+
+AGENT_ROLE_FILES = {
+    "treasury-macro-signal": "agent-roles/treasury/macro-signal-collector.role.md",
+    "treasury-sentiment-nlp": "agent-roles/treasury/sentiment-nlp-agent.role.md",
+    "treasury-rate-forecast": "agent-roles/treasury/rate-forecast-agent.role.md",
+    "treasury-alco-intelligence": "agent-roles/treasury/alco-intelligence-agent.role.md",
+}
+
+AGENT_TOOLS = {
+    "treasury-macro-signal":       ["get_macro_factors", "get_treasury_instruments"],
+    "treasury-sentiment-nlp":      ["get_macro_factors", "get_behavioral_patterns"],
+    "treasury-rate-forecast":      ["get_macro_factors", "get_behavioral_patterns"],
+    "treasury-alco-intelligence":  [
+        "get_treasury_instruments", "get_historical_timeseries",
+        "get_macro_factors", "get_behavioral_patterns",
+        "run_irrbb_suite", "store_alco_recommendations",
+    ],
+}
+
+AGENT_DESCRIPTIONS = {
+    "treasury-macro-signal":      "Macro signal collector — first stage of IRRBB pipeline",
+    "treasury-sentiment-nlp":     "Sentiment & NLP ingestion agent — H/D index for rate forecast",
+    "treasury-rate-forecast":     "Rate forecast modelling agent — 4-scenario ALM quant model",
+    "treasury-alco-intelligence": "ALCO intelligence & recommendation engine — final synthesis layer",
+}
+
+
+# ── Step 2: Provision agents (creates DB record so tools can be associated) ───
+print("\n=== Step 2: Provisioning 4 treasury agents ===")
+
+for name in AGENT_SPECS:
+    resp = requests.post(
+        f"{BUILDER}/agents",
+        headers=HEADERS,
+        json={"name": name, "description": AGENT_DESCRIPTIONS[name]},
+    )
+    if resp.status_code == 409:
+        print(f"  SKIP {name}: already exists")
+    else:
+        ok(resp, f"provision {name}")
+
+
+# ── Step 3: Associate tools BEFORE deploy so codegen injects inline HTTP fns ──
+print("\n=== Step 3: Associating tools with agents ===")
+
+for agent_name, tools in AGENT_TOOLS.items():
+    for tool_name in tools:
+        tid = tool_ids.get(tool_name)
+        if not tid:
+            print(f"  SKIP {agent_name}/{tool_name}: tool_id not found (registration failed above)")
+            continue
+        resp = requests.post(
+            f"{BUILDER}/agents/{agent_name}/tools/associate",
+            headers=HEADERS,
+            json={"tool_id": tid},
+        )
+        ok(resp, f"associate {agent_name} ← {tool_name}")
+
+
+# ── Step 4: Validate agent specs ──────────────────────────────────────────────
+print("\n=== Step 4: Validating agent specs ===")
 
 for name in AGENT_SPECS:
     spec_path = Path("specs/agents") / f"{name}.yaml"
@@ -250,15 +308,8 @@ for name in AGENT_SPECS:
         print(f"    {resp.json()}")
 
 
-# ── Step 3: Deploy agents ─────────────────────────────────────────────────────
-print("\n=== Step 3: Deploying 4 treasury agents ===")
-
-AGENT_ROLE_FILES = {
-    "treasury-macro-signal": "agent-roles/treasury/macro-signal-collector.role.md",
-    "treasury-sentiment-nlp": "agent-roles/treasury/sentiment-nlp-agent.role.md",
-    "treasury-rate-forecast": "agent-roles/treasury/rate-forecast-agent.role.md",
-    "treasury-alco-intelligence": "agent-roles/treasury/alco-intelligence-agent.role.md",
-}
+# ── Step 5: Deploy agents (tools are now associated, codegen will inject them) ─
+print("\n=== Step 5: Deploying 4 treasury agents ===")
 
 for name in AGENT_SPECS:
     spec_path = Path("specs/agents") / f"{name}.yaml"
@@ -285,36 +336,8 @@ for name in AGENT_SPECS:
         print(f"    endpoint={data.get('endpoint')} sa={data.get('service_account_id','?')[:20]}")
 
 
-# ── Step 4: Associate tools with each agent ───────────────────────────────────
-print("\n=== Step 4: Associating tools with agents ===")
-
-AGENT_TOOLS = {
-    "treasury-macro-signal":       ["get_macro_factors", "get_treasury_instruments"],
-    "treasury-sentiment-nlp":      ["get_macro_factors", "get_behavioral_patterns"],
-    "treasury-rate-forecast":      ["get_macro_factors", "get_behavioral_patterns"],
-    "treasury-alco-intelligence":  [
-        "get_treasury_instruments", "get_historical_timeseries",
-        "get_macro_factors", "get_behavioral_patterns",
-        "run_irrbb_suite", "store_alco_recommendations",
-    ],
-}
-
-for agent_name, tools in AGENT_TOOLS.items():
-    for tool_name in tools:
-        tid = tool_ids.get(tool_name)
-        if not tid:
-            print(f"  SKIP {agent_name}/{tool_name}: tool_id not found")
-            continue
-        resp = requests.post(
-            f"{BUILDER}/agents/{agent_name}/tools/associate",
-            headers=HEADERS,
-            json={"tool_id": tid},
-        )
-        ok(resp, f"associate {agent_name} ← {tool_name}")
-
-
-# ── Step 5: Register workflow ─────────────────────────────────────────────────
-print("\n=== Step 5: Registering treasury-alm-irrbb workflow ===")
+# ── Step 6: Register workflow ─────────────────────────────────────────────────
+print("\n=== Step 6: Registering treasury-alm-irrbb workflow ===")
 
 wf_yaml = Path("specs/workflows/treasury-alm-irrbb.yaml").read_text()
 resp = requests.post(
